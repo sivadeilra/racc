@@ -1,0 +1,9 @@
+[package]
+
+name = "yacc"
+version = "0.0.1"
+authors = ["Arlie Davis <arlie.davis@gmail.com>"]
+
+[lib]
+name = "yacc"
+crate-type = ["dylib"]
