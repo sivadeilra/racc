@@ -1,9 +1,9 @@
 [package]
 
-name = "yacc"
+name = "racc"
 version = "0.0.1"
 authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 
 [lib]
-name = "yacc"
+name = "racc"
 crate-type = ["dylib"]

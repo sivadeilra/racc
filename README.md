@@ -1,5 +1,5 @@
-yaccrs
-======
+RACC -- Rust Another Compiler-Compiler
+======================================
 
 A port of the Berkeley YACC parser-generator to Rust
 

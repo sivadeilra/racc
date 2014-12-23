@@ -6,7 +6,7 @@
 #[phase(plugin, link)]
 extern crate log;
 
-#[phase(plugin, link)] extern crate yacc;
+#[phase(plugin, link)] extern crate racc;
 
 
 grammar! {

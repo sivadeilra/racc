@@ -1,3 +1,6 @@
+// RACC -- Rust Another Compiler-Compiler
+// --------------------------------------
+//
 // This is a port of Barkeley YACC to Rust.  It runs as a syntax extension, directly in the compiler.
 // 
 // This port is NOT functional yet.  The front-end (grammar parsing in reader.rs) works, the grammar
