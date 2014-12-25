@@ -63,7 +63,7 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
     //
     //      <context-type> <context-param> ;
     //     
-    let context_type_ident = parser.parse_ident();
+    let context_type_ident = parser.parse_ty();
     let context_param_ident = parser.parse_ident();
     parser.expect(&Token::Semi);
 

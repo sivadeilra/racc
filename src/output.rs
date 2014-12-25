@@ -1,13 +1,13 @@
 use std::cmp;
 
 use syntax::ast;
-use syntax::ast::{Arm, Block, Expr, Generics, Item, Mutability, Pat, StructDef, Stmt, UnsignedIntLit, Ty, TyU16, Ty_, WhereClause};
+use syntax::ast::{Arm, Block, Expr, Generics, Item, Mutability, Pat, Stmt, UnsignedIntLit, Ty, TyU16, Ty_, WhereClause, MutMutable};
 use syntax::ext::build::{AstBuilder};
 use syntax::ext::base::{ExtCtxt};
 use syntax::ext::quote::rt::ExtParseUtils;
 use syntax::parse::token::{intern_and_get_ident};
 use syntax::ptr::P;
-use syntax::codemap::{Span,Spanned};
+use syntax::codemap::{Span};
 
 use syntax::owned_slice::OwnedSlice;
 
@@ -31,12 +31,17 @@ fn no_generics() -> Generics {
      Generics {
         lifetimes: vec![],
         ty_params: OwnedSlice::empty(),
-        where_clause: WhereClause {
-            id: ast::DUMMY_NODE_ID,
-            predicates: vec![],
-        }
+        where_clause: no_where()
     }
 }
+
+fn no_where() -> WhereClause {
+    WhereClause {
+        id: ast::DUMMY_NODE_ID,
+        predicates: vec![],
+    }
+}
+
 
 // Given a constructed parser (a description of a state machine which parses
 // a given grammar), produces a Rust AST which implements the parser.
@@ -48,11 +53,10 @@ pub fn output_parser_to_ast(
     parser: &YaccParser,
     blocks: Vec<Option<P<Block>>>,
     rhs_binding: Vec<Option<ast::Ident>>,
-    context_type_ident: ast::Ident,      // Ident to use for the context type, passed to the reduce() method
-    context_param_ident: ast::Ident,     // Ident to use for the context arg, passed to the reduce() method
-    symbol_value_ty: P<Ty>
+    context_ty: P<Ty>,                      // Ident to use for the context type, passed to the reduce() method
+    context_param_ident: ast::Ident,        // Ident to use for the context arg, passed to the reduce() method
+    symbol_value_ty: P<Ty>                  // type to use for value_stack
     ) -> Vec<P<Item>> {
-    // debug!("output_parser_to_ast");
 
     assert!(blocks.len() == gram.nrules);
 
@@ -69,19 +73,6 @@ pub fn output_parser_to_ast(
         items.push(i);
     }
 
-    let parser_ident = cx.ident_of("Parser");
-    // let token_type_ident = cx.ident_of("Token");
-
-    // Generate a Token enum.
-    /*
-    items.push(cx.item_enum(sp, token_type_ident, ast::EnumDef {
-            variants: Vec::from_fn(gram.ntokens, |token| {
-                let vname = if token == 0 { "End" } else { gram.name[token].as_slice() };
-                P(cx.variant(sp, cx.ident_of(vname), vec![]))
-            })
-        }));
-    */
-
     for t in range(1, gram.ntokens) {
         // todo: use the original Ident from parsing, for better error reporting
         let tokvalue = gram.value[t];
@@ -92,26 +83,6 @@ pub fn output_parser_to_ast(
 
     // Generate YYFINAL constant.
     items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, uint), cx.expr_uint(sp, parser.final_state)));
-
-    // Generate Parser struct.
-    items.push(cx.item_struct(sp, parser_ident, StructDef {
-        ctor_id: None,
-        fields: vec![
-            Spanned { span: sp, node: ast::StructField_ { 
-                kind: ast::NamedField(cx.ident_of("state_stack"), ast::Visibility::Public),
-                id: ast::DUMMY_NODE_ID,
-                ty: quote_ty!(cx, Vec<i16>),
-                attrs: vec![]
-            } },
-            Spanned { span: sp, node: ast::StructField_ { 
-                kind: ast::NamedField(cx.ident_of("value_stack"), ast::Visibility::Public),
-                id: ast::DUMMY_NODE_ID,
-                ty: quote_ty!(cx, Vec<i16>),
-                attrs: vec![]
-            } }
-
-        ]
-    }));
 
     /*
     items.push((quote_item!(cx, 
@@ -139,43 +110,9 @@ pub fn output_parser_to_ast(
         })).unwrap());
         */
 
-    /*
-    // Generate "impl Parser".
-    items.push(cx.item(sp, parser_ident, vec![] /* attributes */, Item_::ItemImpl(Unsafety::Normal, 
-        no_generics(), // generics
-        None /* no trait ref */, 
-        cx.ty_ident(sp, parser_ident),
-        vec![
-            // items of the impl
-
-            //  pub fn new() -> Parser {
-            //      Parser {
-            //          state_stack: Vec::new(),
-            //          value_stack: Vec::new(),
-            //      }
-            //  }
-
-            ast::MethodImplItem(
-
-                cx.item_fn(
-                    sp, cx.ident_of("new"), vec![], cx.ty_ident(sp, parser_ident), (
-                        cx.block_expr(
-                            quote_expr!(cx, 
-                                Parser {
-                                    state_stack: Vec::new(),
-                                    value_stack: Vec::new()
-                                },
-                            )
-                        )
-                    )
-                )
-
-            )
-        ]
-    )));
-    */
-
     // Generate the parse() method.
+
+    // let value_stack_ident = cx.ident_of("value_stack");
 
     // Build up actions
     let mut action_arms: Vec<Arm> = Vec::new();
@@ -206,13 +143,13 @@ pub fn output_parser_to_ast(
                         Some(rbind) => {
                             stmts.push(cx.stmt_let_typed(sp, false, rbind, 
                                 symbol_value_ty.clone(),
-                                cx.parse_expr(format!("parser.value_stack.pop().unwrap()"))));
+                                cx.parse_expr(format!("value_stack.pop().unwrap()"))));
                         }
                         None => {
-                            stmts.push(cx.parse_stmt(format!("drop(parser.value_stack.pop())")));
+                            // The rule has no binding for this value.  Pop it from the stack and discard it.
+                            stmts.push(cx.parse_stmt(format!("drop(value_stack.pop())")));
                         }
                     }
-
                 }
                 Some(cx.expr_block(block))
             }
@@ -220,7 +157,7 @@ pub fn output_parser_to_ast(
                 // This reduction does not have any code to execute.  Still, we need to
                 // remove items from the value stack.
                 for _ in gram.get_rhs_items(rule).iter() {
-                    stmts.push(cx.parse_stmt("drop(parser.value_stack.pop());".to_string()));
+                    stmts.push(cx.parse_stmt("drop(value_stack.pop());".to_string()));
                 }
                 None
             }
@@ -230,16 +167,19 @@ pub fn output_parser_to_ast(
     }
     action_arms.push(cx.arm_unreachable(sp));
 
-    // let token_ident = cx.ident_of("token");
+    // let ty_vec_symbol_value: P<Ty> = cx.ty(sp, ast::TyVec(symbol_value_ty.clone()));       // Vec<SymbolValue>
+    let ty_vec_symbol_value: P<Ty> = ty_vec_of(cx, sp, symbol_value_ty.clone());
+    let ty_mutptr_vec_symbol_value: P<Ty> = cx.ty_rptr(sp, ty_vec_symbol_value.clone(), None, MutMutable);     // &mut Vec<SymbolValue>
 
+    // Generate the reduce() function.
     let parse_fn = cx.item_fn(
         sp,
         cx.ident_of("reduce"),
         vec![ // inputs
             // Arg::new_self(sp, Mutability::MutImmutable, cx.ident_of("self")),
-            cx.arg(sp, cx.ident_of("parser"), cx.ty_rptr(sp, /*cx.ty_ident(sp, parser_ident)*/ quote_ty!(cx, ParserState<i16, AppContext>), None, Mutability::MutMutable)),
+            cx.arg(sp, cx.ident_of("value_stack"), ty_mutptr_vec_symbol_value),
             cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint)),
-            cx.arg(sp, context_param_ident, cx.ty_rptr(sp, cx.ty_ident(sp, context_type_ident), None, Mutability::MutMutable))
+            cx.arg(sp, context_param_ident, cx.ty_rptr(sp, context_ty.clone(), None, Mutability::MutMutable))
         ],
         symbol_value_ty, // output type
         
@@ -815,4 +755,22 @@ fn expr_u32(cx: &ExtCtxt, span: Span, u: u32) -> P<Expr> {
     cx.expr_lit(span, ast::LitInt(u as u64, ast::UnsignedIntLit(ast::TyU32)))
 }
 
+
+// Construct a ty for Vec<T>
+fn ty_vec_of(cx: &ExtCtxt, sp: Span, ty: P<Ty>) -> P<Ty> {
+    let path = ast::Path {
+        span: sp,
+        global: false,
+        segments: vec![
+            ast::PathSegment {
+                identifier: cx.ident_of("Vec"),
+                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
+                    lifetimes: vec![],
+                    types: OwnedSlice::from_vec(vec![ ty ]),
+                    bindings: OwnedSlice::empty()
+                })
+            }
+        ]};
+    cx.ty_path(path)
+}
 

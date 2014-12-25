@@ -19,12 +19,10 @@ pub trait GrammarToken {
     fn token_value(&self) -> uint;
 }
 
-
-
 grammar! {
 
     AppContext ctx;
-    i16;
+    Option<i16>;
 
 	PLUS;
 	MINUS;
@@ -38,18 +36,18 @@ grammar! {
 	WHILE;
 	DO;
 
-	Expr : NUM=x { x }
+	Expr : NUM=x { println!("NUM={}", x); x }
 		| Expr=arg1 PLUS Expr=arg3 { 
-            let a = arg1;
-            let b = arg3;
+            let a = arg1.unwrap();
+            let b = arg3.unwrap();
             println!("reduce by addition: {} + {}", a, b);
-            a + b
+            Some(a + b)
         }
 		| Expr=arg1 MINUS Expr=arg3 {
-            let a = arg1;
-            let b = arg3;
+            let a = arg1.unwrap();
+            let b = arg3.unwrap();
             println!("reduce by sub: {} + {}", a, b);
-            a - b
+            Some(a - b)
         }
 		| ParenExpr=a { println!("reduce by parens: {}", a); a }
 		| IfExpr=a { println!("reduce by if(): {}", a); a }
@@ -58,10 +56,10 @@ grammar! {
 
 	ParenExpr : LPAREN Expr=a RPAREN { println!("grouping, val={}", a); a };
 
-	IfExpr : IF ParenExpr=a THEN Expr { a }
-		| IF ParenExpr=a THEN Expr ELSE Expr { a };
+	IfExpr : IF ParenExpr=a THEN Expr { None }
+		| IF ParenExpr=a THEN Expr ELSE Expr { None };
 
-	WhileExpr : WHILE ParenExpr=a DO Expr { println!("reduce by while: {}", a); -1 };
+	WhileExpr : WHILE ParenExpr=a DO Expr { println!("reduce by while: {}", a); None };
 
 }
 
@@ -69,13 +67,12 @@ const EOF: u32 = 0;
 
 fn main()
 {
-
 	let toks = vec![
-		(LPAREN, -1),
-		(NUM, 42),
-		(RPAREN, -1),
-		(PLUS, 24),
-		(NUM, -1)
+		(LPAREN, None),
+		(NUM, Some(42)),
+		(RPAREN, None),
+		(PLUS, None),
+		(NUM, Some(24))
 	];
 
     let mut parser = ParserState::new(ParserTables {

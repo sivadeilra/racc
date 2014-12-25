@@ -1,3 +1,4 @@
+use std::fmt::Show;
 
 #[deriving(Copy,Show)]
 pub enum PushTokenResult {
@@ -10,9 +11,8 @@ pub enum ParseEndResult<SymbolValue> {
     SyntaxError
 }
 
-
 #[deriving(Copy)]
-pub struct ParserTables<SymbolValue, AppContext> {
+pub struct ParserTables<SymbolValue:Show, AppContext> {
     pub yyrindex: &'static [u16],
     pub yysindex: &'static [u16],
     pub yygindex: &'static [u16],
@@ -28,18 +28,18 @@ pub struct ParserTables<SymbolValue, AppContext> {
     // for debugging
     pub yyrules: &'static [&'static str],
 
-    pub reduce: fn(parser: &mut ParserState<SymbolValue, AppContext>, reduction: uint, ctx: &mut AppContext) -> SymbolValue
+    pub reduce: fn(parser: &mut Vec<SymbolValue>, reduction: uint, ctx: &mut AppContext) -> SymbolValue
 }
 
 // #[deriving(Clone)]
-pub struct ParserState<SymbolValue, AppContext> {
+pub struct ParserState<SymbolValue:Show, AppContext> {
     pub tables: ParserTables<SymbolValue, AppContext>,
     pub yystate: uint,
     pub value_stack: Vec<SymbolValue>,
     pub state_stack: Vec<uint>,
 }
 
-impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
+impl<SymbolValue:Show, AppContext> ParserState<SymbolValue, AppContext> {
     pub fn new(tables: ParserTables<SymbolValue, AppContext>) -> ParserState<SymbolValue, AppContext> {
         ParserState {
             tables: tables,
@@ -62,8 +62,12 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
         // Because the generated code handles popping items from the stack, it is not necessary
         // for us to consult a 'yylen' table here; that information is implicit.
         let old_values_len = self.value_stack.len();
-        let reduce_value = (self.tables.reduce)(self, reduction, ctx);
+        let reduce_value = (self.tables.reduce)(&mut self.value_stack, reduction, ctx);
         assert!(self.value_stack.len() + len == old_values_len);
+        debug!("    generated code popped {} values from value stack, new len = {}", old_values_len, self.value_stack.len());
+        // Push the value that represents the reduction of this rule (the LHS).
+        debug!("    after pushing the result of the reduction, value_stack.len = {}, reduce_value={}", self.value_stack.len() + 1, reduce_value);
+        self.value_stack.push(reduce_value);
 
         // pop states
         for _ in range(0, len) {
@@ -77,7 +81,6 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
             debug!("        after reduction, shifting from state 0 to state {} (0/0 case!)", self.tables.yyfinal);
             self.yystate = self.tables.yyfinal;
             self.state_stack.push(self.tables.yyfinal);
-            self.value_stack.push(reduce_value);
 
             // todo: port acceptance code
         }
@@ -98,9 +101,6 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
 
             self.yystate = next_state;
             self.state_stack.push(next_state);
-
-            // Push the value that represents the reduction of this rule (the LHS).
-            self.value_stack.push(reduce_value);
         }
     }
 
@@ -127,11 +127,28 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
             assert!(yyn >= 0);
             assert!(self.tables.yycheck[yyn as uint] as i16 == token as i16);
             let next_state = self.tables.yytable[yyn as uint] as i16;
-            debug!("state {}, shifting to state {}", self.yystate, next_state);
+            debug!("state {}, shifting to state {}, pushing lval {}", self.yystate, next_state, lval);
             assert!(next_state >= 0);
             self.yystate = next_state as uint;
             self.state_stack.push(self.yystate);
             self.value_stack.push(lval); // <-- lval is consumed
+            true
+        }
+        else {
+            false
+        }
+    }
+
+    // Check to see if there is a REDUCE action for this (state, token).
+    fn try_reduce(&mut self, ctx: &mut AppContext, token: u32) -> bool {
+        let red = self.tables.yyrindex[self.yystate] as i16;
+        if red != 0 {
+            let yyn = red + (token as i16);
+            debug!("    yyn={}", yyn);
+            assert!(self.tables.yycheck[yyn as uint] as i16 == token as i16);
+            debug!("    reducing by {}", red);
+            let rr = self.tables.yytable[yyn as uint] as uint;
+            self.yyreduce(rr, ctx);
             true
         }
         else {
@@ -146,29 +163,17 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
         // let mut yystate = self.state_stack[self.state_stack.len() - 1] as uint;
 
         debug!("");
-        debug!("state {}, reading {} ({}), state_stack = {}", self.yystate, token, self.tables.yyname[token as uint], self.state_stack);
+        debug!("state {}, reading {} ({}) lval {}, state_stack = {}", self.yystate, token, self.tables.yyname[token as uint], lval, self.state_stack);
+        debug!("value_stack = {}", self.value_stack);
 
-        // debug!("    current token = {} {}", token, SYMBOL_NAMES[token as uint]);
         if self.try_shift(token, lval) {
             self.do_defreds(ctx);
             return PushTokenResult::Ok;
         }
 
-        // Check to see if there is a REDUCE action for this (state, token).
-        let red = self.tables.yyrindex[self.yystate] as i16;
-        if red != 0 {
-            let yyn = red + (token as i16);
-            debug!("    yyn={}", yyn);
-            if self.tables.yycheck[yyn as uint] as i16 == token as i16 {
-                debug!("    reducing by {}", red);
-                let rr = self.tables.yytable[yyn as uint] as uint;
-                self.yyreduce(rr, ctx);
-                self.do_defreds(ctx);
-                return PushTokenResult::Ok;
-            }
-            else {
-                debug!("    would shift, but CHECK value does not match");
-            }
+        if self.try_reduce(ctx, token) {
+            self.do_defreds(ctx);
+            return PushTokenResult::Ok;
         }
 
         // If there is neither a shift nor a reduce action defined for this (state, token),
@@ -186,30 +191,11 @@ impl<SymbolValue, AppContext> ParserState<SymbolValue, AppContext> {
         debug!("");
         debug!("push_end: yystate={}  state_stack = {}", self.yystate, self.state_stack);
 
-        self.do_defreds(ctx);
-
-        // Check to see if there is a REDUCE action for this (state, token).
-        {
-            let red = self.tables.yyrindex[self.yystate] as i16;
-            if red != 0 {
-                debug!("...  yystate={}  state_stack={}", self.yystate, self.state_stack);
-
-                let token: uint = 0;
-                let yyn = red + (token as i16);
-                debug!("    yyn={}", yyn);
-                assert!(self.tables.yycheck[yyn as uint] as i16 == token as i16);
-                debug!("    reducing by {}", red);
-
-                let rr = self.tables.yytable[yyn as uint] as uint;
-                self.yyreduce(rr, ctx);
-
-            }
-        }
-
+        self.try_reduce(ctx, 0);
         self.do_defreds(ctx);
 
         if self.value_stack.len() == 1 {
-            debug!("hey, waddaya know!  accept!");
+            debug!("accept");
             let final_lval = self.value_stack.pop().unwrap();
             return ParseEndResult::Accepted(final_lval);
         }

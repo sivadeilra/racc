@@ -22,10 +22,10 @@
 
 %%
 
-	Expr : NUM
+	Expr : NUM { $$ = $1; /* Expr : NUM */ }
 		| Expr PLUS Expr { printf("reduce by addition: %d + %d\n", $1, $3); $$ = $1 + $3; }
 		| Expr MINUS Expr { printf("reduce by subtraction: %d - %d\n", $1, $3); $$ = $1 - $3; }
-		| ParenExpr
+		| ParenExpr { $$ = $1; /* ParenExpr */ }
 		| IfExpr
 		| WhileExpr;
 
