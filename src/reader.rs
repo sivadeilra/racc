@@ -29,13 +29,12 @@ use std::rc::Rc;
 use std::collections::HashMap;
 
 use syntax::ast;
-use syntax::ast::{Block};
+use syntax::ast::Block;
 use syntax::ptr::P;
 use syntax::parse::token::{Token,Ident,BinOp,BinOpToken};
 use syntax::parse::parser::Parser;
 use syntax::codemap;
 use syntax::codemap::Span;
-use syntax::ext::base::{ExtCtxt};
 
 
 use grammar::{TOKEN,UNDEFINED};
@@ -298,7 +297,6 @@ impl ReaderState
         assert!(goal_symbol < self.symbols.len());
         assert!(self.symbols[goal_symbol].class == SymClass::NonTerminal);
 
-        debug!("pack_symbols");
         for i in range(0, self.symbols.len()) {
             debug!("    [{}] = {} value {}", i, self.symbols[i].name, self.symbols[i].value);
         }
@@ -368,11 +366,9 @@ impl ReaderState
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
         // symbol is always at packed index 1.
-        debug!("inverting v table as map_to_packed");
         let mut map_to_packed: Vec<i16> = Vec::from_elem(nsyms, -1);
         map_to_packed[0] = 1; // The 'error' symbol
 
-        debug!("assigning token indices");
         for i in range(1, ntokens) {
             map_to_packed[v[i]] = i as i16;
         }
@@ -775,7 +771,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , toke
                             }
                         }
 
-                        debug!("defining token '{}' at unpacked symbol index {}", name_def_str, lhs);
+                        // debug!("defining token '{}' at unpacked symbol index {}", name_def_str, lhs);
 
                         if has_value {
                             match parser.token {
@@ -816,8 +812,6 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , toke
             parser.span_err(sym.span, "symbol was used but never defined");
         }
     }
-    debug!("all symbols are defined");
-
     parser.abort_if_errors();
 
     let map_to_packed = reader.pack_symbols(goal_symbol);

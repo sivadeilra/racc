@@ -16,7 +16,7 @@
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
-#![allow(unused_imports)]
+//#![allow(unused_imports)]
 
 #[phase(plugin, link)]
 extern crate log;
@@ -28,24 +28,12 @@ extern crate syntax;
 
 use syntax::ast;
 use syntax::ext::base::{ExtCtxt, MacResult, MacItems};
-use syntax::ext::build::AstBuilder;
+// use syntax::ext::build::AstBuilder;
 use syntax::codemap;
 use syntax::parse::token::Token;
 use syntax::ptr::P;
 use syntax::print::pprust;
 use rustc::plugin::Registry;
-
-use lr0::compute_lr0;
-use output::output_parser_to_ast;
-
-
-macro_rules! trace {
-    ($($arg:tt)*) => {
-        if cfg!(not(ndebug)) {
-            debug!($($arg)*);
-        }
-    }
-}
 
 mod closure;
 mod grammar;
@@ -56,30 +44,20 @@ mod warshall;
 mod reader;
 mod output;
 mod mkpar;
+pub mod runtime;
 
 #[plugin_registrar]
 pub fn plugin_registrar(reg: &mut Registry) {
-    // info!("yacc plugin_registrar");
+    info!("yacc plugin_registrar");
     reg.register_macro("grammar", expand_grammar);
 }
 
-
 fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -> Box<MacResult+'static> {
-    // info!("expand_grammar");
+    info!("expand_grammar");
 
     let mut gen_items: Vec<P<ast::Item>> = Vec::new();
 
     let mut parser = cx.new_parser_from_tts(tts);
-
-    /*
-    let tokens_enum_item: P<ast::Item> = match parser.parse_item_with_outer_attributes() {
-        Some(item) => item,
-        None => {
-            cx.span_fatal(parser.span, "expected to find 'enum Token ...' definition at start of grammar");
-        }
-    };
-    debug!("found initial item, name={}", tokens_enum_item.ident);
-    */
 
     // First, we read a special list of tokens:
     //
@@ -89,49 +67,19 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
     let context_param_ident = parser.parse_ident();
     parser.expect(&Token::Semi);
 
+    // The type of the symbol values (on values.stack)
+    let symbol_value_ty = parser.parse_ty();
+    parser.expect(&Token::Semi);
+
     // Read the tokens and rules.
-
-    /*
-    let (gram, action_blocks, rhs_binding) = {
-    let variants: &[P<ast::Variant>] = match &tokens_enum_item.node {
-        &ast::ItemEnum(ref tokens_enum_def, _) => {
-            tokens_enum_def.variants.as_slice()
-        }
-        _ => {
-            cx.span_fatal(tokens_enum_item.span, "expected 'enum Token ...', but the item is not an enum");
-        }
-    };
-
-    let rg = reader::read_grammar(sp, &mut parser, &tokens_enum_item, variants);
-    drop(variants);
-    rg
-    };
-    */
 
     let (gram, action_blocks, rhs_binding) = reader::read_grammar(sp, &mut parser);
 
-    let lr0 = compute_lr0(&gram);
-
-    debug!("computed LR(0) info");
-
+    let lr0 = lr0::compute_lr0(&gram);
     let lalr_out = lalr::run_lalr(&gram, &lr0);
-
     let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
 
-    // build 'parse' method
-
-    let parse_id = cx.ident_of("parse_grammar");
-    let u8_42 = cx.expr_u8(sp, 42u8);
-    let parse_body = cx.block_expr(u8_42);
-
-    let ty_u8 = quote_ty!(cx, u8);
-
-    // gen_items.push(tokens_enum_item);
-
-    let parse_method = cx.item_fn(sp, parse_id, vec![], ty_u8, parse_body);
-    gen_items.push(parse_method);
-
-    let yacc_items = output_parser_to_ast(cx, sp, &gram, &lalr_out.gotos, &yaccparser, action_blocks, rhs_binding, context_type_ident, context_param_ident);
+    let yacc_items = output::output_parser_to_ast(cx, sp, &gram, &lalr_out.gotos, &yaccparser, action_blocks, rhs_binding, context_type_ident, context_param_ident, symbol_value_ty);
     for it in yacc_items.into_iter() {
         gen_items.push(it);
     }

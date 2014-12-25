@@ -1,20 +1,19 @@
 use std::cmp;
 
 use syntax::ast;
-use syntax::ast::{Arm, Block, Expr, Item, Mutability, Pat, Ty_, Sign, StructDef, Stmt, Unsafety, Generics, WhereClause, Item_, LitIntType, UnsignedIntLit, TyU16};
+use syntax::ast::{Arm, Block, Expr, Generics, Item, Mutability, Pat, StructDef, Stmt, UnsignedIntLit, Ty, TyU16, Ty_, WhereClause};
 use syntax::ext::build::{AstBuilder};
 use syntax::ext::base::{ExtCtxt};
 use syntax::ext::quote::rt::ExtParseUtils;
 use syntax::parse::token::{intern_and_get_ident};
 use syntax::ptr::P;
 use syntax::codemap::{Span,Spanned};
-use syntax::print::pprust;
+
 use syntax::owned_slice::OwnedSlice;
 
 use grammar::Grammar;
-use mkpar::{ActionCode};
-use mkpar::YaccParser;
-use lalr::{GotoMap};
+use mkpar::{ActionCode, YaccParser};
+use lalr::GotoMap;
 use util::reverse_range;
 
 const I16_MAX: i16 = 0x7fff;
@@ -42,7 +41,7 @@ fn no_generics() -> Generics {
 // Given a constructed parser (a description of a state machine which parses
 // a given grammar), produces a Rust AST which implements the parser.
 pub fn output_parser_to_ast(
-    cx: &mut ExtCtxt,
+    cx: &ExtCtxt,
     grammar_span: Span,
     gram: &Grammar,
     gotos: &GotoMap,
@@ -50,7 +49,8 @@ pub fn output_parser_to_ast(
     blocks: Vec<Option<P<Block>>>,
     rhs_binding: Vec<Option<ast::Ident>>,
     context_type_ident: ast::Ident,      // Ident to use for the context type, passed to the reduce() method
-    context_param_ident: ast::Ident      // Ident to use for the context arg, passed to the reduce() method
+    context_param_ident: ast::Ident,     // Ident to use for the context arg, passed to the reduce() method
+    symbol_value_ty: P<Ty>
     ) -> Vec<P<Item>> {
     // debug!("output_parser_to_ast");
 
@@ -114,6 +114,32 @@ pub fn output_parser_to_ast(
     }));
 
     /*
+    items.push((quote_item!(cx, 
+        pub fn get_parser_tables() -> ParserTables<i16, AppContext> {
+            ParserTables {
+                yyrindex: YYRINDEX.as_slice(),
+                yygindex: YYGINDEX.as_slice(),
+                yysindex: YYSINDEX.as_slice(),
+                yytable: YYTABLE.as_slice(),
+                yydefred: YYDEFRED.as_slice(),
+                yylen: YYLEN.as_slice(),
+                yylhs: YYLHS.as_slice(),
+                yycheck: YYCHECK.as_slice(),
+                yyfinal: YYFINAL,
+
+                // debugging
+                yyrules: YYRULES.as_slice(),
+                reduce: reduce
+            }
+        })).unwrap());
+
+    items.push((quote_item!(cx,
+        pub fn new_parser<SymbolValue>() -> ParserState<SymbolValue> {
+            ParserState::new(get_parser_tables())
+        })).unwrap());
+        */
+
+    /*
     // Generate "impl Parser".
     items.push(cx.item(sp, parser_ident, vec![] /* attributes */, Item_::ItemImpl(Unsafety::Normal, 
         no_generics(), // generics
@@ -155,8 +181,14 @@ pub fn output_parser_to_ast(
     let mut action_arms: Vec<Arm> = Vec::new();
     let mut rule_iter: uint = 0;
     for block in blocks.into_iter() {
-        let rule = rule_iter; rule_iter += 1;
-        let pat: P<Pat> = cx.pat_lit(sp, cx.expr_uint(sp, rule));
+        let rule = rule_iter;
+        rule_iter += 1;
+
+        if rule < 3 {
+            continue;
+        }
+
+        let pat: P<Pat> = cx.pat_lit(sp, cx.expr_uint(sp, rule - 2));
 
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
@@ -166,12 +198,14 @@ pub fn output_parser_to_ast(
 
         let final_expr = match block {
             Some(block) => {
+                // We need to pop items off the stack and associate them with variables from right to left.
                 let rhs_index = gram.rrhs[rule] as uint;
                 let rhs = gram.get_rhs_items(rule);
-                for i in range(0, rhs.len()) {
+                for i in reverse_range(rhs.len(), 0) {
                     match rhs_binding[rhs_index + i] {
                         Some(rbind) => {
-                            stmts.push(cx.stmt_let(sp, false, rbind, 
+                            stmts.push(cx.stmt_let_typed(sp, false, rbind, 
+                                symbol_value_ty.clone(),
                                 cx.parse_expr(format!("parser.value_stack.pop().unwrap()"))));
                         }
                         None => {
@@ -203,16 +237,15 @@ pub fn output_parser_to_ast(
         cx.ident_of("reduce"),
         vec![ // inputs
             // Arg::new_self(sp, Mutability::MutImmutable, cx.ident_of("self")),
-            cx.arg(sp, cx.ident_of("parser"), cx.ty_rptr(sp, cx.ty_ident(sp, parser_ident), None, Mutability::MutMutable)),
+            cx.arg(sp, cx.ident_of("parser"), cx.ty_rptr(sp, /*cx.ty_ident(sp, parser_ident)*/ quote_ty!(cx, ParserState<i16, AppContext>), None, Mutability::MutMutable)),
             cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint)),
             cx.arg(sp, context_param_ident, cx.ty_rptr(sp, cx.ty_ident(sp, context_type_ident), None, Mutability::MutMutable))
         ],
-        quote_ty!(cx, ()), // output
+        symbol_value_ty, // output type
         
         cx.block_expr(
             cx.expr_match(sp,
-                cx.expr_ident(sp, cx.ident_of("reduction")), // arg
-                    action_arms)
+                cx.expr_ident(sp, cx.ident_of("reduction")), action_arms)
         ));
     items.push(parse_fn);
 
@@ -261,7 +294,7 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
         toknames[gram.value[i] as uint] = gram.name[i].clone();
     }
 
-    make_table_string(cx, span, "SYMBOL_NAMES", &toknames)
+    make_table_string(cx, span, "YYNAME", &toknames)
 }
 
 fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>) -> P<Item> {
@@ -333,7 +366,7 @@ fn make_table_i16_as_u16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -
 
 
 
-fn output_actions(cx: &mut ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<P<Item>> {
+fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<P<Item>> {
     // debug!("output_actions");
 
     let nstates = parser.nstates;

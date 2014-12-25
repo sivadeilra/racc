@@ -237,44 +237,44 @@ fn total_conflicts(srtotal: uint, rrtotal: uint)
 }
 
 fn sole_reduction(stateno: uint, parser: &Vec<Vec<ParserAction>>) -> uint {
-    trace!("sole_reduction: state={}", stateno);
+    debug!("sole_reduction: state={}", stateno);
     let mut count: uint = 0;
     let mut ruleno: uint = 0;
     for p in parser[stateno].iter() {
         if p.action_code == ActionCode::Shift && p.suppressed == 0 {
-            trace!("    found unsuppressed shift, returning 0");
+            debug!("    found unsuppressed shift, returning 0");
             return 0;
         }
         else if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
             if ruleno > 0 && (p.number as uint) != ruleno {
-                trace!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
+                debug!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
                 return 0;
             }
-            trace!("    found unsuppressed reduce");
+            debug!("    found unsuppressed reduce");
             if p.symbol != 1 {
                 count += 1;
-                trace!("    count --> {}", count);
+                debug!("    count --> {}", count);
             }
             ruleno = p.number as uint;
-            trace!("    selecting rule {}", ruleno);
+            debug!("    selecting rule {}", ruleno);
         }
     }
 
     if count == 0 {
-        trace!("    did not find any reductions");
+        debug!("    did not find any reductions");
         return 0;
     }
-    trace!("    selected default reduction {}", ruleno);
+    debug!("    selected default reduction {}", ruleno);
     return ruleno;
 }
 
 fn default_reductions(lr0: &LR0Output, parser: &Vec<Vec<ParserAction>>) -> Vec<i16>
 {
-    trace!("default_reductions");
+    debug!("default_reductions");
     let mut defred: Vec<i16> = Vec::with_capacity(lr0.nstates());
     for i in range(0, lr0.nstates()) {
         let r = sole_reduction(i, parser);
-        trace!("    state {} has default reduction {}", i, r);
+        debug!("    state {} has default reduction {}", i, r);
         defred.push(r as i16);
     }
     defred
