@@ -1,8 +1,7 @@
-use util::{BITS_PER_WORD};
+use util::BITS_PER_WORD;
 use util::Bitmat;
 
-fn transitive_closure(r: &mut Bitmat)
-{
+fn transitive_closure(r: &mut Bitmat) {
     let relend = r.rows * r.rowsize;
 
     let mut cword: uint = 0;
@@ -40,25 +39,13 @@ fn transitive_closure(r: &mut Bitmat)
     }
 }
 
-pub fn reflexive_transitive_closure(r: &mut Bitmat)
-{
+pub fn reflexive_transitive_closure(r: &mut Bitmat) {
     assert!(r.rows == r.cols);
 
     transitive_closure(r);
 
-    let relend = r.rows * r.rowsize;
-
-    let mut i: uint = 0;
-    let mut rp: uint = 0;
-    
-    while rp < relend {
-        r.data[rp] |= 1 << i;
-        i += 1;
-        if i >= BITS_PER_WORD {
-            i = 0;
-            rp += 1;
-        }
-
-        rp += r.rowsize;
+    // set diagonals
+    for i in range(0, r.rows) {
+        r.set(i, i);
     }
 }

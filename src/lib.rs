@@ -30,12 +30,22 @@ use syntax::ast;
 use syntax::ext::base::{ExtCtxt, MacResult, MacItems};
 use syntax::ext::build::AstBuilder;
 use syntax::codemap;
+use syntax::parse::token::Token;
 use syntax::ptr::P;
 use syntax::print::pprust;
 use rustc::plugin::Registry;
 
 use lr0::compute_lr0;
 use output::output_parser_to_ast;
+
+
+macro_rules! trace {
+    ($($arg:tt)*) => {
+        if cfg!(not(ndebug)) {
+            debug!($($arg)*);
+        }
+    }
+}
 
 mod closure;
 mod grammar;
@@ -49,17 +59,57 @@ mod mkpar;
 
 #[plugin_registrar]
 pub fn plugin_registrar(reg: &mut Registry) {
-    info!("yacc plugin_registrar");
+    // info!("yacc plugin_registrar");
     reg.register_macro("grammar", expand_grammar);
 }
 
 
 fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -> Box<MacResult+'static> {
-    info!("expand_grammar");
+    // info!("expand_grammar");
 
     let mut gen_items: Vec<P<ast::Item>> = Vec::new();
 
-    let (gram, action_blocks, rhs_binding) = reader::read_grammar(cx, sp, tts);
+    let mut parser = cx.new_parser_from_tts(tts);
+
+    /*
+    let tokens_enum_item: P<ast::Item> = match parser.parse_item_with_outer_attributes() {
+        Some(item) => item,
+        None => {
+            cx.span_fatal(parser.span, "expected to find 'enum Token ...' definition at start of grammar");
+        }
+    };
+    debug!("found initial item, name={}", tokens_enum_item.ident);
+    */
+
+    // First, we read a special list of tokens:
+    //
+    //      <context-type> <context-param> ;
+    //     
+    let context_type_ident = parser.parse_ident();
+    let context_param_ident = parser.parse_ident();
+    parser.expect(&Token::Semi);
+
+    // Read the tokens and rules.
+
+    /*
+    let (gram, action_blocks, rhs_binding) = {
+    let variants: &[P<ast::Variant>] = match &tokens_enum_item.node {
+        &ast::ItemEnum(ref tokens_enum_def, _) => {
+            tokens_enum_def.variants.as_slice()
+        }
+        _ => {
+            cx.span_fatal(tokens_enum_item.span, "expected 'enum Token ...', but the item is not an enum");
+        }
+    };
+
+    let rg = reader::read_grammar(sp, &mut parser, &tokens_enum_item, variants);
+    drop(variants);
+    rg
+    };
+    */
+
+    let (gram, action_blocks, rhs_binding) = reader::read_grammar(sp, &mut parser);
+
     let lr0 = compute_lr0(&gram);
 
     debug!("computed LR(0) info");
@@ -76,10 +126,12 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
 
     let ty_u8 = quote_ty!(cx, u8);
 
+    // gen_items.push(tokens_enum_item);
+
     let parse_method = cx.item_fn(sp, parse_id, vec![], ty_u8, parse_body);
     gen_items.push(parse_method);
 
-    let yacc_items = output_parser_to_ast(cx, sp, &gram, &lalr_out.gotos, &yaccparser, action_blocks, rhs_binding);
+    let yacc_items = output_parser_to_ast(cx, sp, &gram, &lalr_out.gotos, &yaccparser, action_blocks, rhs_binding, context_type_ident, context_param_ident);
     for it in yacc_items.into_iter() {
         gen_items.push(it);
     }

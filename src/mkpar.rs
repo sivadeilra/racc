@@ -27,6 +27,7 @@ pub struct YaccParser {
     pub nstates: uint,
     pub actions: Vec<Vec<ParserAction>>,
     pub default_reductions: Vec<i16>,
+    pub final_state: uint
 }
 
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
@@ -43,7 +44,8 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
     YaccParser {
         nstates: lr0.nstates(),
         actions: parser,
-        default_reductions: defred
+        default_reductions: defred,
+        final_state: final_state
     }
 }
 
@@ -136,7 +138,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> uint
 
 fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>)
 {
-    let mut rules_used: Bitv = Bitv::with_capacity(gram.nrules, false);
+    let mut rules_used: Bitv = Bitv::from_elem(gram.nrules, false);
 
     for pi in parser.iter() {
         for p in pi.iter() {
@@ -234,36 +236,46 @@ fn total_conflicts(srtotal: uint, rrtotal: uint)
     }
 }
 
-fn sole_reduction(stateno: uint, parser: &Vec<Vec<ParserAction>>) -> uint
-{
+fn sole_reduction(stateno: uint, parser: &Vec<Vec<ParserAction>>) -> uint {
+    trace!("sole_reduction: state={}", stateno);
     let mut count: uint = 0;
     let mut ruleno: uint = 0;
     for p in parser[stateno].iter() {
         if p.action_code == ActionCode::Shift && p.suppressed == 0 {
+            trace!("    found unsuppressed shift, returning 0");
             return 0;
         }
-        else if p.action_code == ActionCode::Shift && p.suppressed == 0 {
+        else if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
             if ruleno > 0 && (p.number as uint) != ruleno {
+                trace!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
                 return 0;
             }
+            trace!("    found unsuppressed reduce");
             if p.symbol != 1 {
                 count += 1;
+                trace!("    count --> {}", count);
             }
             ruleno = p.number as uint;
+            trace!("    selecting rule {}", ruleno);
         }
     }
 
     if count == 0 {
+        trace!("    did not find any reductions");
         return 0;
     }
+    trace!("    selected default reduction {}", ruleno);
     return ruleno;
 }
 
 fn default_reductions(lr0: &LR0Output, parser: &Vec<Vec<ParserAction>>) -> Vec<i16>
 {
+    trace!("default_reductions");
     let mut defred: Vec<i16> = Vec::with_capacity(lr0.nstates());
     for i in range(0, lr0.nstates()) {
-        defred.push(sole_reduction(i, parser) as i16);
+        let r = sole_reduction(i, parser);
+        trace!("    state {} has default reduction {}", i, r);
+        defred.push(r as i16);
     }
     defred
 }

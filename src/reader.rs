@@ -32,9 +32,11 @@ use syntax::ast;
 use syntax::ast::{Block};
 use syntax::ptr::P;
 use syntax::parse::token::{Token,Ident,BinOp,BinOpToken};
+use syntax::parse::parser::Parser;
 use syntax::codemap;
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt};
+
 
 use grammar::{TOKEN,UNDEFINED};
 use grammar::Grammar;
@@ -147,7 +149,7 @@ impl ReaderState
         assert!(self.gram.rprec.len() == self.gram.nrules);
         assert!(self.gram.rassoc.len() == self.gram.nrules);
 
-        debug!("  start_rule: r{}: {}_{} -> (at item {}) ...", self.gram.nrules, self.symbols[lhs].name, lhs, self.pitem.len());
+        // debug!("  start_rule: r{}: {}_{} -> (at item {}) ...", self.gram.nrules, self.symbols[lhs].name, lhs, self.pitem.len());
 
         self.plhs.push(lhs);
         self.gram.rprec.push(UNDEFINED);
@@ -195,8 +197,7 @@ impl ReaderState
 
         assert!(self.rule_blocks.len() == self.gram.nrules);
 
-        debug!("  end_rule: r{}, lhs={} nitems={}", 
-            rule, self.plhs[rule], self.pitem.len());
+        // debug!("  end_rule: r{}, lhs={} nitems={}", rule, self.plhs[rule], self.pitem.len());
     }
 
     pub fn insert_empty_rule(&mut self, span: Span)
@@ -266,48 +267,6 @@ impl ReaderState
         self.rhs_binding.push(ident);
     }
 
-    /*
-    string ProtectString(string s)
-    {
-        if (s == null) {
-            return s;
-        }
-
-        int i = 0;
-        while (true) {
-            if (i == s.Length) {
-                // Did not find any characters that need quoting.
-                return s;
-            }
-            char c = s[i];
-            if (c == '\\' || c == '"') {
-                StringBuilder sb = new StringBuilder();
-                sb.Append(s, 0, i);
-                sb.Append("\\");
-                sb.Append(c);
-                ++i;
-                while (i < s.Length) {
-                    c = s[i];
-                    if (c == '\\') {
-                        sb.Append("\\\\");
-                    }
-                    else if (c == '"') {
-                        sb.Append("\\\"");
-                    }
-                    else {
-                        sb.Append(c);
-                    }
-                    ++i;
-                }
-                return sb.ToString();
-            }
-            else {
-                ++i;
-            }
-        }
-    }
-    */
-
     // TODO: Modify this so that it takes &self, and produces a new set of tables
     // which contain the packed symbols.  This should produce 
     // struct SymbolTable {
@@ -339,7 +298,10 @@ impl ReaderState
         assert!(goal_symbol < self.symbols.len());
         assert!(self.symbols[goal_symbol].class == SymClass::NonTerminal);
 
-        debug!("pack_symbols: nrules={} goal={}_{}", self.gram.nrules, self.symbols[goal_symbol].name, goal_symbol);
+        debug!("pack_symbols");
+        for i in range(0, self.symbols.len()) {
+            debug!("    [{}] = {} value {}", i, self.symbols[i].name, self.symbols[i].value);
+        }
 
         let nsyms: uint = 2 + self.symbols.len(); // $end and $accept
         let mut ntokens: uint = 1; // $end
@@ -356,12 +318,12 @@ impl ReaderState
 
         debug!("ntokens={} nvars={} nsyms={}", ntokens, nvars, nsyms);
 
-        self.gram.name.grow(nsyms, "".into_string());
+        self.gram.name.grow(nsyms, "".to_string());
         self.gram.value.grow(nsyms, 0);
         self.gram.prec.grow(nsyms, 0);
         self.gram.assoc.grow(nsyms, 0);
 
-        debug!("building v table");
+        // debug!("building v table");
 
         // Build the 'v' table, which maps from packed symbols to packed symbols.  The size of the
         // v table is the number of packed symbols (nsyms), which is not the same as the number of
@@ -391,6 +353,8 @@ impl ReaderState
             }
             v
         };
+
+        /*
         debug!("v table (maps packed to unpacked):");
         for i in range(0, v.len()) { 
             if v[i] == NO_SYMBOL {
@@ -399,7 +363,7 @@ impl ReaderState
             else {
                 debug!("    packed {:3} --> {}_{}", i, self.symbols[v[i]].name, v[i]);
             }
-        }
+        }*/
 
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
@@ -422,6 +386,7 @@ impl ReaderState
             }
         }
 
+        self.symbols[goal_symbol].value = 0;
         let mut k: uint = 1;
         for i in range(start_symbol + 1, nsyms) {
             if v[i] != goal_symbol {
@@ -465,7 +430,7 @@ impl ReaderState
         }
 
         // Propagate $end token
-        self.gram.name[0] = "$end".into_string();
+        self.gram.name[0] = "$end".to_string();
         self.gram.value[0] = 0;
         self.gram.prec[0] = 0;
         self.gram.assoc[0] = TOKEN;
@@ -481,7 +446,7 @@ impl ReaderState
 
         // Set up the start (accept) symbol
         assert!(start_symbol == ntokens);
-        self.gram.name[start_symbol] = "$accept".into_string();
+        self.gram.name[start_symbol] = "$accept".to_string();
         self.gram.value[start_symbol] = -1;
         self.gram.prec[start_symbol] = 0;
         self.gram.assoc[start_symbol] = TOKEN;
@@ -512,7 +477,15 @@ impl ReaderState
         self.gram.nvars = nvars;
         self.gram.start_symbol = start_symbol;
 
-        debug!("pack_symbols done");
+        debug!("packed symbol table:");
+        for i in range(0, nsyms) {
+            debug!("    {:3} {} {:20} value {:3} prec {:2} assoc {:2}", i,
+            if i < ntokens { "token" } else { "var  " },
+            self.gram.name[i],
+            self.gram.value[i],
+            self.gram.prec[i],
+            self.gram.assoc[i]);
+        }
     
         map_to_packed
     }
@@ -606,7 +579,7 @@ impl ReaderState
         for i in range(0, gram.ritem.len()) {
             let it = gram.ritem[i];
             if it < 0 {
-                debug!("    {:3} -->  {:3}", i, it);
+                debug!("    {:3} --> {:3}", i, it);
             }
             else {
                 debug!("    {:3} --> {:3} {}", i, it, gram.name[it as uint]);
@@ -636,11 +609,17 @@ impl ReaderState
 }
 
 // Reads the input of the macro invocation, parses and builds a grammar.
-pub fn read_grammar(cx: &mut ExtCtxt, grammar_sp: codemap::Span, tts: &[ast::TokenTree]) -> (Grammar, Vec<Option<P<Block>>>, Vec<Option<ast::Ident>>) {
-
-    let mut parser = cx.new_parser_from_tts(tts);
+pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , tokens_enum: &'a P<ast::Item>, token_variants: &'a [P<ast::Variant>] */ )
+    -> (Grammar, Vec<Option<P<Block>>>, Vec<Option<ast::Ident>>) {
 
     let mut reader: ReaderState = ReaderState::new();
+
+        /*
+    // Parse the variants of the "tokens" enum.
+    for tv in token_variants.iter() {
+        debug!("    token (from enum): {}", tv);
+    }
+    */
 
     // create_symbol_table()
 
@@ -661,10 +640,10 @@ pub fn read_grammar(cx: &mut ExtCtxt, grammar_sp: codemap::Span, tts: &[ast::Tok
 
     let mut goal_symbol: Option<uint> = None;
 
-    debug!("parsing token definitions");
+    // debug!("parsing token definitions");
     loop {
-        debug!("");
-        debug!("token: {}", parser.token);
+        // debug!("");
+        // debug!("token: {}", parser.token);
 
         match parser.token {
             Token::Eof => {
@@ -736,7 +715,7 @@ pub fn read_grammar(cx: &mut ExtCtxt, grammar_sp: codemap::Span, tts: &[ast::Tok
                                         parser.bump();
                                         match parser.token {
                                             Token::Ident(rhs_bind_ident, _) => {
-                                                debug!("found rhs binding");
+                                                // debug!("found rhs binding");
                                                 rbind = Some(rhs_bind_ident);
                                                 parser.bump();
                                             }
@@ -795,6 +774,8 @@ pub fn read_grammar(cx: &mut ExtCtxt, grammar_sp: codemap::Span, tts: &[ast::Tok
                                 reader.symbols[lhs].class = SymClass::Terminal;
                             }
                         }
+
+                        debug!("defining token '{}' at unpacked symbol index {}", name_def_str, lhs);
 
                         if has_value {
                             match parser.token {

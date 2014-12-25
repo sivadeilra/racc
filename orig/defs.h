@@ -320,6 +320,7 @@ extern FILE *text_file;
 extern FILE *union_file;
 extern FILE *verbose_file;
 extern FILE *graph_file;
+extern FILE *trace_file;
 
 extern Value_t nitems;
 extern Value_t nrules;
@@ -544,3 +545,5 @@ extern void output_leaks(void);
 extern void mstring_leaks(void);
 extern void reader_leaks(void);
 #endif
+
+#define trace(fmt, ...) fprintf(trace_file, fmt "\n", __VA_ARGS__)

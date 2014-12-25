@@ -384,12 +384,15 @@ token_actions(void)
     Value_t *actionrow, *r, *s;
     action *p;
 
+    trace("token_actions()");
+
     actionrow = NEW2(PER_STATE * ntokens, Value_t);
     for (i = 0; i < nstates; ++i)
     {
 	if (parser[i])
 	{
-	    for (j = 0; j < PER_STATE * ntokens; ++j)
+        trace("    state=%d", i);
+        for (j = 0; j < PER_STATE * ntokens; ++j)
 		actionrow[j] = 0;
 
 	    shiftcount = 0;
@@ -482,6 +485,8 @@ token_actions(void)
 	    }
 #endif
 
+        trace("        shiftcount=%d reducecount=%d", shiftcount, reducecount);
+
 	    tally[i] = shiftcount;
 	    tally[nstates + i] = reducecount;
 #if defined(YYBTYACC)
@@ -508,6 +513,7 @@ token_actions(void)
 			    min = symbol_value[j];
 			if (max < symbol_value[j])
 			    max = symbol_value[j];
+            trace("        shift for token %d %s, pushing r=%d s=%d", j, symbol_name[j], symbol_value[j], actionrow[j]);
 			*r++ = symbol_value[j];
 			*s++ = actionrow[j];
 		    }
@@ -528,7 +534,8 @@ token_actions(void)
 			    min = symbol_value[j];
 			if (max < symbol_value[j])
 			    max = symbol_value[j];
-			*r++ = symbol_value[j];
+            trace("        reduce for token %d %s, pushing r=%d s=%d", j, symbol_name[j], symbol_value[j], actionrow[ntokens + j] - 2);
+            *r++ = symbol_value[j];
 			*s++ = (Value_t) (actionrow[ntokens + j] - 2);
 		    }
 		}
@@ -556,7 +563,10 @@ token_actions(void)
 		width[2 * nstates + i] = (Value_t) (max - min + 1);
 	    }
 #endif
-	}
+    }
+    else {
+        trace("    state=%d has no actions", i);
+    }
     }
     FREE(actionrow);
 }
@@ -593,6 +603,7 @@ default_goto(int symbol)
 	}
     }
 
+    trace("default_goto(%d) = %d", symbol, default_state);
     return (default_state);
 }
 
@@ -610,15 +621,20 @@ save_column(int symbol, int default_state)
 
     m = goto_map[symbol];
     n = goto_map[symbol + 1];
+    trace("save_column: symbol=%d default_state=%d m=%d n=%d", symbol, default_state, m, n);
 
     count = 0;
     for (i = m; i < n; i++)
     {
-	if (to_state[i] != default_state)
-	    ++count;
+        if (to_state[i] != default_state) {
+            trace("    to_state[%d]=%d", i, to_state[i]);
+            ++count;
+        }
     }
-    if (count == 0)
-	return;
+    if (count == 0) {
+        trace("    none");
+        return;
+    }
 
     symno = symbol_value[symbol] + PER_STATE * nstates;
 
@@ -636,12 +652,15 @@ save_column(int symbol, int default_state)
 
     tally[symno] = count;
     width[symno] = (Value_t) (sp1[-1] - sp[0] + 1);
+    trace("    tally[%d]=%d width[%d]=%d", symno, tally[symno], symno, width[symno]);
 }
 
 static void
 goto_actions(void)
 {
     int i, j, k;
+
+    trace("goto_actions");
 
     state_count = NEW2(nstates, Value_t);
 
@@ -678,30 +697,48 @@ sort_actions(void)
     int t;
     int w;
 
+    trace("sort_actions() nvectors=%d", nvectors);
+
     order = NEW2(nvectors, Value_t);
     nentries = 0;
 
     for (i = 0; i < nvectors; i++)
     {
-	if (tally[i] > 0)
+        trace("tally[%d]=%d", i, tally[i]);
+        if (tally[i] > 0)
 	{
 	    t = tally[i];
 	    w = width[i];
 	    j = nentries - 1;
 
-	    while (j >= 0 && (width[order[j]] < w))
-		j--;
+        trace("    t=%d w=%d j=%d", t, w, j);
 
-	    while (j >= 0 && (width[order[j]] == w) && (tally[order[j]] < t))
-		j--;
+        while (j >= 0 && (width[order[j]] < w)) {
+            j--;
+            trace("    j-- to %d, because width < w", j);
+        }
 
-	    for (k = nentries - 1; k > j; k--)
-		order[k + 1] = order[k];
+        while (j >= 0 && (width[order[j]] == w) && (tally[order[j]] < t)) {
+            j--;
+            trace("    j-- to %d, because tally < t", j);
+        }
 
-	    order[j + 1] = i;
+        for (k = nentries - 1; k > j; k--) {
+            trace("        order[%d] = order[%d] = %d (shifting)", (k + 1), k, order[k]);
+            order[k + 1] = order[k];
+        }
+
+        trace("        order[%d] = %d", (j + 1), i);
+        order[j + 1] = i;
 	    nentries++;
 	}
     }
+
+    trace("order:");
+    for (i = 0; i < nvectors; ++i) {
+        trace("    %d", order[i]);
+    }
+    trace("nentries=%d", nentries);
 }
 
 /*  The function matching_vector determines if the vector specified by	*/

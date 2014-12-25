@@ -3056,6 +3056,11 @@ pack_symbols(void)
     Value_t max_tok_pval;
 #endif
 
+    trace("pack_names");
+    for (bp = first_symbol, i = 0; bp; bp = bp->next, i++) {
+        trace("    [%d] = %s value %d", i, bp->name, bp->value);
+    }
+
     nsyms = 2;
     ntokens = 1;
     for (bp = first_symbol; bp; bp = bp->next)
@@ -3066,6 +3071,8 @@ pack_symbols(void)
     }
     start_symbol = (Value_t) ntokens;
     nvars = (Value_t) (nsyms - ntokens);
+
+    trace("ntokens=%d nvars=%d nsyms=%d", ntokens, nvars, nsyms);
 
     symbol_name = TMALLOC(char *, nsyms);
     NO_SPACE(symbol_name);
@@ -3226,6 +3233,16 @@ pack_symbols(void)
     }
 
     FREE(v);
+
+    trace("packed symbol table:");
+    for (i = 0; i < nsyms; ++i) {
+        trace("    %3d %s %20s value %3d prec %2d assoc %2d", i,
+            i < ntokens ? "token" : "var  ",
+            symbol_name[i],
+            symbol_value[i],
+            symbol_prec[i],
+            symbol_assoc[i]);
+    }
 }
 
 static void
@@ -3317,6 +3334,28 @@ print_grammar(void)
     int i, k;
     size_t j, spacing = 0;
     FILE *f = verbose_file;
+
+    trace("symbols: ntokens=%d nvars=%d nsyms=%d", ntokens, nvars, nsyms);
+    for (i = 0; i < nsyms; ++i) {
+        if (i >= ntokens) {
+            trace("    %3d  var    %s", i, symbol_name[i]);
+        }
+        else {
+            trace("    %3d  token  %s", i, symbol_name[i]);
+        }
+    }
+
+    trace("");
+    trace("raw items:");
+    for (i = 0; i < nitems; ++i) {
+        int it = ritem[i];
+        if (it < 0) {
+            trace("    %3d --> %3d", i, it);
+        }
+        else {
+            trace("    %3d --> %3d %s", i, it, symbol_name[it]);
+        }
+    }
 
     if (!vflag)
 	return;

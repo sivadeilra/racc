@@ -242,6 +242,17 @@ set_goto_map(void)
 	}
     }
 
+    trace("set_goto_map: ngotos=%d", ngotos);
+    for (i = 0; i < ngotos; ++i) {
+        trace("    from %3d to %3d", from_state[i], to_state[i]);
+    }
+
+    trace("goto_map:");
+    for (i = 0; i < nvars; ++i) {
+        trace("    %3d %s --> %d", i, symbol_name[i + ntokens], goto_base[i]);
+    }
+    trace(".");
+
     FREE(temp_base);
 }
 

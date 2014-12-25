@@ -76,6 +76,7 @@ FILE *union_file;	/*  a temp file, used to save the union             */
 			/*  defined                                         */
 FILE *verbose_file;	/*  y.output                                        */
 FILE *graph_file;	/*  y.dot                                           */
+FILE *trace_file;   /*  trace.txt */
 
 Value_t nitems;
 Value_t nrules;
@@ -140,6 +141,8 @@ done(int k)
     DO_CLOSE(text_file);
     DO_CLOSE(union_file);
     DO_CLOSE(verbose_file);
+
+    DO_CLOSE(trace_file);
 
     if (got_intr)
 	_exit(EXIT_FAILURE);
@@ -688,6 +691,12 @@ main(int argc, char *argv[])
     SRexpect = -1;
     RRexpect = -1;
     exit_code = EXIT_SUCCESS;
+
+    trace_file = fopen("trace.txt", "w");
+    if (trace_file == NULL) {
+        printf("failed to open trace.txt for writing\n");
+        return 1;
+    }
 
     set_signals();
     getargs(argc, argv);

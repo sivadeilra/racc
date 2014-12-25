@@ -418,7 +418,7 @@ fn print_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
 
 fn set_nullable(gram: &Grammar) -> Bitv
 {
-    let mut nullable = Bitv::with_capacity(gram.nsyms, false);
+    let mut nullable = Bitv::from_elem(gram.nsyms, false);
 
     let mut done_flag = false;
     while !done_flag {

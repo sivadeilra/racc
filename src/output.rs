@@ -1,7 +1,7 @@
 use std::cmp;
 
 use syntax::ast;
-use syntax::ast::{Arm, Block, Expr, Item, Mutability, Pat, Ty_, Sign, StructDef, Stmt};
+use syntax::ast::{Arm, Block, Expr, Item, Mutability, Pat, Ty_, Sign, StructDef, Stmt, Unsafety, Generics, WhereClause, Item_, LitIntType, UnsignedIntLit, TyU16};
 use syntax::ext::build::{AstBuilder};
 use syntax::ext::base::{ExtCtxt};
 use syntax::ext::quote::rt::ExtParseUtils;
@@ -9,6 +9,7 @@ use syntax::parse::token::{intern_and_get_ident};
 use syntax::ptr::P;
 use syntax::codemap::{Span,Spanned};
 use syntax::print::pprust;
+use syntax::owned_slice::OwnedSlice;
 
 use grammar::Grammar;
 use mkpar::{ActionCode};
@@ -17,6 +18,7 @@ use lalr::{GotoMap};
 use util::reverse_range;
 
 const I16_MAX: i16 = 0x7fff;
+const I16_MIN: i16 = -0x8000;
 
 struct ActionsTable {
     nvectors: uint,
@@ -24,6 +26,17 @@ struct ActionsTable {
     width: Vec<i16>,
     froms: Vec<Vec<i16>>,
     tos: Vec<Vec<i16>>
+}
+
+fn no_generics() -> Generics {
+     Generics {
+        lifetimes: vec![],
+        ty_params: OwnedSlice::empty(),
+        where_clause: WhereClause {
+            id: ast::DUMMY_NODE_ID,
+            predicates: vec![],
+        }
+    }
 }
 
 // Given a constructed parser (a description of a state machine which parses
@@ -35,8 +48,11 @@ pub fn output_parser_to_ast(
     gotos: &GotoMap,
     parser: &YaccParser,
     blocks: Vec<Option<P<Block>>>,
-    rhs_binding: Vec<Option<ast::Ident>>) -> Vec<P<Item>> {
-    debug!("output_parser_to_ast");
+    rhs_binding: Vec<Option<ast::Ident>>,
+    context_type_ident: ast::Ident,      // Ident to use for the context type, passed to the reduce() method
+    context_param_ident: ast::Ident      // Ident to use for the context arg, passed to the reduce() method
+    ) -> Vec<P<Item>> {
+    // debug!("output_parser_to_ast");
 
     assert!(blocks.len() == gram.nrules);
 
@@ -44,22 +60,38 @@ pub fn output_parser_to_ast(
 
     let mut items: Vec<P<Item>> = Vec::new();
 
-    items.push(make_table_i16(cx, grammar_span, "DEFRED", parser.default_reductions.as_slice()));
+    items.push({
+        let v: Vec<i16> = parser.default_reductions.iter().map(|s| if *s != 0 { *s - 2 } else { 0 }).collect();
+        make_table_i16(cx, grammar_span, "YYDEFRED", v.as_slice())
+    });
 
     for i in output_actions(cx, grammar_span, gram, gotos, parser).into_iter() {
         items.push(i);
     }
 
     let parser_ident = cx.ident_of("Parser");
-    let token_type_ident = cx.ident_of("Token");
+    // let token_type_ident = cx.ident_of("Token");
 
     // Generate a Token enum.
+    /*
     items.push(cx.item_enum(sp, token_type_ident, ast::EnumDef {
             variants: Vec::from_fn(gram.ntokens, |token| {
                 let vname = if token == 0 { "End" } else { gram.name[token].as_slice() };
                 P(cx.variant(sp, cx.ident_of(vname), vec![]))
             })
         }));
+    */
+
+    for t in range(1, gram.ntokens) {
+        // todo: use the original Ident from parsing, for better error reporting
+        let tokvalue = gram.value[t];
+        let tok_ident = cx.ident_of(gram.name[t].as_slice());
+        let ty_u32 = quote_ty!(cx, u32);
+        items.push(cx.item_const(sp, tok_ident, ty_u32, expr_u32(cx, sp, tokvalue as u32)));
+    }
+
+    // Generate YYFINAL constant.
+    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, uint), cx.expr_uint(sp, parser.final_state)));
 
     // Generate Parser struct.
     items.push(cx.item_struct(sp, parser_ident, StructDef {
@@ -80,6 +112,42 @@ pub fn output_parser_to_ast(
 
         ]
     }));
+
+    /*
+    // Generate "impl Parser".
+    items.push(cx.item(sp, parser_ident, vec![] /* attributes */, Item_::ItemImpl(Unsafety::Normal, 
+        no_generics(), // generics
+        None /* no trait ref */, 
+        cx.ty_ident(sp, parser_ident),
+        vec![
+            // items of the impl
+
+            //  pub fn new() -> Parser {
+            //      Parser {
+            //          state_stack: Vec::new(),
+            //          value_stack: Vec::new(),
+            //      }
+            //  }
+
+            ast::MethodImplItem(
+
+                cx.item_fn(
+                    sp, cx.ident_of("new"), vec![], cx.ty_ident(sp, parser_ident), (
+                        cx.block_expr(
+                            quote_expr!(cx, 
+                                Parser {
+                                    state_stack: Vec::new(),
+                                    value_stack: Vec::new()
+                                },
+                            )
+                        )
+                    )
+                )
+
+            )
+        ]
+    )));
+    */
 
     // Generate the parse() method.
 
@@ -136,20 +204,25 @@ pub fn output_parser_to_ast(
         vec![ // inputs
             // Arg::new_self(sp, Mutability::MutImmutable, cx.ident_of("self")),
             cx.arg(sp, cx.ident_of("parser"), cx.ty_rptr(sp, cx.ty_ident(sp, parser_ident), None, Mutability::MutMutable)),
-            cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint))
+            cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint)),
+            cx.arg(sp, context_param_ident, cx.ty_rptr(sp, cx.ty_ident(sp, context_type_ident), None, Mutability::MutMutable))
         ],
         quote_ty!(cx, ()), // output
         
-        cx.block_expr(cx.expr_loop(sp,
-            cx.block_expr(
-                cx.expr_match(sp,
-                    cx.expr_ident(sp, cx.ident_of("reduction")), // arg
-                        action_arms
-                    )
-                )
-            )
+        cx.block_expr(
+            cx.expr_match(sp,
+                cx.expr_ident(sp, cx.ident_of("reduction")), // arg
+                    action_arms)
         ));
     items.push(parse_fn);
+
+    items.push(output_rule_data(cx, sp, gram));
+
+    // Emit the YYLEN table.
+    items.push({
+        let yylen: Vec<i16> = range(2, gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
+        make_table_i16(cx, sp, "YYLEN", yylen.as_slice())
+    });
 
     // emit some tables just for debugging
     items.push(make_symbol_names_table(cx, sp, gram));
@@ -158,8 +231,37 @@ pub fn output_parser_to_ast(
     items
 }
 
+// Generates the YYLHS table.
+fn output_rule_data(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
+    let mut data: Vec<i16> = Vec::new();
+    data.push(gram.value[gram.start_symbol]);
+    for i in range(3, gram.nrules) {
+        data.push(gram.value[gram.rlhs[i] as uint]);
+    }
+    make_table_i16(cx, span, "YYLHS", data.as_slice())
+}
+
 fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
-    make_table_string(cx, span, "SYMBOL_NAMES", &gram.name)
+    // The values used at runtime are not symbol indices.  They are token values, which come from gram.value[token].value.
+    // This is ugly and inefficient.
+
+    let mut max_value: i16 = I16_MIN;
+    for i in range(0, gram.ntokens) {
+        max_value = cmp::max(max_value, gram.value[i]);
+    }
+
+    assert!(max_value >= 0);
+    assert!(max_value < I16_MAX);
+    let length = (max_value + 1) as uint;
+
+    let mut toknames: Vec<String> = Vec::from_elem(length, String::new());
+    
+    // Now put the names into proper places.
+    for i in range(0, gram.ntokens) {
+        toknames[gram.value[i] as uint] = gram.name[i].clone();
+    }
+
+    make_table_string(cx, span, "SYMBOL_NAMES", &toknames)
 }
 
 fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>) -> P<Item> {
@@ -175,8 +277,8 @@ fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>
 }
 
 fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
-    let rules: Vec<String> = Vec::from_fn(gram.nrules, |rule| gram.rule_to_str(rule));
-    make_table_string(cx, span, "RULES_TEXT", &rules)
+    let rules: Vec<String> = range(2, gram.nrules).map(|rule| gram.rule_to_str(rule)).collect();
+    make_table_string(cx, span, "YYRULES", &rules)
 }
 
 
@@ -193,6 +295,10 @@ fn make_table_uint(cx: &ExtCtxt, span: Span, name: &str, values: &[uint]) -> P<I
 }
 
 fn make_table_i16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
+    make_table_i16_as_u16(cx, span, name, values)
+}
+
+fn make_table_i16_real(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
     let values_expr = cx.expr_vec(span, Vec::from_fn(values.len(), |i| expr_i16(cx, span, values[i])));
     let ty_i16 = quote_ty!(cx, i16);
     let table_ident = cx.ident_of(name);
@@ -204,18 +310,31 @@ fn make_table_i16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Ite
 }
 
 fn expr_i16(cx: &ExtCtxt, span: Span, i: i16) -> P<ast::Expr> {
-    // let u: u64 = i as u64; // if i < 0 { (-(i as i64)) as u64 } else { i as u64 };
-    let sign = Sign::Plus; // if i < 0 { Sign::Minus } else { Sign::Plus };
     cx.expr_lit(span, ast::LitInt(
-        // i as u64,
-        if i < 0 { 0 } else { i as u64 },
-        // { let u = if i < 0 { (-i) as u64 } else { i as u64 }; debug!("i={} u={}", i, u); u },
-        ast::LitIntType::SignedIntLit(ast::TyI16, sign)))
+        i as u64,
+        ast::LitIntType::SignedIntLit(ast::TyI16, ast::Sign::new(i as int))))
+}
+
+fn expr_u16(cx: &ExtCtxt, span: Span, u: u16) -> P<ast::Expr> {
+    cx.expr_lit(span, ast::LitInt(
+        u as u64,
+        UnsignedIntLit(TyU16)))
+}
+
+// yuck
+fn make_table_i16_as_u16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
+    let values_expr = cx.expr_vec(span, Vec::from_fn(values.len(), |i| expr_u16(cx, span, values[i] as u16)));
+    let ty_u16 = quote_ty!(cx, u16);
+    let table_ident = cx.ident_of(name);
+    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_uint(span, values.len())));
+    let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
+    table_item
 }
 
 
+
 fn output_actions(cx: &mut ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<P<Item>> {
-    debug!("output_actions");
+    // debug!("output_actions");
 
     let nstates = parser.nstates;
     let mut items: Vec<P<Item>> = Vec::new();
@@ -226,27 +345,27 @@ fn output_actions(cx: &mut ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap,
     
     let packed = pack_table(parser.nstates, nentries, order.as_slice(), &act);
 
-    debug!("emitting tables");
+    // debug!("emitting tables");
 
-    items.push(make_table_uint(cx, span, "DGOTO", dgoto.as_slice()));
+    items.push(make_table_i16(cx, span, "YYDGOTO", dgoto.as_slice()));
 
     // was output_base
-    items.push(make_table_i16(cx, span, "SINDEX", packed.base.slice(0, nstates)));
-    items.push(make_table_i16(cx, span, "RINDEX", packed.base.slice(nstates, nstates * 2)));
-    items.push(make_table_i16(cx, span, "GINDEX", packed.base.slice(nstates * 2, act.nvectors)));
+    items.push(make_table_i16(cx, span, "YYSINDEX", packed.base.slice(0, nstates)));
+    items.push(make_table_i16(cx, span, "YYRINDEX", packed.base.slice(nstates, nstates * 2)));
+    items.push(make_table_i16(cx, span, "YYGINDEX", packed.base.slice(nstates * 2, act.nvectors)));
 
     // was output_table
     // todo, emit const YYTABLESIZE = m_high
-    items.push(make_table_i16(cx, span, "TABLE", packed.table.slice(0, packed.high + 1)));
+    items.push(make_table_i16(cx, span, "YYTABLE", packed.table.slice(0, packed.high + 1)));
 
     // was output_check
-    items.push(make_table_i16(cx, span, "CHECK", packed.check.slice(0, packed.high + 1)));
+    items.push(make_table_i16(cx, span, "YYCHECK", packed.check.slice(0, packed.high + 1)));
 
     items
 }
 
 fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
-    debug!("token_actions");
+    debug!("token_actions()");
 
     let nstates = parser.nstates;
     let nvectors = 2 * nstates + gram.nvars;
@@ -259,7 +378,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     for i in range(0, nstates) {
         let actions = &parser.actions[i];
         if actions.len() != 0 {
-            debug!("    state={} has {} action(s)", i, actions.len());
+            debug!("    state={}", i);
             for ii in actionrow.iter_mut() {
                 *ii = 0;
             }
@@ -271,17 +390,17 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                     if p.action_code == ActionCode::Shift {
                         shiftcount += 1;
                         actionrow[p.symbol as uint] = p.number;
-                        debug!("        shift {}", p.number);
+                        // debug!("        shift {}", p.number);
                     }
                     else if p.action_code == ActionCode::Reduce && p.number != parser.default_reductions[i] {
                         reducecount += 1;
                         actionrow[(p.symbol as uint) + gram.ntokens] = p.number;
-                        debug!("        reduce {}", p.number);
+                        // debug!("        reduce {}", p.number);
                     }
                 }
             }
 
-            debug!("    shiftcount={} reducecount={}", shiftcount, reducecount);
+            debug!("        shiftcount={} reducecount={}", shiftcount, reducecount);
 
             tally[i] = shiftcount as i16;
             tally[nstates + i] = reducecount as i16;
@@ -299,6 +418,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
                         s.push(actionrow[j]);
+                        debug!("        shift for token {} {}, pushing r={} s={}", j, gram.name[j], gram.value[j], actionrow[j]);
                     }
                 }
                 froms[i] = r;
@@ -317,12 +437,16 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
                         s.push(actionrow[gram.ntokens + j] - 2);
+                        debug!("        reduce for token {} {}, pushing r={} s={}", j, gram.name[j], gram.value[j], actionrow[gram.ntokens + j] - 2);
                     }
                 }
                 froms[nstates + i] = r;
                 tos[nstates + i] = s;
                 width[nstates + i] = max - min + 1;
             }
+        }
+        else {
+            debug!("    state={} has no actions", i);
         }
     }
 
@@ -365,6 +489,8 @@ fn default_goto(
         }
     }
 
+    debug!("default_goto({}) = {}", symbol, default_state);
+
     default_state
 }
 
@@ -378,16 +504,20 @@ fn save_column(
 {
     let m = gotos.goto_map[symbol - gram.ntokens] as uint;
     let n = gotos.goto_map[symbol - gram.ntokens + 1] as uint;
+    debug!("save_column: symbol={} default_state={} m={} n={}", symbol, default_state, m, n);
 
     let mut count: uint = 0;
     for i in range(m, n) {
         if (gotos.to_state[i] as uint) != default_state {
+            debug!("    to_state[{}]={}", i, gotos.to_state[i]);
             count += 1;
         }
     }
     if count == 0 {
+        debug!("    none");
         return;
     }
+
 
     let mut spf: Vec<i16> = Vec::with_capacity(count);
     let mut spt: Vec<i16> = Vec::with_capacity(count);
@@ -404,85 +534,95 @@ fn save_column(
     act.tos[symno] = spt;
     act.tally[symno] = count as i16;
     act.width[symno] = spf_width;
+    debug!("    tally[{}]={} width[{}]={}", symno, act.tally[symno], symno, act.width[symno]);
 }
 
 // build the "dgoto" table
-fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<uint> {
+fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<i16> {
+    debug!("goto_actions");
+
     let mut state_count: Vec<i16> = Vec::from_elem(nstates, 0);         // temporary data, used in default_goto()
-    let mut dgoto_table: Vec<uint> = Vec::with_capacity(gram.nvars);    // the table that we are building
+    let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars);    // the table that we are building
 
     let k = default_goto(gram, gotos, gram.start_symbol + 1, nstates, &mut state_count);
-    dgoto_table.push(k);
+    dgoto_table.push(k as i16);
     save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
 
-    for i in range(gram.start_symbol, gram.nsyms) {
+    for i in range(gram.start_symbol + 2, gram.nsyms) {
         let k = default_goto(gram, gotos, i, nstates, &mut state_count);
-        dgoto_table.push(k);
+        dgoto_table.push(k as i16);
         save_column(gram, nstates, gotos, i, k, act);
     }
 
     dgoto_table
 }
 
-fn sort_actions(act: &mut ActionsTable) -> (uint, Vec<uint>) {
-    debug!("sort_actions");
+fn sort_actions(act: &ActionsTable) -> (uint, Vec<uint>) {
+    debug!("sort_actions() nvectors={}", act.nvectors);
 
     let mut order: Vec<uint> = Vec::from_elem(act.nvectors, 0);
     let mut nentries: int = 0;
 
     for i in range(0, act.nvectors) {
+        debug!("tally[{}]={}", i, act.tally[i]);
         if act.tally[i] > 0 {
             let t = act.tally[i];
             let w = act.width[i];
             let mut j: int = nentries - 1;
-            debug!("i={} tally={} width={} nentries={}", i, t, w, nentries);
+            debug!("    t={} w={} j={}", t, w, j);
 
             while j >= 0 && (act.width[order[j as uint]] < w) {
                 j -= 1;
+                debug!("    j-- to {}, because width < w", j);
             }
 
             while j >= 0 && (act.width[order[j as uint]] == w) && (act.tally[order[j as uint]] < t) {
                 j -= 1;
+                debug!("    j-- to {}, because tally < t", j);
             }
 
             let mut k = nentries - 1;
             while k > j {
-                order[(k as uint) + 1] = order[k as uint];
+                debug!("        order[{}] = order[{}] = {} (shifting)", (k + 1) as uint, k as uint, order[k as uint]);
+                order[(k + 1) as uint] = order[k as uint];
                 k -= 1;
             }
 
+            debug!("        order[{}] = {}", (j + 1) as uint, i);
             order[(j + 1) as uint] = i;
             nentries += 1;
-            debug!("        order[{}] = {}, nentries={}", j + 1, i, nentries);
         }
     }
 
-    debug!("sort_actions done");
+    debug!("order:");
+    for i in range(0, order.len()) {
+        debug!("    {}", order[i]);
+    }
+    debug!("nentries={}", nentries);
+
     (nentries as uint, order)
 }
 
-/// <remarks>
-/// The function matching_vector determines if the vector specified by
-/// the input parameter matches a previously considered vector. The
-/// test at the start of the function checks if the vector represents
-/// a row of shifts over terminal symbols or a row of reductions, or a
-/// column of shifts over a nonterminal symbol.  Berkeley Yacc does not
-/// check if a column of shifts over a nonterminal symbols matches a
-/// previously considered vector.  Because of the nature of LR parsing
-/// tables, no two columns can match.  Therefore, the only possible
-/// match would be between a row and a column.  Such matches are
-/// unlikely.  Therefore, to save time, no attempt is made to see if a
-/// column matches a previously considered vector.
-///
-/// Matching_vector is poorly designed.  The test could easily be made
-/// faster.  Also, it depends on the vectors being in a specific
-/// order.
-/// </remarks>
+// The function matching_vector determines if the vector specified by
+// the input parameter matches a previously considered vector. The
+// test at the start of the function checks if the vector represents
+// a row of shifts over terminal symbols or a row of reductions, or a
+// column of shifts over a nonterminal symbol.  Berkeley Yacc does not
+// check if a column of shifts over a nonterminal symbols matches a
+// previously considered vector.  Because of the nature of LR parsing
+// tables, no two columns can match.  Therefore, the only possible
+// match would be between a row and a column.  Such matches are
+// unlikely.  Therefore, to save time, no attempt is made to see if a
+// column matches a previously considered vector.
+//
+// Matching_vector is poorly designed.  The test could easily be made
+// faster.  Also, it depends on the vectors being in a specific
+// order.
 fn matching_vector(pack: &PackState, vector: uint) -> Option<uint>
 {
     let i = pack.order[vector];
     if i >= 2 * pack.nstates {
-        debug!("    matching_vector: vector={} - no match", vector);
+        debug!("    matching_vector: vector={} no match", vector);
         return None;
     }
 
@@ -515,7 +655,7 @@ fn matching_vector(pack: &PackState, vector: uint) -> Option<uint>
 }
 
 fn pack_vector(pack: &mut PackState, vector: uint) -> int {
-    debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
+    // debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
     let act = pack.act;
     let i = pack.order[vector];
     let t = act.tally[i];
@@ -524,19 +664,19 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
     let from = &act.froms[i];
     let to = &act.tos[i];
 
-    debug!("from[0]={}", from[0]);
+    // debug!("from[0]={}", from[0]);
 
     let mut j: int = (pack.lowzero as int) - (from[0] as int);
-    debug!("j={}", j);
+    // debug!("j={}", j);
     for k in range(1, t as uint) {
         if (pack.lowzero as int) - (from[k] as int) > j {
             j = (pack.lowzero as int) - (from[k] as int);
-            debug!("j={}", j);
+            // debug!("j={}", j);
         }
     }
 
     loop {
-        debug!("    loop: j={}", j);
+        // debug!("    loop: j={}", j);
         if j == 0 {
             j = 1;
             continue;
@@ -607,7 +747,7 @@ struct PackState<'a> {
 }
 
 fn pack_table<'a>(nstates: uint, nentries: uint, order: &'a [uint], act: &'a ActionsTable) -> PackState<'a> {
-    debug!("pack_table");
+    debug!("pack_table: nentries={}", nentries);
 
     let initial_maxtable = 1000;
 
@@ -624,18 +764,22 @@ fn pack_table<'a>(nstates: uint, nentries: uint, order: &'a [uint], act: &'a Act
     };
 
     for i in range(0, nentries) {
-        debug!("i={}", i);
+        // debug!("i={}", i);
         let place: int = match matching_vector(&mut pack, i) {
             Some(state) => pack.base[state] as int,
             None => pack_vector(&mut pack, i)
         };
 
-        debug!("    place={}", place);
+        // debug!("    place={}", place);
         pack.pos[i] = place as i16;
         pack.base[order[i]] = place as i16;
     }
 
     pack
+}
+
+fn expr_u32(cx: &ExtCtxt, span: Span, u: u32) -> P<Expr> {
+    cx.expr_lit(span, ast::LitInt(u as u64, ast::UnsignedIntLit(ast::TyU32)))
 }
 
 

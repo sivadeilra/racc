@@ -344,24 +344,37 @@ sole_reduction(int stateno)
     int count, ruleno;
     action *p;
 
+    trace("sole_reduction: state=%d", stateno);
+
     count = 0;
     ruleno = 0;
     for (p = parser[stateno]; p; p = p->next)
     {
-	if (p->action_code == SHIFT && MaySuppress(p))
-	    return (0);
+        if (p->action_code == SHIFT && MaySuppress(p)) {
+            trace("    found unsuppressed shift, returning 0");
+            return (0);
+        }
 	else if ((p->action_code == REDUCE) && MaySuppress(p))
 	{
-	    if (ruleno > 0 && p->number != ruleno)
-		return (0);
-	    if (p->symbol != 1)
-		++count;
+        if (ruleno > 0 && p->number != ruleno) {
+            trace("    found unsuppressed reduce for rule %d, returning 0", ruleno);
+            return (0);
+        }
+        trace("    found unsuppressed reduce");
+        if (p->symbol != 1) {
+            ++count;
+            trace("    count --> %d", count);
+        }
 	    ruleno = p->number;
+        trace("    selecting rule %d", ruleno);
 	}
     }
 
-    if (count == 0)
-	return (0);
+    if (count == 0) {
+        trace("    did not find any reductions");
+        return (0);
+    }
+    trace("    selected default reduction %d", ruleno);
     return (ruleno);
 }
 
@@ -370,9 +383,13 @@ defreds(void)
 {
     int i;
 
+    trace("default reduction");
+
     defred = NEW2(nstates, Value_t);
-    for (i = 0; i < nstates; i++)
-	defred[i] = (Value_t) sole_reduction(i);
+    for (i = 0; i < nstates; i++) {
+        defred[i] = (Value_t)sole_reduction(i);
+        trace("    state %d has default reduction %d", i, defred[i]);
+    }
 }
 
 static void

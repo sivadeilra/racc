@@ -135,8 +135,7 @@ fn initialize_LA(lr0: &LR0Output, LA_len: uint, reduction_table: &[i16]) -> Vec<
     laruleno
 }
 
-fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap
-{
+fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
     let mut goto_map: Vec<i16> = Vec::from_elem(gram.nvars + 1, 0);
     let mut ngotos: uint = 0;
@@ -191,6 +190,17 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap
             to_state[k] = state2;
         }
     }
+
+    debug!("set_goto_map: ngotos={}", ngotos);
+    for i in range(0, ngotos) {
+        debug!("    from {:3} to {:3}", from_state[i], to_state[i]);
+    }
+
+    debug!("goto_map:");
+    for i in range(0, gram.nvars) {
+        debug!("    {:3} {} --> {}", i, gram.name[i + gram.ntokens], goto_map[i]);
+    }
+    debug!(".");
 
     GotoMap { ngotos: ngotos, goto_map: goto_map, from_state: from_state, to_state: to_state }
 }
