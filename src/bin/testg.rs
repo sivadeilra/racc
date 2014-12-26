@@ -75,23 +75,7 @@ fn main()
 		(NUM, Some(24))
 	];
 
-    let mut parser = ParserState::new(ParserTables {
-        yyrindex: YYRINDEX.as_slice(),
-        yygindex: YYGINDEX.as_slice(),
-        yysindex: YYSINDEX.as_slice(),
-        yytable: YYTABLE.as_slice(),
-        yydefred: YYDEFRED.as_slice(),
-        yylen: YYLEN.as_slice(),
-        yylhs: YYLHS.as_slice(),
-        yycheck: YYCHECK.as_slice(),
-        yyfinal: YYFINAL,
-        yydgoto: YYDGOTO.as_slice(),
-        yyname: YYNAME.as_slice(),
-
-        // debugging
-        yyrules: YYRULES.as_slice(),
-        reduce: reduce
-    });
+    let mut parser = ParserState::new(get_parser_tables());
 
     let mut ctx = AppContext { x: 0 };
 

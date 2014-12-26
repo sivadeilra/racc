@@ -110,10 +110,6 @@ pub fn output_parser_to_ast(
         })).unwrap());
         */
 
-    // Generate the parse() method.
-
-    // let value_stack_ident = cx.ident_of("value_stack");
-
     // Build up actions
     let mut action_arms: Vec<Arm> = Vec::new();
     let mut rule_iter: uint = 0;
@@ -172,7 +168,7 @@ pub fn output_parser_to_ast(
     let ty_mutptr_vec_symbol_value: P<Ty> = cx.ty_rptr(sp, ty_vec_symbol_value.clone(), None, MutMutable);     // &mut Vec<SymbolValue>
 
     // Generate the reduce() function.
-    let parse_fn = cx.item_fn(
+    let reduce_fn = cx.item_fn(
         sp,
         cx.ident_of("reduce"),
         vec![ // inputs
@@ -181,13 +177,94 @@ pub fn output_parser_to_ast(
             cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint)),
             cx.arg(sp, context_param_ident, cx.ty_rptr(sp, context_ty.clone(), None, Mutability::MutMutable))
         ],
-        symbol_value_ty, // output type
+        symbol_value_ty.clone(), // output type
         
         cx.block_expr(
             cx.expr_match(sp,
                 cx.expr_ident(sp, cx.ident_of("reduction")), action_arms)
         ));
-    items.push(parse_fn);
+    items.push(reduce_fn);
+
+    // ParserTables<SymbolValue, AppContext>
+    let ty_parser_tables = cx.ty_path(ast::Path {
+        span: sp,
+        global: false,
+        segments: vec![
+            ast::PathSegment {
+                identifier: cx.ident_of("ParserTables"),
+                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
+                    lifetimes: vec![],
+                    types: OwnedSlice::from_vec(vec![ symbol_value_ty.clone(), context_ty.clone() ]),
+                    bindings: OwnedSlice::empty()
+                })
+            }
+        ]});
+
+    // ParserState<SymbolValue, AppContext>
+    let ty_parser_state = cx.ty_path(ast::Path {
+        span: sp,
+        global: false,
+        segments: vec![
+            ast::PathSegment {
+                identifier: cx.ident_of("ParserState"),
+                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
+                    lifetimes: vec![],
+                    types: OwnedSlice::from_vec(vec![ symbol_value_ty.clone(), context_ty.clone() ]),
+                    bindings: OwnedSlice::empty()
+                })
+            }
+        ]});
+
+    // Generate the get_parser_tables() function.
+    items.push(cx.item_fn(
+        sp,
+        cx.ident_of("get_parser_tables"),
+        vec![], // inputs
+        ty_parser_tables,
+        cx.block_expr(
+            cx.expr_struct(
+                sp,
+                /*path: */ cx.path_ident(sp, cx.ident_of("ParserTables")),
+                /*fields:*/ {
+                    // cx.field_imm(sp, cx.ident_of("yylen"), cx.expr_method_call(sp, cx.expr_ident(sp, cx.ident_of("YYLEN")), cx.ident_of("as_slice"), vec![]))
+                    let as_slice_ident = cx.ident_of("as_slice");
+                    let mut fields: Vec<ast::Field> = (vec![
+                        ("yyrindex", "YYRINDEX"),
+                        ("yygindex", "YYGINDEX"),
+                        ("yysindex", "YYSINDEX"),
+                        ("yytable", "YYTABLE"),
+                        ("yydefred", "YYDEFRED"),
+                        ("yylen", "YYLEN"),
+                        ("yylhs", "YYLHS"),
+                        ("yycheck", "YYCHECK"),
+                        // ("yyfinal", "YYFINAL"),
+                        ("yydgoto", "YYDGOTO"),
+                        ("yyname", "YYNAME"),           // for debugging
+                        ("yyrules", "YYRULES")         // for debugging
+                        // reduce: reduce
+                    ]).into_iter().map(|(field, sitem)|
+                            cx.field_imm(sp, cx.ident_of(field), cx.expr_method_call(sp, cx.expr_ident(sp, cx.ident_of(sitem)), as_slice_ident, vec![]))
+                        ).collect();
+                    fields.push(cx.field_imm(sp, cx.ident_of("yyfinal"), cx.expr_ident(sp, cx.ident_of("YYFINAL"))));
+                    fields.push(cx.field_imm(sp, cx.ident_of("reduce"), cx.expr_ident(sp, cx.ident_of("reduce"))));
+                    fields
+                }
+            )
+        )
+        ));
+
+    /*
+    // Generate the new_parser() function.
+    items.push(cx.item_fn(sp,
+        cx.ident_of("new_parser"),
+        vec![], // inputs
+        ty_parser_state,
+        cx.block_expr(
+            cx.expr_call(sp, vec![ cx.ident_of("ParserState"), cx.ident_of("new") ],
+                vec![
+                    cx.expr_call_ident(sp, cx.ident_of("get_parser_tables"), vec![])
+                ]))));
+    */
 
     items.push(output_rule_data(cx, sp, gram));
 
