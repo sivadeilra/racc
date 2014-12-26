@@ -6,11 +6,18 @@ pub enum PushTokenResult {
     SyntaxError
 }
 
-pub enum ParseEndResult<SymbolValue> {
+/// The final result of parsing a stream of tokens.
+///
+/// This value is returned from the `ParserState::finish` method.
+pub enum FinishParseResult<SymbolValue> {
     Accepted(SymbolValue),
     SyntaxError
 }
 
+/// Contains references to the parsing tables (and related information) needed by parsers.
+/// 
+/// You generally should not need to deal with `ParserTables` directly.  Instead, app code
+/// should use the `ParserState` type.
 #[deriving(Copy)]
 pub struct ParserTables<SymbolValue:Show, AppContext> {
     pub yyrindex: &'static [u16],
@@ -31,7 +38,11 @@ pub struct ParserTables<SymbolValue:Show, AppContext> {
     pub reduce: fn(parser: &mut Vec<SymbolValue>, reduction: uint, ctx: &mut AppContext) -> SymbolValue
 }
 
-// #[deriving(Clone)]
+/// An active instance of a parser.  This structure contains the state of a parsing state
+/// machine, including the state stack and the value stack.
+///
+/// To create an instance of `ParserState`, use `ParserState::new` and pass it a `ParserTables` which
+/// describes your application's grammar.
 pub struct ParserState<SymbolValue:Show, AppContext> {
     pub tables: ParserTables<SymbolValue, AppContext>,
     pub yystate: uint,
@@ -156,11 +167,12 @@ impl<SymbolValue:Show, AppContext> ParserState<SymbolValue, AppContext> {
         }
     }
 
+    /// Advances the state of the parser by reporting a new token to the parser.
+    ///
+    /// Calling this method is the equivalent of returning a token (other than `YYEOF`) from a `yylex()`
+    /// function in a YACC parser.
     pub fn push_token(&mut self, ctx: &mut AppContext, token: u32, lval: SymbolValue) -> PushTokenResult {
         assert!(self.state_stack.len() > 0);
-        // assert!(self.state_stack[parser.state_stack.len() - 1] as uint == yystate);
-
-        // let mut yystate = self.state_stack[self.state_stack.len() - 1] as uint;
 
         debug!("");
         debug!("state {}, reading {} ({}) lval {}, state_stack = {}", self.yystate, token, self.tables.yyname[token as uint], lval, self.state_stack);
@@ -183,7 +195,11 @@ impl<SymbolValue:Show, AppContext> ParserState<SymbolValue, AppContext> {
         return PushTokenResult::SyntaxError;
     }
 
-    pub fn push_end(&mut self, ctx: &mut AppContext) -> ParseEndResult<SymbolValue> {
+    /// Pushes the final "end of tokens" token into the state machine, and checks whether the grammar has
+    /// accepted or rejected the sequence of tokens.
+    ///
+    /// Calling this method is the equivalent of returning `YYEOF` from a `yylex()` function in a YACC parser.
+    pub fn finish(&mut self, ctx: &mut AppContext) -> FinishParseResult<SymbolValue> {
         assert!(self.state_stack.len() > 0);
 
         // let mut yystate = self.state_stack[self.state_stack.len() - 1] as uint;
@@ -194,10 +210,10 @@ impl<SymbolValue:Show, AppContext> ParserState<SymbolValue, AppContext> {
         self.try_reduce(ctx, 0);
         self.do_defreds(ctx);
 
-        if self.value_stack.len() == 1 {
+        if self.state_stack.len() == 1 && self.value_stack.len() == 1 {
             debug!("accept");
             let final_lval = self.value_stack.pop().unwrap();
-            return ParseEndResult::Accepted(final_lval);
+            return FinishParseResult::Accepted(final_lval);
         }
 
         debug!("done with all reductions.  yystate={}  state_stack={}", self.yystate, self.state_stack);
@@ -206,6 +222,6 @@ impl<SymbolValue:Show, AppContext> ParserState<SymbolValue, AppContext> {
         // then we have encountered a syntax error.
 
         debug!("syntax error!  token is not recognized in this state.");
-        return ParseEndResult::SyntaxError;
+        return FinishParseResult::SyntaxError;
     }
 }

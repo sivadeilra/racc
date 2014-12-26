@@ -44,6 +44,8 @@ mod warshall;
 mod reader;
 mod output;
 mod mkpar;
+
+/// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
 pub mod runtime;
 
 #[plugin_registrar]

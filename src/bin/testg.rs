@@ -9,7 +9,7 @@ extern crate log;
 
 #[phase(plugin, link)] extern crate racc;
 
-use racc::runtime::{ParserState,ParserTables,ParseEndResult};
+use racc::runtime::{ParserState,ParserTables,FinishParseResult};
 
 struct AppContext {
     x: uint
@@ -96,16 +96,14 @@ fn main()
     let mut ctx = AppContext { x: 0 };
 
     for &(tok, lval) in toks.iter() {
-        let result = parser.push_token(&mut ctx, tok, lval);
-        println!("result = {}", result);
+        parser.push_token(&mut ctx, tok, lval);
     }
 
-    println!("push_end()");
-    match parser.push_end(&mut ctx) {
-        ParseEndResult::Accepted(final_value) => {
+    match parser.finish(&mut ctx) {
+        FinishParseResult::Accepted(final_value) => {
             println!("Accepted: {}", final_value);
         }
-        ParseEndResult::SyntaxError => {
+        FinishParseResult::SyntaxError => {
             println!("SyntaxError");
         }
     }
