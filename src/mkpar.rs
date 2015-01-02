@@ -1,4 +1,5 @@
 use std::collections::Bitv;
+use std::iter::repeat;
 
 use grammar::Grammar;
 use lr0::LR0Output;
@@ -163,8 +164,8 @@ fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>)
 fn remove_conflicts(lr0: &LR0Output, final_state: uint, parser: &mut Vec<Vec<ParserAction>>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    let mut srconflicts: Vec<i16> = Vec::from_elem(lr0.nstates(), 0);
-    let mut rrconflicts: Vec<i16> = Vec::from_elem(lr0.nstates(), 0);
+    let mut srconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
+    let mut rrconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
     for i in range(0, lr0.nstates()) {
         let pvec = &mut parser[i];
         let mut srcount: uint = 0;

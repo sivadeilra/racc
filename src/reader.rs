@@ -27,6 +27,7 @@
 
 use std::rc::Rc;
 use std::collections::HashMap;
+use std::iter::repeat;
 
 use syntax::ast;
 use syntax::ast::Block;
@@ -105,10 +106,10 @@ impl ReaderState
     pub fn new() -> ReaderState {
         let gram = Grammar::new();
         ReaderState {
-            pitem: Vec::from_elem(gram.nitems, NO_ITEM),
-            plhs: Vec::from_elem(gram.nrules, NO_ITEM),
-            rule_blocks: Vec::from_elem(gram.nrules, None),
-            rhs_binding: Vec::from_elem(gram.nitems, None),
+            pitem: repeat(NO_ITEM).take(gram.nitems).collect(),
+            plhs: repeat(NO_ITEM).take(gram.nrules).collect(),
+            rule_blocks: repeat(None).take(gram.nrules).collect(),
+            rhs_binding: repeat(None).take(gram.nitems).collect(),
             symbols: Vec::new(),
             symbol_table: HashMap::new(),
             gensym: 1,
@@ -316,10 +317,10 @@ impl ReaderState
 
         debug!("ntokens={} nvars={} nsyms={}", ntokens, nvars, nsyms);
 
-        self.gram.name.grow(nsyms, "".to_string());
-        self.gram.value.grow(nsyms, 0);
-        self.gram.prec.grow(nsyms, 0);
-        self.gram.assoc.grow(nsyms, 0);
+        self.gram.name.extend(repeat(String::new()).take(nsyms));
+        self.gram.value.extend(repeat(0).take(nsyms));
+        self.gram.prec.extend(repeat(0).take(nsyms));
+        self.gram.assoc.extend(repeat(0).take(nsyms));
 
         // debug!("building v table");
 
@@ -329,7 +330,7 @@ impl ReaderState
         // unpacked view.  In u = v[p], p is a packed symbol index (a number in the nsyms space),
         // while u is the unpacked symbol.
         let v = {
-            let mut v: Vec<uint> = Vec::from_elem(nsyms, NO_SYMBOL); // symbol indices, which point into reader.symbols[]
+            let mut v: Vec<uint> = repeat(NO_SYMBOL).take(nsyms).collect(); // symbol indices, which point into reader.symbols[]
             v[0] = NO_SYMBOL; // $end
             v[start_symbol] = NO_SYMBOL; // $accept
 
@@ -366,7 +367,7 @@ impl ReaderState
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
         // symbol is always at packed index 1.
-        let mut map_to_packed: Vec<i16> = Vec::from_elem(nsyms, -1);
+        let mut map_to_packed: Vec<i16> = repeat(-1).take(nsyms).collect();
         map_to_packed[0] = 1; // The 'error' symbol
 
         for i in range(1, ntokens) {
@@ -496,18 +497,18 @@ impl ReaderState
         //      -1 -> 
         //      $accept -> start_symbol
 
-        let mut ritem: Vec<i16> = Vec::from_elem(nitems, 0);
+        let mut ritem: Vec<i16> = repeat(0).take(nitems).collect();
         ritem[0] = -1;
         ritem[1] = map_to_packed[goal_var];
         ritem[2] = 0;
         ritem[3] = -2;
 
-        let mut rlhs: Vec<i16> = Vec::from_elem(nrules, 0);
+        let mut rlhs: Vec<i16> = repeat(0).take(nrules).collect();
         rlhs[0] = 0;
         rlhs[1] = 0;
         rlhs[2] = self.gram.start_symbol as i16;
 
-        let mut rrhs: Vec<i16> = Vec::from_elem(nrules + 1, 0);
+        let mut rrhs: Vec<i16> = repeat(0).take(nrules + 1).collect();
         rrhs[0] = 0;
         rrhs[1] = 0;
         rrhs[2] = 1;

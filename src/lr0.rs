@@ -3,6 +3,7 @@ use closure::set_first_derives;
 use closure::closure;
 use util::Bitv32;
 use std::collections::Bitv;
+use std::iter::repeat;
 
 /// the structure of the LR(0) state machine
 pub struct Core
@@ -98,7 +99,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
     // The kernel_* fields are allocated to well-defined sizes, but their contents are
     // not well-defined yet.
     let mut kernel_items_count: uint = 0;
-    let mut symbol_count: Vec<i16> = Vec::from_elem(gram.nsyms, 0);
+    let mut symbol_count: Vec<i16> = repeat(0).take(gram.nsyms).collect();
     for i in range(0, gram.nitems) {
         let symbol = gram.ritem[i];
         if symbol >= 0 {
@@ -107,7 +108,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
         }
     }
     let kernel_base = {
-        let mut kernel_base: Vec<i16> = Vec::from_elem(gram.nsyms, 0);
+        let mut kernel_base: Vec<i16> = repeat(0).take(gram.nsyms).collect();
         let mut count: uint = 0;
         for i in range(0, gram.nsyms) {
             kernel_base[i] = count as i16;
@@ -118,10 +119,10 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
 
     let mut lr0: LR0State = LR0State {
         gram: gram,
-        state_set: Vec::from_fn(gram.nitems, |_| Vec::new()),
+        state_set: range(0, gram.nitems).map(|_| Vec::new()).collect(),
         kernel_base: kernel_base,
-        kernel_end: Vec::from_elem(gram.nsyms, -1),
-        kernel_items: Vec::from_elem(kernel_items_count, 0),
+        kernel_end: repeat(-1).take(gram.nsyms).collect(),
+        kernel_items: repeat(0).take(kernel_items_count).collect(),
         states: initialize_states(gram, derives.as_slice(), derives_rules.as_slice())
     };
 
@@ -380,7 +381,7 @@ fn set_derives(gram: &Grammar) -> (Vec<i16>, Vec<i16>) // (derives, derives_rule
 {
     // note: 'derives' appears to waste its token space; consider adjusting indices
     // so that only var indices are used
-	let mut derives: Vec<i16> = Vec::from_elem(gram.nsyms, 0);
+	let mut derives: Vec<i16> = repeat(0).take(gram.nsyms).collect();
     let mut derives_rules: Vec<i16> = Vec::with_capacity(gram.nvars + gram.nrules);
 
     for lhs in range(gram.start_symbol, gram.nsyms) {

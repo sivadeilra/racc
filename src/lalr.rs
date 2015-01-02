@@ -1,7 +1,7 @@
 use grammar::Grammar;
 use util::{Bitmat,reverse_range};
 use lr0::LR0Output;
-use std::default::Default;
+use std::iter::repeat;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
@@ -53,7 +53,7 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput
 
 fn set_shift_table(lr0: &LR0Output) -> Vec<i16>
 {
-    let mut shift_table: Vec<i16> = Vec::from_elem(lr0.states.len(), -1);
+    let mut shift_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
     for i in range(0, lr0.shifts.len()) {
         let state = lr0.shifts[i].state;
         assert!(shift_table[state] == -1);
@@ -68,7 +68,7 @@ fn set_shift_table(lr0: &LR0Output) -> Vec<i16>
 // do not have any reductions, or an index into LR0Output.reductions.
 fn set_reduction_table(lr0: &LR0Output) -> Vec<i16>
 {
-    let mut reduction_table: Vec<i16> = Vec::from_elem(lr0.states.len(), -1);
+    let mut reduction_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
     for i in range(0, lr0.reductions.len()) {
         let state = lr0.reductions[i].state;
         assert!(reduction_table[state] == -1);
@@ -119,7 +119,7 @@ fn create_lookaheads(lr0: &LR0Output, reduction_table: &[i16]) -> Vec<i16> {
 
 #[allow(non_snake_case)]
 fn initialize_LA(lr0: &LR0Output, LA_len: uint, reduction_table: &[i16]) -> Vec<i16> {
-    let mut laruleno: Vec<i16> = Vec::from_elem(LA_len, 0);
+    let mut laruleno: Vec<i16> = repeat(0).take(LA_len).collect();
     let mut k: uint = 0;
     for i in range(0, lr0.states.len()) {
         let rp = reduction_table[i];
@@ -137,7 +137,7 @@ fn initialize_LA(lr0: &LR0Output, LA_len: uint, reduction_table: &[i16]) -> Vec<
 
 fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
-    let mut goto_map: Vec<i16> = Vec::from_elem(gram.nvars + 1, 0);
+    let mut goto_map: Vec<i16> = repeat(0).take(gram.nvars + 1).collect();
     let mut ngotos: uint = 0;
     for sp in lr0.shifts.iter() {
         for i in reverse_range(sp.shifts.len(), 0) {
@@ -173,8 +173,8 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     temp_map.push(ngotos as i16);
     // at this point, temp_map and goto_map have identical length and contents
 
-    let mut from_state: Vec<i16> = Vec::from_elem(ngotos, 0);
-    let mut to_state: Vec<i16> = Vec::from_elem(ngotos, 0);
+    let mut from_state: Vec<i16> = repeat(0).take(ngotos).collect();
+    let mut to_state: Vec<i16> = repeat(0).take(ngotos).collect();
 
     for sp in lr0.shifts.iter() {
         for i in reverse_range(sp.shifts.len(), 0) {
@@ -245,7 +245,7 @@ fn initialize_F(
 
     let ngotos = gotos.ngotos;
     let mut F = Bitmat::new(ngotos, gram.ntokens);
-    let mut reads: Vec<Vec<i16>> = Vec::from_elem(ngotos, Default::default());
+    let mut reads: Vec<Vec<i16>> = repeat(Vec::new()).take(ngotos).collect();
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);
 
     for i in range(0, ngotos) {
@@ -304,10 +304,10 @@ fn build_relations(
     debug!("build_relations");
 
     let ngotos = gotos.ngotos;
-    let mut includes: Vec<Vec<i16>> = Vec::from_elem(ngotos, Vec::new());
+    let mut includes: Vec<Vec<i16>> =  repeat(Vec::new()).take(ngotos).collect();
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);                // temporary, reused in loops
     let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1);   // temporary, reused in loops
-    let mut lookback: Vec<Vec<i16>> = Vec::from_elem(LA_len, Vec::new());
+    let mut lookback: Vec<Vec<i16>> = repeat(Vec::new()).take(LA_len).collect();
 
     for i in range(0, ngotos) {
         assert!(edge.len() == 0);
@@ -389,7 +389,7 @@ fn transpose(r2: &Vec<Vec<i16>>, n: uint) -> Vec<Vec<i16>>
 {
     assert!(r2.len() == n);
 
-    let mut nedges: Vec<i16> = Vec::from_elem(n, 0);
+    let mut nedges: Vec<i16> = repeat(0).take(n).collect();
     for i in range(0, n) {
         let sp = &r2[i];
         if sp.len() > 0 {
@@ -402,19 +402,19 @@ fn transpose(r2: &Vec<Vec<i16>>, n: uint) -> Vec<Vec<i16>>
         }
     }
 
-    let mut new_R: Vec<Vec<i16>> = Vec::from_elem(n, Vec::new());
+    let mut new_R: Vec<Vec<i16>> = repeat(Vec::new()).take(n).collect();
 
     for i in range(0, n) {
         let k = nedges[i];
         if k > 0 {
-            let mut sp: Vec<i16> = Vec::from_elem((k as uint) + 1, 0);
+            let mut sp: Vec<i16> = repeat(0).take((k as uint) + 1).collect();
             sp[k as uint] = -1;
             new_R[i] = sp;
         }
     }
     drop(nedges);
 
-    let mut temp_R: Vec<i16> = Vec::from_elem(n, 0);        // contains output columns
+    let mut temp_R: Vec<i16> = repeat(0).take(n).collect();        // contains output columns
     for i in range(0, n) {              // i is old-row
         let sp = &r2[i];
         let mut j: uint = 0;            // j is old-col
@@ -479,8 +479,8 @@ fn digraph(relation: &Vec<Vec<i16>>, F: &mut Bitmat) {
     let ngotos = F.rows;
     let mut ds = DigraphState {
         infinity: ngotos + 2,
-        index: Vec::from_elem(ngotos + 1, 0),
-        vertices: Vec::from_elem(ngotos + 1, 0),
+        index: repeat(0).take(ngotos + 1).collect(),
+        vertices: repeat(0).take(ngotos + 1).collect(),
         top: 0,
         R: relation,
         F: F

@@ -1,4 +1,5 @@
 use std::num::Int;
+use std::iter::repeat;
 
 pub const BITS_PER_WORD: uint = 32;
 
@@ -20,7 +21,7 @@ impl Bitmat
 		let rowsize = word_size(cols);
 		let total = rowsize * rows;
 		Bitmat {
-			data: Vec::from_elem(total, 0),
+			data: repeat(0).take(total).collect(),
 			rows: rows, cols: cols, rowsize: rowsize
 		}
 	}
@@ -197,7 +198,7 @@ impl Bitv32 {
         let w = if value { !0u32 } else { 0u32 };
         let nwords = (n + BITS_PER_WORD - 1) / BITS_PER_WORD;
         Bitv32 {
-            data: Vec::from_elem(nwords, w),
+            data: repeat(w).take(nwords).collect(),
             nbits: n
         }
     }

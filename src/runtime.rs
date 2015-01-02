@@ -18,23 +18,24 @@ pub enum FinishParseResult<SymbolValue> {
 /// 
 /// You generally should not need to deal with `ParserTables` directly.  Instead, app code
 /// should use the generated 'get_parser_tables()' method.  Example:
-///
-/// ```
-///     grammar! {
-///         ... grammar definition ...
-///     }
-///
-///     fn main() {
-///         let mut parser = ParserState::new(get_parser_tables());
-///
-///         for token in (...) {
-///             parser.push_token(token);
-///         }
-///
-///         match parser.finish() {
-///             ...
-///         }
-///     }
+/// //
+/// // ```
+/// //     grammar! {
+/// //         ... grammar definition ...
+/// //     }
+/// //
+/// //     fn main() {
+/// //         let mut parser = ParserState::new(get_parser_tables());
+/// //
+/// //         for token in (...) {
+/// //             parser.push_token(token);
+/// //         }
+/// //
+/// //         match parser.finish() {
+/// //             ...
+/// //         }
+/// //     }
+/// // ```
 #[deriving(Copy)]
 pub struct ParserTables<SymbolValue:Show, AppContext> {
     pub yyrindex: &'static [u16],

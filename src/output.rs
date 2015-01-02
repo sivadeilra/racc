@@ -1,4 +1,5 @@
 use std::cmp;
+use std::iter::repeat;
 
 use syntax::ast;
 use syntax::ast::{Arm, Block, Expr, Generics, Item, Mutability, Pat, Stmt, UnsignedIntLit, Ty, TyU16, Ty_, WhereClause, MutMutable};
@@ -200,6 +201,7 @@ pub fn output_parser_to_ast(
             }
         ]});
 
+/*
     // ParserState<SymbolValue, AppContext>
     let ty_parser_state = cx.ty_path(ast::Path {
         span: sp,
@@ -214,6 +216,7 @@ pub fn output_parser_to_ast(
                 })
             }
         ]});
+*/
 
     // Generate the get_parser_tables() function.
     items.push(cx.item_fn(
@@ -304,7 +307,7 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
     assert!(max_value < I16_MAX);
     let length = (max_value + 1) as uint;
 
-    let mut toknames: Vec<String> = Vec::from_elem(length, String::new());
+    let mut toknames: Vec<String> = repeat(String::new()).take(length).collect();
     
     // Now put the names into proper places.
     for i in range(0, gram.ntokens) {
@@ -319,11 +322,11 @@ fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>
         cx.ident_of(name), 
         cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_uint(span, strings.len()))),
         Mutability::MutImmutable,
-        cx.expr_vec(span, Vec::from_fn(strings.len(), |i| {
+        cx.expr_vec(span, range(0, strings.len()).map(|i| {
             let iname = intern_and_get_ident(strings[i].as_slice());
             cx.expr_str(span, iname)
         }
-        )))
+        ).collect()))
 }
 
 fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
@@ -334,7 +337,7 @@ fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
 
 #[allow(dead_code)]
 fn make_table_uint(cx: &ExtCtxt, span: Span, name: &str, values: &[uint]) -> P<Item> {
-    let values_expr = cx.expr_vec(span, Vec::from_fn(values.len(), |i| cx.expr_uint(span, values[i])));
+    let values_expr = cx.expr_vec(span, values.iter().map(|value| cx.expr_uint(span, *value)).collect());
     let ty_uint = quote_ty!(cx, uint);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_uint, cx.expr_uint(span, values.len())));
@@ -349,7 +352,7 @@ fn make_table_i16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Ite
 }
 
 fn make_table_i16_real(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
-    let values_expr = cx.expr_vec(span, Vec::from_fn(values.len(), |i| expr_i16(cx, span, values[i])));
+    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_i16(cx, span, *value)).collect());
     let ty_i16 = quote_ty!(cx, i16);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_i16, cx.expr_uint(span, values.len())));
@@ -373,7 +376,7 @@ fn expr_u16(cx: &ExtCtxt, span: Span, u: u16) -> P<ast::Expr> {
 
 // yuck
 fn make_table_i16_as_u16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
-    let values_expr = cx.expr_vec(span, Vec::from_fn(values.len(), |i| expr_u16(cx, span, values[i] as u16)));
+    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_u16(cx, span, *value as u16)).collect());
     let ty_u16 = quote_ty!(cx, u16);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_uint(span, values.len())));
@@ -419,11 +422,11 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 
     let nstates = parser.nstates;
     let nvectors = 2 * nstates + gram.nvars;
-    let mut tally: Vec<i16> = Vec::from_elem(nvectors, 0);
-    let mut width: Vec<i16> = Vec::from_elem(nvectors, 0);
-    let mut froms: Vec<Vec<i16>> = Vec::from_elem(nvectors, Vec::new());
-    let mut tos: Vec<Vec<i16>> = Vec::from_elem(nvectors, Vec::new());
-    let mut actionrow: Vec<i16> = Vec::from_elem(2 * gram.ntokens, 0);
+    let mut tally: Vec<i16> = repeat(0).take(nvectors).collect();
+    let mut width: Vec<i16> = repeat(0).take(nvectors).collect();
+    let mut froms: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
+    let mut tos: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
+    let mut actionrow: Vec<i16> = repeat(0).take(2 * gram.ntokens).collect();
 
     for i in range(0, nstates) {
         let actions = &parser.actions[i];
@@ -591,7 +594,7 @@ fn save_column(
 fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<i16> {
     debug!("goto_actions");
 
-    let mut state_count: Vec<i16> = Vec::from_elem(nstates, 0);         // temporary data, used in default_goto()
+    let mut state_count: Vec<i16> = repeat(0).take(nstates).collect();         // temporary data, used in default_goto()
     let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars);    // the table that we are building
 
     let k = default_goto(gram, gotos, gram.start_symbol + 1, nstates, &mut state_count);
@@ -610,7 +613,7 @@ fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut Action
 fn sort_actions(act: &ActionsTable) -> (uint, Vec<uint>) {
     debug!("sort_actions() nvectors={}", act.nvectors);
 
-    let mut order: Vec<uint> = Vec::from_elem(act.nvectors, 0);
+    let mut order: Vec<uint> = repeat(0).take(act.nvectors).collect();
     let mut nentries: int = 0;
 
     for i in range(0, act.nvectors) {
@@ -741,8 +744,8 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
                 assert!(pack.table.len() == pack.check.len());
                 let grow = loc + 1 - pack.table.len();
                 debug!("        growing table/check by {}", grow);
-                pack.table.grow(grow, 0);
-                pack.check.grow(grow, -1);
+                pack.table.extend(repeat(0).take(grow));
+                pack.check.extend(repeat(-1).take(grow));
             }
 
             if pack.check[loc] != -1 {
@@ -802,10 +805,10 @@ fn pack_table<'a>(nstates: uint, nentries: uint, order: &'a [uint], act: &'a Act
     let initial_maxtable = 1000;
 
     let mut pack = PackState {
-        base: Vec::from_elem(act.nvectors, 0),
-        pos: Vec::from_elem(nentries, 0),
-        table: Vec::from_elem(initial_maxtable, 0),
-        check: Vec::from_elem(initial_maxtable, -1),
+        base: repeat(0).take(act.nvectors).collect(),
+        pos: repeat(0).take(nentries).collect(),
+        table: repeat(0).take(initial_maxtable).collect(),
+        check: repeat(-1).take(initial_maxtable).collect(),
         lowzero: 0,
         high: 0,
         order: order,
