@@ -1,13 +1,16 @@
-#![feature(phase)]
+#![feature(plugin)]
+
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 #![allow(unused_variables)]
 
-#[phase(plugin, link)]
+#[plugin]
+#[macro_use]
 extern crate log;
 
-#[phase(plugin, link)] extern crate racc;
+#[plugin]
+extern crate racc;
 
 use racc::runtime::{ParserState,ParserTables,FinishParseResult};
 

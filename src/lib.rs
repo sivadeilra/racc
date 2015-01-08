@@ -241,12 +241,13 @@
 #![feature(plugin_registrar)]
 #![feature(phase)]
 #![feature(quote)]
-#![feature(macro_rules)]
+#![feature(plugin)]
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
 
-#[phase(plugin, link)]
+#[plugin]
+#[macro_use]
 extern crate log;
 
 extern crate rustc;

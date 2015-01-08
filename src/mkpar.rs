@@ -6,7 +6,7 @@ use lr0::LR0Output;
 use lalr::LALROutput;
 use util::{reverse_range};
 
-#[deriving(Copy,PartialEq)]
+#[derive(Copy,PartialEq)]
 pub enum ActionCode {
     Shift = 1,
     Reduce = 2,

@@ -170,7 +170,8 @@ fn print_eff(gram: &Grammar, eff: &Bitmat)
     for i in range(0, eff.rows) {
         debug!("{}", gram.name[gram.start_symbol + i]);
         for j in eff.iter_ones_in_row(i) {
-            debug!("  {}", gram.name[gram.start_symbol + j]);
+            let s: uint = gram.start_symbol + j;
+            debug!("  {}", gram.name[s]);
         }
     }
 }

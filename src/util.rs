@@ -91,7 +91,8 @@ pub struct BitmatIterOnes<'a>
     mat: &'a Bitmat
 }
 
-impl<'a> Iterator<(uint, uint)> for BitmatIterOnes<'a> {
+impl<'a> Iterator for BitmatIterOnes<'a> {
+    type Item = (uint, uint);
     // This could be made faster with a "find first set bit" intrinsic.
     fn next(&mut self) -> Option<(uint, uint)> {
         const LOW_MASK: uint = (1 << BITS_PER_WORD) - 1;
@@ -144,8 +145,9 @@ pub struct BitMaskIterator<'a>
     bitpos: uint,       // current bit position
 }
 
-impl<'a> Iterator<uint> for BitMaskIterator<'a>
+impl<'a> Iterator for BitMaskIterator<'a>
 {
+    type Item = uint;
     // This could be made faster with a "find first set bit" intrinsic.
     fn next(&mut self) -> Option<uint> {
         const LOW_MASK: uint = (1 << BITS_PER_WORD) - 1;
@@ -229,7 +231,8 @@ pub fn reverse_range<A:Int>(start: A, stop: A) -> ReverseRange<A> {
     }
 }
 
-impl<A:Int> Iterator<A> for ReverseRange<A> {
+impl<A:Int> Iterator for ReverseRange<A> {
+    type Item = A;
     fn next(&mut self) -> Option<A> {
         if self.state > self.stop {
             self.state = self.state - self.one;

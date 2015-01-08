@@ -33,7 +33,7 @@ pub const UNDEFINED: i16 = -1;
 //       any combination of tokens or variables
 //     * (optional) precedence and associativity rules for rules
 //
-#[deriving(Default)]
+#[derive(Default)]
 pub struct Grammar
 {
     // the symbols (non-terminals and terminals/tokens)

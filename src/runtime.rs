@@ -1,6 +1,6 @@
 use std::fmt::Show;
 
-#[deriving(Copy,Show)]
+#[derive(Copy,Show)]
 pub enum PushTokenResult {
     Ok,                         // The token was consumed.
     SyntaxError
@@ -36,7 +36,7 @@ pub enum FinishParseResult<SymbolValue> {
 /// //         }
 /// //     }
 /// // ```
-#[deriving(Copy)]
+#[derive(Copy)]
 pub struct ParserTables<SymbolValue:Show, AppContext> {
     pub yyrindex: &'static [u16],
     pub yysindex: &'static [u16],

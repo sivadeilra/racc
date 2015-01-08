@@ -26,7 +26,7 @@ pub struct Reductions
     pub rules: Vec<i16>,
 }
 
-#[deriving(Default)]
+#[derive(Default)]
 pub struct LR0Output
 {
     pub states: Vec<Core>,

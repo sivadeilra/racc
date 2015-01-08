@@ -45,7 +45,7 @@ const NO_SYMBOL: uint = !0u;
 const NO_ITEM: uint = !0u;
 
 // symbol classes
-#[deriving(Copy,PartialEq,Show)]
+#[derive(Copy,PartialEq,Show)]
 enum SymClass {
     Unknown = 0,
     Terminal = 1,
