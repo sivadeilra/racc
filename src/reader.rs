@@ -28,6 +28,7 @@
 use std::rc::Rc;
 use std::collections::HashMap;
 use std::iter::repeat;
+use std::mem::replace;
 
 use syntax::ast;
 use syntax::ast::Block;
@@ -37,12 +38,19 @@ use syntax::parse::parser::Parser;
 use syntax::codemap;
 use syntax::codemap::Span;
 
-
-use grammar::{TOKEN,UNDEFINED};
+use grammar::{TOKEN, UNDEFINED, PREDEFINED_RULES, PREDEFINED_ITEMS};
 use grammar::Grammar;
+
+use std::borrow::BorrowFrom;
 
 const NO_SYMBOL: uint = !0u;
 const NO_ITEM: uint = !0u;
+
+impl BorrowFrom<Rc<String>> for str {
+    fn borrow_from(owned: &Rc<String>) -> &str {
+        owned.as_slice()
+    }
+}
 
 // symbol classes
 #[derive(Copy,PartialEq,Show)]
@@ -52,23 +60,21 @@ enum SymClass {
     NonTerminal = 2
 }
 
-struct Bucket
-{
-    name: String,
+struct Symbol {
+    name: Rc<String>,
     tag: Option<Rc<String>>,
-    value: i16,
+    // value: i16,
     prec: i16,
     class: SymClass,
     assoc: u8,
     span: Span,     // code span which defined this name
 }
 
-fn make_bucket(name: &str, span: Span) -> Bucket
-{
-    Bucket {
-        name: name.to_string(),
+fn make_symbol(name: &str, span: Span) -> Symbol {
+    Symbol {
+        name: Rc::new(name.to_string()),
         tag: None,
-        value: UNDEFINED,
+        // value: UNDEFINED,
         prec: 0,
         class: SymClass::Unknown,
         assoc: TOKEN,
@@ -76,22 +82,27 @@ fn make_bucket(name: &str, span: Span) -> Bucket
     }
 }
 
-struct ReaderState
-{
-    pitem: Vec<uint>,       // contains indices that point into symbols
-    plhs: Vec<uint>,        // contains indices that point into symbols
+struct ReaderState {
+    /// Contains indices that point into `self.symbols`, or `NO_ITEM`.
+    pitem: Vec<uint>,
 
-    // All of the symbols, in the order that they are first encountered.
-    symbols: Vec<Bucket>,
+    /// Contains indices that point into `self.symbols`, or `NO_SYMBOL`.
+    plhs: Vec<uint>,
 
-    // a lookup table, which gives you an index into self.symbols
-    symbol_table: HashMap<String, uint>,
+    /// Contains all of the symbols, in the order that they are first encountered.
+    symbols: Vec<Symbol>,
+
+    // A lookup table, which gives you an index into self.symbols
+    symbol_table: HashMap<Rc<String>, uint>,
 
     gensym: uint,          // used for generating names for anonymous symbols
 
     last_was_action: bool,
 
-    gram: Grammar,         // the grammar we are building
+    nitems: uint,
+    nrules: uint,
+    rprec: Vec<i16>,
+    rassoc: Vec<u8>,
 
     // The actions (code blocks) provided by the grammar author.
     rule_blocks: Vec<Option<P<Block>>>,
@@ -101,87 +112,85 @@ struct ReaderState
     rhs_binding: Vec<Option<ast::Ident>>,      
 }
 
-impl ReaderState
-{
+impl ReaderState {
     pub fn new() -> ReaderState {
-        let gram = Grammar::new();
         ReaderState {
-            pitem: repeat(NO_ITEM).take(gram.nitems).collect(),
-            plhs: repeat(NO_ITEM).take(gram.nrules).collect(),
-            rule_blocks: repeat(None).take(gram.nrules).collect(),
-            rhs_binding: repeat(None).take(gram.nitems).collect(),
+            pitem: repeat(NO_ITEM).take(PREDEFINED_ITEMS).collect(),
+            plhs: repeat(NO_ITEM).take(PREDEFINED_RULES).collect(),
+            rule_blocks: repeat(None).take(PREDEFINED_RULES).collect(),
+            rhs_binding: repeat(None).take(PREDEFINED_ITEMS).collect(),
             symbols: Vec::new(),
             symbol_table: HashMap::new(),
             gensym: 1,
             last_was_action: false,
-            gram: gram,
+            nitems: PREDEFINED_ITEMS,
+            nrules: PREDEFINED_RULES,
+            rprec: repeat(0).take(PREDEFINED_RULES).collect(),
+            rassoc: repeat(TOKEN).take(PREDEFINED_RULES).collect(),
         }
     }
 
     // Looks up a symbol in the symbol table, and returns the symbol index
     // (the index within ReaderState.symbols) of that symbol.  If the symbol
     // is not already in the symbol table, then this method adds the symbol.
-    pub fn lookup(&mut self, name: &str, span: Span) -> uint
-    {
+    pub fn lookup(&mut self, name: &str, span: Span) -> uint {
         if let Some(ii) = self.symbol_table.get(name) {
             // debug!("found {}_{} already in table", name, *ii);
             return *ii;
         }
 
         let index = self.symbols.len();
-        let bp = make_bucket(name, span);
-        self.symbols.push(bp);
-        self.symbol_table.insert(name.to_string(), index);
+        let s = make_symbol(name, span);
+        self.symbols.push(s);
+        self.symbol_table.insert(Rc::new(name.to_string()), index);
         // debug!("added {}_{} to table", name, index);
         return index;
     }
 
-    pub fn lookup_ref_mut<'a>(&'a mut self, name: &str, span: Span) -> (uint, &'a mut Bucket)
-    {
+    pub fn lookup_ref_mut<'a>(&'a mut self, name: &str, span: Span) -> (uint, &'a mut Symbol) {
         let index = self.lookup(name, span);
         (index, &mut self.symbols[index])
     }
 
-    pub fn start_rule(&mut self, lhs: uint, span: Span)
-    {
+    pub fn start_rule(&mut self, lhs: uint, span: Span) {
         assert!(self.symbols[lhs].class == SymClass::NonTerminal);
-        assert!(self.plhs.len() == self.gram.nrules);
-        assert!(self.gram.rprec.len() == self.gram.nrules);
-        assert!(self.gram.rassoc.len() == self.gram.nrules);
+        assert!(self.plhs.len() == self.nrules);
+        assert!(self.rprec.len() == self.nrules);
+        assert!(self.rassoc.len() == self.nrules);
 
-        // debug!("  start_rule: r{}: {}_{} -> (at item {}) ...", self.gram.nrules, self.symbols[lhs].name, lhs, self.pitem.len());
+        // debug!("  start_rule: r{}: {}_{} -> (at item {}) ...", self.nrules, self.symbols[lhs].name, lhs, self.pitem.len());
 
         self.plhs.push(lhs);
-        self.gram.rprec.push(UNDEFINED);
-        self.gram.rassoc.push(TOKEN);
+        self.rprec.push(UNDEFINED);
+        self.rassoc.push(TOKEN);
 
         // nrules is not yet advanced; that happens in end_rule
         drop(span); // will use later
     }
     
-    pub fn end_rule(&mut self)
-    {
-        let rule = self.gram.nrules;
+    // Terminates the current rule.
+    pub fn end_rule(&mut self) {
+        let rule = self.nrules;
 
         assert!(self.plhs.len() == rule + 1);
-        assert!(self.gram.rprec.len() == rule + 1);
-        assert!(self.gram.rassoc.len() == rule + 1);
+        assert!(self.rprec.len() == rule + 1);
+        assert!(self.rassoc.len() == rule + 1);
 
-        if !self.last_was_action && { if let Some(_) = self.symbols[self.plhs[self.gram.nrules]].tag { true } else { false } } {
+        if !self.last_was_action && { if let Some(_) = self.symbols[self.plhs[self.nrules]].tag { true } else { false } } {
             if self.pitem[self.pitem.len() - 1] != NO_ITEM {
                 let mut i: uint = self.pitem.len() - 1;
                 while (i > 0) && self.pitem[i] != NO_ITEM {
                     i -= 1;
                 }
-                if self.pitem[i + 1] == NO_ITEM || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.plhs[self.gram.nrules]].tag {
+                if self.pitem[i + 1] == NO_ITEM || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.plhs[self.nrules]].tag {
                     warn!("default_action_warning();")
                     // default_action_warning();
                 }
             }
         }
 
-        assert!(self.pitem.len() == self.gram.nitems);
-        assert!(self.rule_blocks.len() == self.gram.nrules + (if self.last_was_action { 1 } else { 0 }));
+        assert!(self.pitem.len() == self.nitems);
+        assert!(self.rule_blocks.len() == self.nrules + (if self.last_was_action { 1 } else { 0 }));
 
         // Insert a None entry into rule_blocks, if the current rule did not declare an action.
         if !self.last_was_action {
@@ -192,17 +201,18 @@ impl ReaderState
         self.pitem.push(NO_ITEM);
         self.rhs_binding.push(None);
 
-        self.gram.nitems += 1;
-        self.gram.nrules += 1;
+        self.nitems += 1;
+        self.nrules += 1;
 
-        assert!(self.rule_blocks.len() == self.gram.nrules);
+        assert!(self.rule_blocks.len() == self.nrules);
 
         // debug!("  end_rule: r{}, lhs={} nitems={}", rule, self.plhs[rule], self.pitem.len());
     }
 
-    pub fn insert_empty_rule(&mut self, span: Span)
-    {
-        let nrules = self.gram.nrules;
+    // Adds a new "empty" rule.  A new symbol name is generated, using the pattern $$nn,
+    // where $$ is the literal string "$$" and nn is a number.
+    pub fn insert_empty_rule(&mut self, span: Span) {
+        let nrules = self.nrules;
 
         self.gensym += 1;
         let symname = format!("$${}", self.gensym);
@@ -210,21 +220,19 @@ impl ReaderState
         debug!("insert_empty_rule: added symbol {}", symname);
 
         let tag = self.symbols[self.plhs[nrules]].tag.clone();
-        let bp = {
-            let (bp_index, sym) = self.lookup_ref_mut(symname.as_slice(), span);
+        let sym_index = {
+            let (sym_index, sym) = self.lookup_ref_mut(symname.as_slice(), span);
             sym.tag = tag;
             sym.class = SymClass::NonTerminal;
-            bp_index
+            sym_index
         };
 
-        assert!(self.pitem.len() == self.gram.nitems);
-        self.gram.nitems += 2;
+        assert!(self.pitem.len() == self.nitems);
+        self.nitems += 2;
         self.pitem.push(NO_ITEM);
-        self.pitem.push(NO_ITEM);
+        self.pitem.push(sym_index);
 
-        let mut bpp = self.gram.nitems - 1;
-        self.pitem[bpp] = bp;
-        bpp -= 1;
+        let mut bpp = self.nitems - 2;
         loop {
             let b = self.pitem[bpp - 1];
             self.pitem[bpp] = b;
@@ -236,17 +244,16 @@ impl ReaderState
 
         // Insert the generated rule right before the current rule, which was
         // written to self.{plhs,rprec,rassoc}[nrules].
-        self.plhs.insert(nrules, bp);        
-        self.gram.rprec.insert(nrules, 0);        
-        self.gram.rassoc.insert(nrules, TOKEN);
+        self.plhs.insert(nrules, sym_index);        
+        self.rprec.insert(nrules, 0);        
+        self.rassoc.insert(nrules, TOKEN);
 
-        self.gram.nrules += 1;
+        self.nrules += 1;
     }
 
-    pub fn add_symbol(&mut self, bp: uint, span: Span, ident: Option<ast::Ident>)
-    {
-        assert!(self.pitem.len() == self.gram.nitems);
-        assert!(self.rhs_binding.len() == self.gram.nitems);
+    pub fn add_symbol(&mut self, bp: uint, span: Span, ident: Option<ast::Ident>) {
+        assert!(self.pitem.len() == self.nitems);
+        assert!(self.rhs_binding.len() == self.nitems);
 
         if self.last_was_action {
             // If we have encountered a new rhs symbol for the current rule, and immediately
@@ -258,11 +265,11 @@ impl ReaderState
             self.last_was_action = false;
         }
 
-        assert!(self.pitem.len() == self.gram.nitems);
+        assert!(self.pitem.len() == self.nitems);
 
         // debug!("    add_symbol: pitem[{}] = {}_{}", self.pitem.len(), self.symbols[bp].name, bp);
 
-        self.gram.nitems += 1;
+        self.nitems += 1;
         self.pitem.push(bp);
         self.rhs_binding.push(ident);
     }
@@ -280,26 +287,19 @@ impl ReaderState
     // As well as a vector, which allows mapping from old indices to new indices.
     //
     // Returns a vector which maps from old (unpacked) symbol indices to packed
-    // symbol indices.  This replaces the bucket.index field.
-    pub fn pack_symbols(&mut self, goal_symbol: uint) -> Vec<i16>
-    {
+    // symbol indices.
+    pub fn pack_symbols_and_grammar(&mut self, goal_symbol: uint) -> Grammar {
         debug!("");
         debug!("pack_symbols");
         debug!("");
 
         // output/mutated: m_goal
 
-        assert!(self.gram.name.len() == 0);
-        assert!(self.gram.value.len() == 0);
-        assert!(self.gram.pname.len() == 0);
-        assert!(self.gram.prec.len() == 0);
-        assert!(self.gram.assoc.len() == 0);        
-
         assert!(goal_symbol < self.symbols.len());
         assert!(self.symbols[goal_symbol].class == SymClass::NonTerminal);
 
         for i in range(0, self.symbols.len()) {
-            debug!("    [{}] = {} value {}", i, self.symbols[i].name, self.symbols[i].value);
+            debug!("    [{}] = {} value {}", i, self.symbols[i].name, UNDEFINED); // self.symbols[i].value);
         }
 
         let nsyms: uint = 2 + self.symbols.len(); // $end and $accept
@@ -317,10 +317,12 @@ impl ReaderState
 
         debug!("ntokens={} nvars={} nsyms={}", ntokens, nvars, nsyms);
 
-        self.gram.name.extend(repeat(String::new()).take(nsyms));
-        self.gram.value.extend(repeat(0).take(nsyms));
-        self.gram.prec.extend(repeat(0).take(nsyms));
-        self.gram.assoc.extend(repeat(0).take(nsyms));
+        let mut gram_name: Vec<String> = repeat(String::new()).take(nsyms).collect();
+        let mut gram_value: Vec<i16> = repeat(0).take(nsyms).collect();
+        let mut gram_prec: Vec<i16> = repeat(0).take(nsyms).collect();
+        let mut gram_assoc: Vec<u8> = repeat(0).take(nsyms).collect();
+        let mut gram_rprec = replace(&mut self.rprec, Vec::new());
+        let mut gram_rassoc = replace(&mut self.rassoc, Vec::new());
 
         // debug!("building v table");
 
@@ -353,17 +355,6 @@ impl ReaderState
             v
         };
 
-        /*
-        debug!("v table (maps packed to unpacked):");
-        for i in range(0, v.len()) { 
-            if v[i] == NO_SYMBOL {
-                debug!("    packed {:3} --> NO_SYMBOL", i);
-            }
-            else {
-                debug!("    packed {:3} --> {}_{}", i, self.symbols[v[i]].name, v[i]);
-            }
-        }*/
-
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
         // symbol is always at packed index 1.
@@ -383,11 +374,15 @@ impl ReaderState
             }
         }
 
-        self.symbols[goal_symbol].value = 0;
+        // symbols_value replaces the bucket::value field.  that is, for (i, j),
+        // self.symbols[i].value = j ==> symbols_value[i] = j
+        let mut symbols_value: Vec<i16> = repeat(UNDEFINED).take(self.symbols.len()).collect();
+
+        symbols_value[goal_symbol] = 0;
         let mut k: uint = 1;
         for i in range(start_symbol + 1, nsyms) {
             if v[i] != goal_symbol {
-                self.symbols[v[i]].value = k as i16;
+                symbols_value[v[i]] = k as i16;
                 k += 1;
             }
         }
@@ -395,102 +390,96 @@ impl ReaderState
         // Assign token values
         let mut k = 0;
         for i in range(1, ntokens) {
-            let n = self.symbols[v[i]].value;
+            let n = symbols_value[v[i]];
             if n > 256 {
                 let mut j = k;
                 k += 1;
-                while j > 0 && self.gram.value[j - 1] > n {
-                    self.gram.value[j] = self.gram.value[j - 1];
+                while j > 0 && gram_value[j - 1] > n {
+                    gram_value[j] = gram_value[j - 1];
                     j -= 1;
                 }
-                self.gram.value[j] = n as i16;
+                gram_value[j] = n as i16;
             }
         }
 
-        if self.symbols[v[1]].value == UNDEFINED {
-            self.symbols[v[1]].value = 256;
+        if symbols_value[v[1]] == UNDEFINED {
+            symbols_value[v[1]] = 256;
         }
 
         let mut j = 0;
         let mut n = 257;
         for i in range(2, ntokens) {
-            if self.symbols[v[i]].value == UNDEFINED {
-                while j < k && n == self.gram.value[j] {
-                    while { j += 1; j < k && n == self.gram.value[j] } {
+            if symbols_value[v[i]] == UNDEFINED {
+                while j < k && n == gram_value[j] {
+                    while { j += 1; j < k && n == gram_value[j] } {
                         continue;
                     }
                     n += 1;
                 }
-                self.symbols[v[i]].value = n as i16;
+                symbols_value[v[i]] = n as i16;
                 n += 1;
             }
         }
 
         // Propagate $end token
-        self.gram.name[0] = "$end".to_string();
-        self.gram.value[0] = 0;
-        self.gram.prec[0] = 0;
-        self.gram.assoc[0] = TOKEN;
+        gram_name[0] = "$end".to_string();
+        gram_value[0] = 0;
+        gram_prec[0] = 0;
+        gram_assoc[0] = TOKEN;
 
         // Propagate token symbols
         for i in range(1, ntokens) {
             let from = &self.symbols[v[i]];
-            self.gram.name[i] = from.name.to_string();
-            self.gram.value[i] = from.value;
-            self.gram.prec[i] = from.prec;
-            self.gram.assoc[i] = from.assoc;
+            gram_name[i] = from.name.to_string();
+            gram_value[i] = symbols_value[v[i]];
+            gram_prec[i] = from.prec;
+            gram_assoc[i] = from.assoc;
         }
 
         // Set up the start (accept) symbol
         assert!(start_symbol == ntokens);
-        self.gram.name[start_symbol] = "$accept".to_string();
-        self.gram.value[start_symbol] = -1;
-        self.gram.prec[start_symbol] = 0;
-        self.gram.assoc[start_symbol] = TOKEN;
+        gram_name[start_symbol] = "$accept".to_string();
+        gram_value[start_symbol] = -1;
+        gram_prec[start_symbol] = 0;
+        gram_assoc[start_symbol] = TOKEN;
 
         // Propagate non-terminal symbols
         for i in range(start_symbol + 1, nsyms) {
             let k = map_to_packed[v[i]] as uint;
             assert!(k != NO_SYMBOL);
             let from = &self.symbols[v[i]];
-            self.gram.name[k] = from.name.to_string();
-            self.gram.value[k] = from.value;
-            self.gram.prec[k] = from.prec;
-            self.gram.assoc[k] = from.assoc;
+            gram_name[k] = from.name.to_string();
+            gram_value[k] = symbols_value[v[i]];
+            gram_prec[k] = from.prec;
+            gram_assoc[k] = from.assoc;
         }
-
-/* todo
-        let symbol_pname: Vec<String> = Vec::new();
-        if gflag {
-            for i in range(0, nsyms) {
-                let pname = protect_string(reader.gram.name[i]);
-                symbol_pname.push(pname);
-            }
-        }
-*/
-
-        self.gram.nsyms = nsyms;
-        self.gram.ntokens = ntokens;
-        self.gram.nvars = nvars;
-        self.gram.start_symbol = start_symbol;
 
         debug!("packed symbol table:");
         for i in range(0, nsyms) {
             debug!("    {:3} {} {:20} value {:3} prec {:2} assoc {:2}", i,
             if i < ntokens { "token" } else { "var  " },
-            self.gram.name[i],
-            self.gram.value[i],
-            self.gram.prec[i],
-            self.gram.assoc[i]);
+            gram_name[i],
+            gram_value[i],
+            gram_prec[i],
+            gram_assoc[i]);
         }
     
-        map_to_packed
-    }
+        // Reads the "unpacked" grammar and produces the "packed" grammar.
+        //
+        // This function implements the second phase of packing.  (The first phase is
+        // packing the symbol names).  In this phase, we read self.plhs and self.pitem
+        // and create the "packed" ritem, rlhs, rrhs and vectors.  This phase is
+        // necessary because plhs contains the "unpacked" symbol indices, and we need
+        // the "packed" indices.
+        //
+        // In the original C code, plhs contained pointers to symbol entries.  However,
+        // because we cannot use the same approach with pointers in Rust, plhs contains
+        // indices into a separate table (the unpacked symbol table).  It may be possible
+        // to simply scan through plhs and remap indices in place, rather than allocating
+        // a new array.
 
-    pub fn pack_grammar(&mut self, map_to_packed: &[i16], goal_var: uint)
-    {
-        let nitems = self.gram.nitems;
-        let nrules = self.gram.nrules;
+        let nitems = self.nitems;
+        let nrules = self.nrules;
 
         // there are three pre-defined rules:
         //      -1 -> (nothing)
@@ -499,14 +488,14 @@ impl ReaderState
 
         let mut ritem: Vec<i16> = repeat(0).take(nitems).collect();
         ritem[0] = -1;
-        ritem[1] = map_to_packed[goal_var];
+        ritem[1] = map_to_packed[goal_symbol];
         ritem[2] = 0;
         ritem[3] = -2;
 
         let mut rlhs: Vec<i16> = repeat(0).take(nrules).collect();
         rlhs[0] = 0;
         rlhs[1] = 0;
-        rlhs[2] = self.gram.start_symbol as i16;
+        rlhs[2] = start_symbol as i16;
 
         let mut rrhs: Vec<i16> = repeat(0).take(nrules + 1).collect();
         rrhs[0] = 0;
@@ -517,10 +506,8 @@ impl ReaderState
         let pitem = &self.pitem;
         let symbols = &self.symbols;
 
-        let gram = &mut self.gram;
-
-        let mut j = 4; // index of next item to process
-        for i in range(3, nrules) {
+        let mut j = PREDEFINED_ITEMS; // index of next item to process
+        for i in range(PREDEFINED_RULES, nrules) {
             rlhs[i] = map_to_packed[plhs[i]] as i16;
             rrhs[i] = j as i16;
             let mut assoc = TOKEN;
@@ -540,26 +527,41 @@ impl ReaderState
             // emit a reduction in a particular state.
             ritem[j] = -(i as i16);
             j += 1;
-            if gram.rprec[i] == UNDEFINED {
-                gram.rprec[i] = prec2 as i16;
-                gram.rassoc[i] = assoc;
+            if gram_rprec[i] == UNDEFINED {
+                gram_rprec[i] = prec2 as i16;
+                gram_rassoc[i] = assoc;
             }
         }
 
         // Terminate the rrhs list
         rrhs[nrules] = j as i16;
 
-        // Store results
-        gram.rlhs = rlhs;
-        gram.rrhs = rrhs;    
-        gram.ritem = ritem;
+        Grammar {
+            nsyms: nsyms,
+            ntokens: ntokens,
+            nvars: nvars,
+            start_symbol: start_symbol,
+
+            name: gram_name,
+            pname: Vec::new(),
+            value: gram_value,
+
+            prec: gram_prec,
+            assoc: gram_assoc,
+            
+            nitems: nitems,
+            nrules: nrules,
+
+            ritem: ritem,
+            rlhs: rlhs,
+            rrhs: rrhs,    
+            rprec: gram_rprec,
+            rassoc: gram_rassoc
+        }
     }
 
-    pub fn print_grammar(gram: &Grammar)
-    {
+    pub fn print_grammar(gram: &Grammar) {
         assert!(gram.ritem.len() == gram.nitems);
-
-        let mut k: uint = 1;
 
         debug!("symbols: ntokens={} nvars={} nsyms={}", gram.ntokens, gram.nvars, gram.nsyms);
         for i in range(0, gram.nsyms) {
@@ -586,6 +588,7 @@ impl ReaderState
         debug!("");
         debug!("rules:");
 
+        let mut k: uint = 1;
         let mut line = String::new();
         for i in range(2, gram.nrules) {
             line.push_str(format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as uint]).as_slice());
@@ -606,34 +609,18 @@ impl ReaderState
 }
 
 // Reads the input of the macro invocation, parses and builds a grammar.
-pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , tokens_enum: &'a P<ast::Item>, token_variants: &'a [P<ast::Variant>] */ )
+pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
     -> (Grammar, Vec<Option<P<Block>>>, Vec<Option<ast::Ident>>) {
 
     let mut reader: ReaderState = ReaderState::new();
 
-        /*
-    // Parse the variants of the "tokens" enum.
-    for tv in token_variants.iter() {
-        debug!("    token (from enum): {}", tv);
-    }
-    */
-
-    // create_symbol_table()
-
     // Add the well-known "error" symbol to the table.
     {
-        let (_, bp) = reader.lookup_ref_mut("error", grammar_sp);
-        bp.class = SymClass::Terminal;
+        let (_, s) = reader.lookup_ref_mut("error", grammar_sp);
+        s.class = SymClass::Terminal;
     }
 
-    // read_declarations();
-
-    // now begins what was read_grammar();
-
-
     // first, parse all tokens.
-
-    // let t_token = Token::Ident(Ident("token"), IdentStyle::Plain);
 
     let mut goal_symbol: Option<uint> = None;
 
@@ -731,7 +718,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , toke
                                 }
                                 Token::OpenDelim(_) => {
                                     // Parse an action (a code block).  Parsing it is actually very easy, thanks to Rust!
-                                    assert!(reader.rule_blocks.len() == reader.gram.nrules);
+                                    assert!(reader.rule_blocks.len() == reader.nrules);
                                     if reader.last_was_action {
                                         reader.insert_empty_rule(parser.span);
                                     }
@@ -815,10 +802,9 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser /* , toke
     }
     parser.abort_if_errors();
 
-    let map_to_packed = reader.pack_symbols(goal_symbol);
-    reader.pack_grammar(map_to_packed.as_slice(), goal_symbol);
-    ReaderState::print_grammar(&reader.gram);
+    let gram = reader.pack_symbols_and_grammar(goal_symbol);
+    ReaderState::print_grammar(&gram);
 
-    (reader.gram, reader.rule_blocks, reader.rhs_binding)
+    (gram, reader.rule_blocks, reader.rhs_binding)
 }
 

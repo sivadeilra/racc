@@ -25,6 +25,9 @@ pub const VISIBILITY: u8 =16;
 // the undefined value
 pub const UNDEFINED: i16 = -1;
 
+pub const PREDEFINED_RULES: uint = 3;
+pub const PREDEFINED_ITEMS: uint = 4;
+
 // Defines a grammar.  A grammar has these elements:
 //
 //     * a set of tokens (terminals), each having a name and potentially a value
@@ -34,8 +37,7 @@ pub const UNDEFINED: i16 = -1;
 //     * (optional) precedence and associativity rules for rules
 //
 #[derive(Default)]
-pub struct Grammar
-{
+pub struct Grammar {
     // the symbols (non-terminals and terminals/tokens)
     // symbols are ordered as tokens first, then non-terminals.
     // symbol[0] is the special $end token.
@@ -64,8 +66,7 @@ pub struct Grammar
     pub rassoc: Vec<u8>,
 }
 
-impl Grammar
-{
+impl Grammar {
 	pub fn new() -> Grammar {
         Grammar {
             nitems: 4,
@@ -79,13 +80,11 @@ impl Grammar
         }
 	}
 
-    pub fn is_var(&self, s: uint) -> bool
-    {
+    pub fn is_var(&self, s: uint) -> bool {
         s >= self.start_symbol
     }
 
-    pub fn is_token(&self, s: uint) -> bool
-    {
+    pub fn is_token(&self, s: uint) -> bool {
         s < self.start_symbol
     }
 
