@@ -43,8 +43,8 @@ use grammar::Grammar;
 
 use std::borrow::BorrowFrom;
 
-const NO_SYMBOL: uint = !0u;
-const NO_ITEM: uint = !0u;
+const NO_SYMBOL: usize = !0;
+const NO_ITEM: usize = !0;
 
 impl BorrowFrom<Rc<String>> for str {
     fn borrow_from(owned: &Rc<String>) -> &str {
@@ -84,23 +84,23 @@ fn make_symbol(name: &str, span: Span) -> Symbol {
 
 struct ReaderState {
     /// Contains indices that point into `self.symbols`, or `NO_ITEM`.
-    pitem: Vec<uint>,
+    pitem: Vec<usize>,
 
     /// Contains indices that point into `self.symbols`, or `NO_SYMBOL`.
-    plhs: Vec<uint>,
+    plhs: Vec<usize>,
 
     /// Contains all of the symbols, in the order that they are first encountered.
     symbols: Vec<Symbol>,
 
     // A lookup table, which gives you an index into self.symbols
-    symbol_table: HashMap<Rc<String>, uint>,
+    symbol_table: HashMap<Rc<String>, usize>,
 
-    gensym: uint,          // used for generating names for anonymous symbols
+    gensym: usize,          // used for generating names for anonymous symbols
 
     last_was_action: bool,
 
-    nitems: uint,
-    nrules: uint,
+    nitems: usize,
+    nrules: usize,
     rprec: Vec<i16>,
     rassoc: Vec<u8>,
 
@@ -133,7 +133,7 @@ impl ReaderState {
     // Looks up a symbol in the symbol table, and returns the symbol index
     // (the index within ReaderState.symbols) of that symbol.  If the symbol
     // is not already in the symbol table, then this method adds the symbol.
-    pub fn lookup(&mut self, name: &str, span: Span) -> uint {
+    pub fn lookup(&mut self, name: &str, span: Span) -> usize {
         if let Some(ii) = self.symbol_table.get(name) {
             // debug!("found {}_{} already in table", name, *ii);
             return *ii;
@@ -147,12 +147,12 @@ impl ReaderState {
         return index;
     }
 
-    pub fn lookup_ref_mut<'a>(&'a mut self, name: &str, span: Span) -> (uint, &'a mut Symbol) {
+    pub fn lookup_ref_mut<'a>(&'a mut self, name: &str, span: Span) -> (usize, &'a mut Symbol) {
         let index = self.lookup(name, span);
         (index, &mut self.symbols[index])
     }
 
-    pub fn start_rule(&mut self, lhs: uint, span: Span) {
+    pub fn start_rule(&mut self, lhs: usize, span: Span) {
         assert!(self.symbols[lhs].class == SymClass::NonTerminal);
         assert!(self.plhs.len() == self.nrules);
         assert!(self.rprec.len() == self.nrules);
@@ -178,7 +178,7 @@ impl ReaderState {
 
         if !self.last_was_action && { if let Some(_) = self.symbols[self.plhs[self.nrules]].tag { true } else { false } } {
             if self.pitem[self.pitem.len() - 1] != NO_ITEM {
-                let mut i: uint = self.pitem.len() - 1;
+                let mut i: usize = self.pitem.len() - 1;
                 while (i > 0) && self.pitem[i] != NO_ITEM {
                     i -= 1;
                 }
@@ -251,7 +251,7 @@ impl ReaderState {
         self.nrules += 1;
     }
 
-    pub fn add_symbol(&mut self, bp: uint, span: Span, ident: Option<ast::Ident>) {
+    pub fn add_symbol(&mut self, bp: usize, span: Span, ident: Option<ast::Ident>) {
         assert!(self.pitem.len() == self.nitems);
         assert!(self.rhs_binding.len() == self.nitems);
 
@@ -281,14 +281,14 @@ impl ReaderState {
     //      values: Vec<i16>,
     //      prec: Vec<u8>,
     //      assoc: Vec<u8>,
-    //      start: uint,
+    //      start: usize,
     // }
     //
     // As well as a vector, which allows mapping from old indices to new indices.
     //
     // Returns a vector which maps from old (unpacked) symbol indices to packed
     // symbol indices.
-    pub fn pack_symbols_and_grammar(&mut self, goal_symbol: uint) -> Grammar {
+    pub fn pack_symbols_and_grammar(&mut self, goal_symbol: usize) -> Grammar {
         debug!("");
         debug!("pack_symbols");
         debug!("");
@@ -302,8 +302,8 @@ impl ReaderState {
             debug!("    [{}] = {} value {}", i, self.symbols[i].name, UNDEFINED); // self.symbols[i].value);
         }
 
-        let nsyms: uint = 2 + self.symbols.len(); // $end and $accept
-        let mut ntokens: uint = 1; // $end
+        let nsyms: usize = 2 + self.symbols.len(); // $end and $accept
+        let mut ntokens: usize = 1; // $end
 
         // Count the number of tokens.        
         for sym in self.symbols.iter() {
@@ -332,12 +332,12 @@ impl ReaderState {
         // unpacked view.  In u = v[p], p is a packed symbol index (a number in the nsyms space),
         // while u is the unpacked symbol.
         let v = {
-            let mut v: Vec<uint> = repeat(NO_SYMBOL).take(nsyms).collect(); // symbol indices, which point into reader.symbols[]
+            let mut v: Vec<usize> = repeat(NO_SYMBOL).take(nsyms).collect(); // symbol indices, which point into reader.symbols[]
             v[0] = NO_SYMBOL; // $end
             v[start_symbol] = NO_SYMBOL; // $accept
 
-            let mut i: uint = 1;                      // packed index for assigning tokens
-            let mut j: uint = start_symbol + 1;       // packed index for assigning vars
+            let mut i: usize = 1;                      // packed index for assigning tokens
+            let mut j: usize = start_symbol + 1;       // packed index for assigning vars
         
             for s in range(0, self.symbols.len()) {
                 match self.symbols[s].class {
@@ -379,7 +379,7 @@ impl ReaderState {
         let mut symbols_value: Vec<i16> = repeat(UNDEFINED).take(self.symbols.len()).collect();
 
         symbols_value[goal_symbol] = 0;
-        let mut k: uint = 1;
+        let mut k: usize = 1;
         for i in range(start_symbol + 1, nsyms) {
             if v[i] != goal_symbol {
                 symbols_value[v[i]] = k as i16;
@@ -445,7 +445,7 @@ impl ReaderState {
 
         // Propagate non-terminal symbols
         for i in range(start_symbol + 1, nsyms) {
-            let k = map_to_packed[v[i]] as uint;
+            let k = map_to_packed[v[i]] as usize;
             assert!(k != NO_SYMBOL);
             let from = &self.symbols[v[i]];
             gram_name[k] = from.name.to_string();
@@ -581,21 +581,21 @@ impl ReaderState {
                 debug!("    {:3} --> {:3}", i, it);
             }
             else {
-                debug!("    {:3} --> {:3} {}", i, it, gram.name[it as uint]);
+                debug!("    {:3} --> {:3} {}", i, it, gram.name[it as usize]);
             }
         }
 
         debug!("");
         debug!("rules:");
 
-        let mut k: uint = 1;
+        let mut k: usize = 1;
         let mut line = String::new();
         for i in range(2, gram.nrules) {
-            line.push_str(format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as uint]).as_slice());
+            line.push_str(format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as usize]).as_slice());
 
             while gram.ritem[k] >= 0 {
                 line.push_str(" ");
-                line.push_str(gram.name[gram.ritem[k] as uint].as_slice());
+                line.push_str(gram.name[gram.ritem[k] as usize].as_slice());
                 k += 1;
             }
             k += 1;
@@ -622,7 +622,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
 
     // first, parse all tokens.
 
-    let mut goal_symbol: Option<uint> = None;
+    let mut goal_symbol: Option<usize> = None;
 
     // debug!("parsing token definitions");
     loop {
@@ -764,7 +764,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                         if has_value {
                             match parser.token {
                                 Token::Literal(_,_) => {
-                                    debug!("token has value: {}", parser.token);
+                                    debug!("token has value: {:?}", parser.token);
                                     parser.bump();
                                     parser.expect(&Token::Semi);
                                 }

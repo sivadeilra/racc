@@ -4,13 +4,13 @@ use util::Bitmat;
 fn transitive_closure(r: &mut Bitmat) {
     let relend = r.rows * r.rowsize;
 
-    let mut cword: uint = 0;
-    let mut i: uint = 0;
-    let mut rowi: uint = 0;
+    let mut cword: usize = 0;
+    let mut i: usize = 0;
+    let mut rowi: usize = 0;
 
     while rowi < relend {
         let mut ccol = cword;
-        let mut rowj: uint = 0;
+        let mut rowj: usize = 0;
 
         while rowj < relend {
             if (r.data[ccol] & (1 << i)) != 0 {

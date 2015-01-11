@@ -25,15 +25,15 @@ pub struct ParserAction {
 }
 
 pub struct YaccParser {
-    pub nstates: uint,
+    pub nstates: usize,
     pub actions: Vec<Vec<ParserAction>>,
     pub default_reductions: Vec<i16>,
-    pub final_state: uint
+    pub final_state: usize
 }
 
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let mut parser: Vec<Vec<ParserAction>> = Vec::with_capacity(lr0.nstates());
-    for state in range(0, lr0.nstates()) {
+    for state in (0..lr0.nstates()) {
         parser.push(parse_actions(gram, lr0, lalr, state));
     }
 
@@ -50,19 +50,19 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
     }
 }
 
-fn parse_actions(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: uint) -> Vec<ParserAction> {
+fn parse_actions(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: usize) -> Vec<ParserAction> {
     let mut actions = get_shifts(gram, lr0, lalr, stateno);
     add_reductions(gram, lalr, stateno, &mut actions);
     actions
 }
 
-fn get_shifts(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: uint) -> Vec<ParserAction> {
+fn get_shifts(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: usize) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
     if lalr.shift_table[stateno] != -1 {
-        let sp = &lr0.shifts[lalr.shift_table[stateno] as uint];
+        let sp = &lr0.shifts[lalr.shift_table[stateno] as usize];
         let to_state2 = &sp.shifts;
         for i in reverse_range(sp.shifts.len(), 0) {
-            let k = to_state2[i] as uint;
+            let k = to_state2[i] as usize;
             let symbol = lr0.states[k].accessing_symbol;
             if gram.is_token(symbol) {
                 actions.push(ParserAction {
@@ -82,11 +82,11 @@ fn get_shifts(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: uint)
     actions
 }
 
-fn add_reductions(gram: &Grammar, lalr: &LALROutput, stateno: uint, actions: &mut Vec<ParserAction>) {
-    let m = lalr.lookaheads[stateno] as uint;
-    let n = lalr.lookaheads[stateno + 1] as uint;
-    for i in range(m, n) {
-        let ruleno = lalr.laruleno[i] as uint;
+fn add_reductions(gram: &Grammar, lalr: &LALROutput, stateno: usize, actions: &mut Vec<ParserAction>) {
+    let m = lalr.lookaheads[stateno] as usize;
+    let n = lalr.lookaheads[stateno + 1] as usize;
+    for i in (m..n) {
+        let ruleno = lalr.laruleno[i] as usize;
         for j in reverse_range(gram.ntokens, 0) {
             if lalr.LA.get(i, j) {
                 add_reduce(gram, actions, ruleno, j);
@@ -95,9 +95,9 @@ fn add_reductions(gram: &Grammar, lalr: &LALROutput, stateno: uint, actions: &mu
     }
 }
 
-fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: uint, symbol: uint) {
+fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, symbol: usize) {
     let symbol16 = symbol as i16;
-    let mut next: uint = 0;
+    let mut next: usize = 0;
     while next < actions.len() && actions[next].symbol < symbol16 {
         next += 1;
     }
@@ -106,7 +106,7 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: uint, sym
         next += 1;
     }
 
-    while next < actions.len() && actions[next].symbol == symbol16 && actions[next].action_code == ActionCode::Reduce && (actions[next].number as uint) < ruleno {
+    while next < actions.len() && actions[next].symbol == symbol16 && actions[next].action_code == ActionCode::Reduce && (actions[next].number as usize) < ruleno {
         next += 1;
     }
 
@@ -122,14 +122,13 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: uint, sym
     actions.insert(next, temp);
 }
 
-fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> uint
-{
-    let p = &lr0.shifts[lalr.shift_table[0] as uint];
+fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize {
+    let p = &lr0.shifts[lalr.shift_table[0] as usize];
     let to_state2 = &p.shifts;
-    let goal = gram.ritem[1] as uint;
-    let mut final_state: uint = 0;
+    let goal = gram.ritem[1] as usize;
+    let mut final_state: usize = 0;
     for i in reverse_range(to_state2.len(), 0) {
-        final_state = to_state2[i] as uint;
+        final_state = to_state2[i] as usize;
         if lr0.states[final_state].accessing_symbol == goal {
             break;
         }
@@ -137,20 +136,19 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> uint
     final_state
 }
 
-fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>)
-{
+fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
     let mut rules_used: Bitv = Bitv::from_elem(gram.nrules, false);
 
     for pi in parser.iter() {
         for p in pi.iter() {
             if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-                rules_used.set(p.number as uint, true);
+                rules_used.set(p.number as usize, true);
             }
         }
     }
 
-    let mut nunused: uint = 0;
-    for i in range(3, gram.nrules) {
+    let mut nunused: usize = 0;
+    for i in (3..gram.nrules) {
         if !rules_used[i] {
             nunused += 1;
         }
@@ -161,19 +159,19 @@ fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>)
     }
 }
 
-fn remove_conflicts(lr0: &LR0Output, final_state: uint, parser: &mut Vec<Vec<ParserAction>>) {
+fn remove_conflicts(lr0: &LR0Output, final_state: usize, parser: &mut Vec<Vec<ParserAction>>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
     let mut srconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
     let mut rrconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
-    for i in range(0, lr0.nstates()) {
+    for i in (0..lr0.nstates()) {
         let pvec = &mut parser[i];
-        let mut srcount: uint = 0;
-        let mut rrcount: uint = 0;
+        let mut srcount: usize = 0;
+        let mut rrcount: usize = 0;
         if pvec.len() > 0 {
             let mut symbol: i16 = pvec[0].symbol;
-            let mut pref: uint = 0; // index into pvec
-            for p in range(1, pvec.len()) { // p is index into pvec
+            let mut pref: usize = 0; // index into pvec
+            for p in (1..pvec.len()) { // p is index into pvec
                 if pvec[p].symbol != symbol {
                     pref = p;
                     symbol = pvec[p].symbol;
@@ -226,7 +224,7 @@ fn remove_conflicts(lr0: &LR0Output, final_state: uint, parser: &mut Vec<Vec<Par
     }
 }
 
-fn total_conflicts(srtotal: uint, rrtotal: uint)
+fn total_conflicts(srtotal: usize, rrtotal: usize)
 {
     if srtotal > 0 {
         warn!("{} shift/reduce conflict(s)", srtotal);
@@ -237,17 +235,17 @@ fn total_conflicts(srtotal: uint, rrtotal: uint)
     }
 }
 
-fn sole_reduction(stateno: uint, parser: &Vec<Vec<ParserAction>>) -> uint {
+fn sole_reduction(stateno: usize, parser: &Vec<Vec<ParserAction>>) -> usize {
     debug!("sole_reduction: state={}", stateno);
-    let mut count: uint = 0;
-    let mut ruleno: uint = 0;
+    let mut count: usize = 0;
+    let mut ruleno: usize = 0;
     for p in parser[stateno].iter() {
         if p.action_code == ActionCode::Shift && p.suppressed == 0 {
             debug!("    found unsuppressed shift, returning 0");
             return 0;
         }
         else if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-            if ruleno > 0 && (p.number as uint) != ruleno {
+            if ruleno > 0 && (p.number as usize) != ruleno {
                 debug!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
                 return 0;
             }
@@ -256,7 +254,7 @@ fn sole_reduction(stateno: uint, parser: &Vec<Vec<ParserAction>>) -> uint {
                 count += 1;
                 debug!("    count --> {}", count);
             }
-            ruleno = p.number as uint;
+            ruleno = p.number as usize;
             debug!("    selecting rule {}", ruleno);
         }
     }
@@ -273,7 +271,7 @@ fn default_reductions(lr0: &LR0Output, parser: &Vec<Vec<ParserAction>>) -> Vec<i
 {
     debug!("default_reductions");
     let mut defred: Vec<i16> = Vec::with_capacity(lr0.nstates());
-    for i in range(0, lr0.nstates()) {
+    for i in (0..lr0.nstates()) {
         let r = sole_reduction(i, parser);
         debug!("    state {} has default reduction {}", i, r);
         defred.push(r as i16);

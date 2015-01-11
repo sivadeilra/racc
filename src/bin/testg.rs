@@ -15,11 +15,11 @@ extern crate racc;
 use racc::runtime::{ParserState,ParserTables,FinishParseResult};
 
 struct AppContext {
-    x: uint
+    x: usize
 }
 
 pub trait GrammarToken {
-    fn token_value(&self) -> uint;
+    fn token_value(&self) -> usize;
 }
 
 grammar! {
@@ -39,30 +39,30 @@ grammar! {
 	WHILE;
 	DO;
 
-	Expr : NUM=x { println!("NUM={}", x); x }
+	Expr : NUM=x { println!("NUM={:?}", x); x }
 		| Expr=arg1 PLUS Expr=arg3 { 
             let a = arg1.unwrap();
             let b = arg3.unwrap();
-            println!("reduce by addition: {} + {}", a, b);
+            println!("reduce by addition: {:?} + {:?}", a, b);
             Some(a + b)
         }
 		| Expr=arg1 MINUS Expr=arg3 {
             let a = arg1.unwrap();
             let b = arg3.unwrap();
-            println!("reduce by sub: {} + {}", a, b);
+            println!("reduce by sub: {:?} + {:?}", a, b);
             Some(a - b)
         }
-		| ParenExpr=a { println!("reduce by parens: {}", a); a }
-		| IfExpr=a { println!("reduce by if(): {}", a); a }
-		| WhileExpr=a { println!("reduce by while(): {}", a); a }
+		| ParenExpr=a { println!("reduce by parens: {:?}", a); a }
+		| IfExpr=a { println!("reduce by if(): {:?}", a); a }
+		| WhileExpr=a { println!("reduce by while(): {:?}", a); a }
         ;
 
-	ParenExpr : LPAREN Expr=a RPAREN { println!("grouping, val={}", a); a };
+	ParenExpr : LPAREN Expr=a RPAREN { println!("grouping, val={:?}", a); a };
 
 	IfExpr : IF ParenExpr=a THEN Expr { None }
 		| IF ParenExpr=a THEN Expr ELSE Expr { None };
 
-	WhileExpr : WHILE ParenExpr=a DO Expr { println!("reduce by while: {}", a); None };
+	WhileExpr : WHILE ParenExpr=a DO Expr { println!("reduce by while: {:?}", a); None };
 
 }
 
@@ -88,7 +88,7 @@ fn main()
 
     match parser.finish(&mut ctx) {
         FinishParseResult::Accepted(final_value) => {
-            println!("Accepted: {}", final_value);
+            println!("Accepted: {:?}", final_value);
         }
         FinishParseResult::SyntaxError => {
             println!("SyntaxError");

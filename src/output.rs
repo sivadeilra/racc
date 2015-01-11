@@ -21,7 +21,7 @@ const I16_MAX: i16 = 0x7fff;
 const I16_MIN: i16 = -0x8000;
 
 struct ActionsTable {
-    nvectors: uint,
+    nvectors: usize,
     tally: Vec<i16>,
     width: Vec<i16>,
     froms: Vec<Vec<i16>>,
@@ -83,7 +83,7 @@ pub fn output_parser_to_ast(
     }
 
     // Generate YYFINAL constant.
-    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, uint), cx.expr_uint(sp, parser.final_state)));
+    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, usize), cx.expr_uint(sp, parser.final_state)));
 
     /*
     items.push((quote_item!(cx, 
@@ -113,7 +113,7 @@ pub fn output_parser_to_ast(
 
     // Build up actions
     let mut action_arms: Vec<Arm> = Vec::new();
-    let mut rule_iter: uint = 0;
+    let mut rule_iter: usize = 0;
     for block in blocks.into_iter() {
         let rule = rule_iter;
         rule_iter += 1;
@@ -133,7 +133,7 @@ pub fn output_parser_to_ast(
         let final_expr = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right to left.
-                let rhs_index = gram.rrhs[rule] as uint;
+                let rhs_index = gram.rrhs[rule] as usize;
                 let rhs = gram.get_rhs_items(rule);
                 for i in reverse_range(rhs.len(), 0) {
                     match rhs_binding[rhs_index + i] {
@@ -175,7 +175,7 @@ pub fn output_parser_to_ast(
         vec![ // inputs
             // Arg::new_self(sp, Mutability::MutImmutable, cx.ident_of("self")),
             cx.arg(sp, cx.ident_of("value_stack"), ty_mutptr_vec_symbol_value),
-            cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, uint)),
+            cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, usize)),
             cx.arg(sp, context_param_ident, cx.ty_rptr(sp, context_ty.clone(), None, Mutability::MutMutable))
         ],
         symbol_value_ty.clone(), // output type
@@ -289,7 +289,7 @@ fn output_rule_data(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
     let mut data: Vec<i16> = Vec::new();
     data.push(gram.value[gram.start_symbol]);
     for i in range(3, gram.nrules) {
-        data.push(gram.value[gram.rlhs[i] as uint]);
+        data.push(gram.value[gram.rlhs[i] as usize]);
     }
     make_table_i16(cx, span, "YYLHS", data.as_slice())
 }
@@ -305,13 +305,13 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
 
     assert!(max_value >= 0);
     assert!(max_value < I16_MAX);
-    let length = (max_value + 1) as uint;
+    let length = (max_value + 1) as usize;
 
     let mut toknames: Vec<String> = repeat(String::new()).take(length).collect();
     
     // Now put the names into proper places.
     for i in range(0, gram.ntokens) {
-        toknames[gram.value[i] as uint] = gram.name[i].clone();
+        toknames[gram.value[i] as usize] = gram.name[i].clone();
     }
 
     make_table_string(cx, span, "YYNAME", &toknames)
@@ -336,11 +336,11 @@ fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
 
 
 #[allow(dead_code)]
-fn make_table_uint(cx: &ExtCtxt, span: Span, name: &str, values: &[uint]) -> P<Item> {
+fn make_table_usize(cx: &ExtCtxt, span: Span, name: &str, values: &[usize]) -> P<Item> {
     let values_expr = cx.expr_vec(span, values.iter().map(|value| cx.expr_uint(span, *value)).collect());
-    let ty_uint = quote_ty!(cx, uint);
+    let ty_usize = quote_ty!(cx, usize);
     let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_uint, cx.expr_uint(span, values.len())));
+    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_usize, cx.expr_uint(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     // debug!("built table item for '{}': values {}", name, values);
     // debug!("item: {}", pprust::item_to_string(&*table_item));
@@ -365,7 +365,7 @@ fn make_table_i16_real(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> 
 fn expr_i16(cx: &ExtCtxt, span: Span, i: i16) -> P<ast::Expr> {
     cx.expr_lit(span, ast::LitInt(
         i as u64,
-        ast::LitIntType::SignedIntLit(ast::TyI16, ast::Sign::new(i as int))))
+        ast::LitIntType::SignedIntLit(ast::TyI16, ast::Sign::new(i as isize))))
 }
 
 fn expr_u16(cx: &ExtCtxt, span: Span, u: u16) -> P<ast::Expr> {
@@ -436,18 +436,18 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 *ii = 0;
             }
 
-            let mut shiftcount: uint = 0;
-            let mut reducecount: uint = 0;
+            let mut shiftcount: usize = 0;
+            let mut reducecount: usize = 0;
             for p in actions.iter() {
                 if p.suppressed == 0 {
                     if p.action_code == ActionCode::Shift {
                         shiftcount += 1;
-                        actionrow[p.symbol as uint] = p.number;
+                        actionrow[p.symbol as usize] = p.number;
                         // debug!("        shift {}", p.number);
                     }
                     else if p.action_code == ActionCode::Reduce && p.number != parser.default_reductions[i] {
                         reducecount += 1;
-                        actionrow[(p.symbol as uint) + gram.ntokens] = p.number;
+                        actionrow[(p.symbol as usize) + gram.ntokens] = p.number;
                         // debug!("        reduce {}", p.number);
                     }
                 }
@@ -515,12 +515,12 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 fn default_goto(
     gram: &Grammar,
     gotos: &GotoMap,
-    symbol: uint,
-    nstates: uint,
-    state_count: &mut Vec<i16>) -> uint
+    symbol: usize,
+    nstates: usize,
+    state_count: &mut Vec<i16>) -> usize
 {
-    let m = gotos.goto_map[symbol - gram.ntokens] as uint;
-    let n = gotos.goto_map[symbol - gram.ntokens + 1] as uint;
+    let m = gotos.goto_map[symbol - gram.ntokens] as usize;
+    let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
     if m == n {
         return 0;
     }
@@ -530,7 +530,7 @@ fn default_goto(
     }
 
     for i in range(m, n) {
-        state_count[gotos.to_state[i] as uint] += 1;
+        state_count[gotos.to_state[i] as usize] += 1;
     }
 
     let mut max = 0;
@@ -549,19 +549,19 @@ fn default_goto(
 
 fn save_column(
     gram: &Grammar, 
-    nstates: uint,
+    nstates: usize,
     gotos: &GotoMap,
-    symbol: uint, 
-    default_state: uint,
+    symbol: usize, 
+    default_state: usize,
     act: &mut ActionsTable)
 {
-    let m = gotos.goto_map[symbol - gram.ntokens] as uint;
-    let n = gotos.goto_map[symbol - gram.ntokens + 1] as uint;
+    let m = gotos.goto_map[symbol - gram.ntokens] as usize;
+    let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
     debug!("save_column: symbol={} default_state={} m={} n={}", symbol, default_state, m, n);
 
-    let mut count: uint = 0;
+    let mut count: usize = 0;
     for i in range(m, n) {
-        if (gotos.to_state[i] as uint) != default_state {
+        if (gotos.to_state[i] as usize) != default_state {
             debug!("    to_state[{}]={}", i, gotos.to_state[i]);
             count += 1;
         }
@@ -575,13 +575,13 @@ fn save_column(
     let mut spf: Vec<i16> = Vec::with_capacity(count);
     let mut spt: Vec<i16> = Vec::with_capacity(count);
     for i in range(m, n) {
-        if (gotos.to_state[i] as uint) != default_state {
+        if (gotos.to_state[i] as usize) != default_state {
             spf.push(gotos.from_state[i]);
             spt.push(gotos.to_state[i]);
         }
     }
 
-    let symno = (gram.value[symbol] as uint) + 2 * nstates;
+    let symno = (gram.value[symbol] as usize) + 2 * nstates;
     let spf_width = spf[spf.len() - 1] - spf[0] + 1;
     act.froms[symno] = spf;
     act.tos[symno] = spt;
@@ -591,7 +591,7 @@ fn save_column(
 }
 
 // build the "dgoto" table
-fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<i16> {
+fn goto_actions(gram: &Grammar, nstates: usize, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<i16> {
     debug!("goto_actions");
 
     let mut state_count: Vec<i16> = repeat(0).take(nstates).collect();         // temporary data, used in default_goto()
@@ -610,39 +610,39 @@ fn goto_actions(gram: &Grammar, nstates: uint, gotos: &GotoMap, act: &mut Action
     dgoto_table
 }
 
-fn sort_actions(act: &ActionsTable) -> (uint, Vec<uint>) {
+fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
     debug!("sort_actions() nvectors={}", act.nvectors);
 
-    let mut order: Vec<uint> = repeat(0).take(act.nvectors).collect();
-    let mut nentries: int = 0;
+    let mut order: Vec<usize> = repeat(0).take(act.nvectors).collect();
+    let mut nentries: isize = 0;
 
     for i in range(0, act.nvectors) {
         debug!("tally[{}]={}", i, act.tally[i]);
         if act.tally[i] > 0 {
             let t = act.tally[i];
             let w = act.width[i];
-            let mut j: int = nentries - 1;
+            let mut j: isize = nentries - 1;
             debug!("    t={} w={} j={}", t, w, j);
 
-            while j >= 0 && (act.width[order[j as uint]] < w) {
+            while j >= 0 && (act.width[order[j as usize]] < w) {
                 j -= 1;
                 debug!("    j-- to {}, because width < w", j);
             }
 
-            while j >= 0 && (act.width[order[j as uint]] == w) && (act.tally[order[j as uint]] < t) {
+            while j >= 0 && (act.width[order[j as usize]] == w) && (act.tally[order[j as usize]] < t) {
                 j -= 1;
                 debug!("    j-- to {}, because tally < t", j);
             }
 
             let mut k = nentries - 1;
             while k > j {
-                debug!("        order[{}] = order[{}] = {} (shifting)", (k + 1) as uint, k as uint, order[k as uint]);
-                order[(k + 1) as uint] = order[k as uint];
+                debug!("        order[{}] = order[{}] = {} (shifting)", (k + 1) as usize, k as usize, order[k as usize]);
+                order[(k + 1) as usize] = order[k as usize];
                 k -= 1;
             }
 
-            debug!("        order[{}] = {}", (j + 1) as uint, i);
-            order[(j + 1) as uint] = i;
+            debug!("        order[{}] = {}", (j + 1) as usize, i);
+            order[(j + 1) as usize] = i;
             nentries += 1;
         }
     }
@@ -653,7 +653,7 @@ fn sort_actions(act: &ActionsTable) -> (uint, Vec<uint>) {
     }
     debug!("nentries={}", nentries);
 
-    (nentries as uint, order)
+    (nentries as usize, order)
 }
 
 // The function matching_vector determines if the vector specified by
@@ -671,7 +671,7 @@ fn sort_actions(act: &ActionsTable) -> (uint, Vec<uint>) {
 // Matching_vector is poorly designed.  The test could easily be made
 // faster.  Also, it depends on the vectors being in a specific
 // order.
-fn matching_vector(pack: &PackState, vector: uint) -> Option<uint>
+fn matching_vector(pack: &PackState, vector: usize) -> Option<usize>
 {
     let i = pack.order[vector];
     if i >= 2 * pack.nstates {
@@ -691,7 +691,7 @@ fn matching_vector(pack: &PackState, vector: uint) -> Option<uint>
         }
 
         let mut is_match = true;
-        for k in range(0, t as uint) {
+        for k in range(0, t as usize) {
             if act.tos[j][k] != act.tos[i][k] || act.froms[j][k] != act.froms[i][k] {
                 is_match = false;
                 break;
@@ -707,11 +707,11 @@ fn matching_vector(pack: &PackState, vector: uint) -> Option<uint>
     return None;
 }
 
-fn pack_vector(pack: &mut PackState, vector: uint) -> int {
+fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
     // debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
     let act = pack.act;
     let i = pack.order[vector];
-    let t = act.tally[i];
+    let t = act.tally[i] as usize;
     assert!(t != 0);
 
     let from = &act.froms[i];
@@ -719,11 +719,11 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
 
     // debug!("from[0]={}", from[0]);
 
-    let mut j: int = (pack.lowzero as int) - (from[0] as int);
+    let mut j: isize = (pack.lowzero as isize) - (from[0] as isize);
     // debug!("j={}", j);
-    for k in range(1, t as uint) {
-        if (pack.lowzero as int) - (from[k] as int) > j {
-            j = (pack.lowzero as int) - (from[k] as int);
+    for k in (1..t) {
+        if (pack.lowzero as isize) - (from[k] as isize) > j {
+            j = (pack.lowzero as isize) - (from[k] as isize);
             // debug!("j={}", j);
         }
     }
@@ -736,8 +736,8 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
         }
 
         let mut ok = true;
-        for k in range(0, t as uint) {
-            let loc = (j + (from[k] as int)) as uint;
+        for k in (0..t) {
+            let loc = (j + (from[k] as isize)) as usize;
 
             // make sure we can read/write table[loc] and table[check]
             if loc > pack.table.len() {
@@ -757,8 +757,8 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
             j += 1;
             continue;
         }
-        for k in range(0, vector) {
-            if pack.pos[k] as int == j {
+        for k in (0..vector) {
+            if pack.pos[k] as isize == j {
                 ok = false;
                 break;
             }
@@ -768,8 +768,8 @@ fn pack_vector(pack: &mut PackState, vector: uint) -> int {
             continue;
         }
 
-        for k in range(0, t as uint) {
-            let loc = (j + (from[k] as int)) as uint;
+        for k in (0..t) {
+            let loc = (j + (from[k] as isize)) as usize;
             pack.table[loc] = to[k];
             pack.check[loc] = from[k];
             if loc > pack.high {
@@ -790,16 +790,16 @@ struct PackState<'a> {
     pos: Vec<i16>, 
     table: Vec<i16>,        // table and check always have same len
     check: Vec<i16>,        // table is 0-filled, check is -1-filled
-    lowzero: uint,
-    high: uint,
+    lowzero: usize,
+    high: usize,
 
     // read-only references to stuff
-    order: &'a [uint],
-    nstates: uint,
+    order: &'a [usize],
+    nstates: usize,
     act: &'a ActionsTable
 }
 
-fn pack_table<'a>(nstates: uint, nentries: uint, order: &'a [uint], act: &'a ActionsTable) -> PackState<'a> {
+fn pack_table<'a>(nstates: usize, nentries: usize, order: &'a [usize], act: &'a ActionsTable) -> PackState<'a> {
     debug!("pack_table: nentries={}", nentries);
 
     let initial_maxtable = 1000;
@@ -816,10 +816,10 @@ fn pack_table<'a>(nstates: uint, nentries: uint, order: &'a [uint], act: &'a Act
         act: act
     };
 
-    for i in range(0, nentries) {
+    for i in (0..nentries) {
         // debug!("i={}", i);
-        let place: int = match matching_vector(&mut pack, i) {
-            Some(state) => pack.base[state] as int,
+        let place: isize = match matching_vector(&mut pack, i) {
+            Some(state) => pack.base[state] as isize,
             None => pack_vector(&mut pack, i)
         };
 

@@ -9,3 +9,6 @@ description = "RACC is a port of Berkeley YACC to Rust, and allows you to write 
 [lib]
 name = "racc"
 crate-type = ["dylib"]
+
+[dependencies.log]
+log = "0.1.19"

@@ -25,8 +25,8 @@ pub const VISIBILITY: u8 =16;
 // the undefined value
 pub const UNDEFINED: i16 = -1;
 
-pub const PREDEFINED_RULES: uint = 3;
-pub const PREDEFINED_ITEMS: uint = 4;
+pub const PREDEFINED_RULES: usize = 3;
+pub const PREDEFINED_ITEMS: usize = 4;
 
 // Defines a grammar.  A grammar has these elements:
 //
@@ -42,10 +42,10 @@ pub struct Grammar {
     // symbols are ordered as tokens first, then non-terminals.
     // symbol[0] is the special $end token.
     // the first non-terminal is the special "$accept" symbol.
-    pub nsyms: uint,
-    pub ntokens: uint,
-    pub nvars: uint,
-    pub start_symbol: uint,
+    pub nsyms: usize,
+    pub ntokens: usize,
+    pub nvars: usize,
+    pub start_symbol: usize,
 
     pub name: Vec<String>,
     pub pname: Vec<String>,
@@ -56,8 +56,8 @@ pub struct Grammar {
     pub assoc: Vec<u8>,
 
     // the rules which describe the grammar
-    pub nitems: uint,
-    pub nrules: uint,
+    pub nitems: usize,
+    pub nrules: usize,
 
     pub ritem: Vec<i16>,
     pub rlhs: Vec<i16>,
@@ -80,34 +80,34 @@ impl Grammar {
         }
 	}
 
-    pub fn is_var(&self, s: uint) -> bool {
+    pub fn is_var(&self, s: usize) -> bool {
         s >= self.start_symbol
     }
 
-    pub fn is_token(&self, s: uint) -> bool {
+    pub fn is_token(&self, s: usize) -> bool {
         s < self.start_symbol
     }
 
-    pub fn rule_to_str(&self, r: uint) -> String {
+    pub fn rule_to_str(&self, r: usize) -> String {
         let mut s = String::new();
         s.push_str(format!("(r{}) ", r).as_slice());
-        s.push_str(self.name[self.rlhs[r] as uint].as_slice());
+        s.push_str(self.name[self.rlhs[r] as usize].as_slice());
         s.push_str(" :");
-        for it in self.ritem.slice_from(self.rrhs[r] as uint).iter() {
+        for it in self.ritem.slice_from(self.rrhs[r] as usize).iter() {
             if *it < 0 { break; } // end of this rule
             s.push_str(" ");
-            s.push_str(self.name[*it as uint].as_slice());
+            s.push_str(self.name[*it as usize].as_slice());
         }
         s
     }
 
-    pub fn get_rhs_items<'a>(&'a self, r: uint) -> &'a[i16] {
+    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a[i16] {
         let rhs = self.rrhs[r];
         assert!(rhs >= 0);
-        let mut end = rhs as uint;
+        let mut end = rhs as usize;
         while self.ritem[end] >= 0 {
             end += 1;
         }
-        self.ritem.slice(rhs as uint, end)
+        self.ritem.slice(rhs as usize, end)
     }
 }

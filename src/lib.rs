@@ -239,25 +239,22 @@
 
 #![crate_type = "dylib"]
 #![feature(plugin_registrar)]
-#![feature(phase)]
 #![feature(quote)]
 #![feature(plugin)]
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
+#![allow(unstable)]
 
 #[plugin]
 #[macro_use]
 extern crate log;
 
 extern crate rustc;
-
-// #[phase(plugin, link)]
 extern crate syntax;
 
 use syntax::ast;
 use syntax::ext::base::{ExtCtxt, MacResult, MacItems};
-// use syntax::ext::build::AstBuilder;
 use syntax::codemap;
 use syntax::parse::token::Token;
 use syntax::ptr::P;
