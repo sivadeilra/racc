@@ -92,10 +92,11 @@ struct ReaderState {
     /// Contains all of the symbols, in the order that they are first encountered.
     symbols: Vec<Symbol>,
 
-    // A lookup table, which gives you an index into self.symbols
+    /// A lookup table, which gives you an index into self.symbols
     symbol_table: HashMap<Rc<String>, usize>,
 
-    gensym: usize,          // used for generating names for anonymous symbols
+    // used for generating names for anonymous symbols
+    gensym: u32,
 
     last_was_action: bool,
 
@@ -104,11 +105,11 @@ struct ReaderState {
     rprec: Vec<i16>,
     rassoc: Vec<u8>,
 
-    // The actions (code blocks) provided by the grammar author.
+    /// The actions (code blocks) provided by the grammar author.
     rule_blocks: Vec<Option<P<Block>>>,
 
-    // identifier used by grammar for a RHS value, given by =foo
-    // indices are same as rrhs
+    /// identifier used by grammar for a RHS value, given by =foo
+    /// indices are same as rrhs
     rhs_binding: Vec<Option<ast::Ident>>,      
 }
 
@@ -184,7 +185,6 @@ impl ReaderState {
                 }
                 if self.pitem[i + 1] == NO_ITEM || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.plhs[self.nrules]].tag {
                     warn!("default_action_warning();")
-                    // default_action_warning();
                 }
             }
         }
@@ -209,17 +209,15 @@ impl ReaderState {
         // debug!("  end_rule: r{}, lhs={} nitems={}", rule, self.plhs[rule], self.pitem.len());
     }
 
-    // Adds a new "empty" rule.  A new symbol name is generated, using the pattern $$nn,
-    // where $$ is the literal string "$$" and nn is a number.
+    /// Adds a new "empty" rule.  A new symbol name is generated, using the pattern $$nn,
+    /// where $$ is the literal string "$$" and nn is a number.
     pub fn insert_empty_rule(&mut self, span: Span) {
-        let nrules = self.nrules;
-
         self.gensym += 1;
         let symname = format!("$${}", self.gensym);
 
         debug!("insert_empty_rule: added symbol {}", symname);
 
-        let tag = self.symbols[self.plhs[nrules]].tag.clone();
+        let tag = self.symbols[self.plhs[self.nrules]].tag.clone();
         let sym_index = {
             let (sym_index, sym) = self.lookup_ref_mut(symname.as_slice(), span);
             sym.tag = tag;
@@ -244,13 +242,15 @@ impl ReaderState {
 
         // Insert the generated rule right before the current rule, which was
         // written to self.{plhs,rprec,rassoc}[nrules].
-        self.plhs.insert(nrules, sym_index);        
-        self.rprec.insert(nrules, 0);        
-        self.rassoc.insert(nrules, TOKEN);
+        self.plhs.insert(self.nrules, sym_index);        
+        self.rprec.insert(self.nrules, 0);        
+        self.rassoc.insert(self.nrules, TOKEN);
 
         self.nrules += 1;
     }
 
+    /// Adds a symbol to the RHS of the current rule being built.
+    /// Can only be called between calls to start_rule() and end_rule().
     pub fn add_symbol(&mut self, bp: usize, span: Span, ident: Option<ast::Ident>) {
         assert!(self.pitem.len() == self.nitems);
         assert!(self.rhs_binding.len() == self.nitems);
@@ -274,33 +274,15 @@ impl ReaderState {
         self.rhs_binding.push(ident);
     }
 
-    // TODO: Modify this so that it takes &self, and produces a new set of tables
-    // which contain the packed symbols.  This should produce 
-    // struct SymbolTable {
-    //      names: Vec<String>,
-    //      values: Vec<i16>,
-    //      prec: Vec<u8>,
-    //      assoc: Vec<u8>,
-    //      start: usize,
-    // }
-    //
-    // As well as a vector, which allows mapping from old indices to new indices.
-    //
-    // Returns a vector which maps from old (unpacked) symbol indices to packed
-    // symbol indices.
+    /// "Packs" the symbol table and the grammar definition.  In the packed form, the
+    /// tokens are numbered sequentially, and are followed by the non-terminals.
     pub fn pack_symbols_and_grammar(&mut self, goal_symbol: usize) -> Grammar {
         debug!("");
         debug!("pack_symbols");
         debug!("");
 
-        // output/mutated: m_goal
-
         assert!(goal_symbol < self.symbols.len());
         assert!(self.symbols[goal_symbol].class == SymClass::NonTerminal);
-
-        for i in range(0, self.symbols.len()) {
-            debug!("    [{}] = {} value {}", i, self.symbols[i].name, UNDEFINED); // self.symbols[i].value);
-        }
 
         let nsyms: usize = 2 + self.symbols.len(); // $end and $accept
         let mut ntokens: usize = 1; // $end
@@ -324,9 +306,7 @@ impl ReaderState {
         let mut gram_rprec = replace(&mut self.rprec, Vec::new());
         let mut gram_rassoc = replace(&mut self.rassoc, Vec::new());
 
-        // debug!("building v table");
-
-        // Build the 'v' table, which maps from packed symbols to packed symbols.  The size of the
+        // Build the 'v' table, which maps from packed symbols to unpacked symbols.  The size of the
         // v table is the number of packed symbols (nsyms), which is not the same as the number of
         // unpacked symbols.  This is because the $accept and error symbols are not symbols in the
         // unpacked view.  In u = v[p], p is a packed symbol index (a number in the nsyms space),
@@ -339,7 +319,7 @@ impl ReaderState {
             let mut i: usize = 1;                      // packed index for assigning tokens
             let mut j: usize = start_symbol + 1;       // packed index for assigning vars
         
-            for s in range(0, self.symbols.len()) {
+            for s in 0 .. self.symbols.len() {
                 match self.symbols[s].class {
                     SymClass::Terminal => { v[i] = s; i += 1; }
                     SymClass::NonTerminal => {v[j] = s; j += 1; }
@@ -349,7 +329,7 @@ impl ReaderState {
 
             assert!(i == ntokens);
             assert!(j == nsyms);
-            for s in range(1, v.len()) {
+            for s in 1 .. v.len() {
                 assert!(s == start_symbol || v[s] != NO_SYMBOL);
             }
             v
@@ -361,13 +341,13 @@ impl ReaderState {
         let mut map_to_packed: Vec<i16> = repeat(-1).take(nsyms).collect();
         map_to_packed[0] = 1; // The 'error' symbol
 
-        for i in range(1, ntokens) {
+        for i in (1 .. ntokens) {
             map_to_packed[v[i]] = i as i16;
         }
 
         map_to_packed[goal_symbol] = (start_symbol + 1) as i16;
         let mut k = start_symbol + 2;
-        for i in range(ntokens + 1, nsyms) {
+        for i in (ntokens + 1 .. nsyms) {
             if v[i] != goal_symbol {
                 map_to_packed[v[i]] = k as i16;
                 k += 1;
@@ -380,7 +360,7 @@ impl ReaderState {
 
         symbols_value[goal_symbol] = 0;
         let mut k: usize = 1;
-        for i in range(start_symbol + 1, nsyms) {
+        for i in (start_symbol + 1 .. nsyms) {
             if v[i] != goal_symbol {
                 symbols_value[v[i]] = k as i16;
                 k += 1;
@@ -389,7 +369,7 @@ impl ReaderState {
 
         // Assign token values
         let mut k = 0;
-        for i in range(1, ntokens) {
+        for i in (1 .. ntokens) {
             let n = symbols_value[v[i]];
             if n > 256 {
                 let mut j = k;
@@ -408,7 +388,7 @@ impl ReaderState {
 
         let mut j = 0;
         let mut n = 257;
-        for i in range(2, ntokens) {
+        for i in (2 .. ntokens) {
             if symbols_value[v[i]] == UNDEFINED {
                 while j < k && n == gram_value[j] {
                     while { j += 1; j < k && n == gram_value[j] } {
@@ -428,7 +408,7 @@ impl ReaderState {
         gram_assoc[0] = TOKEN;
 
         // Propagate token symbols
-        for i in range(1, ntokens) {
+        for i in (1 .. ntokens) {
             let from = &self.symbols[v[i]];
             gram_name[i] = from.name.to_string();
             gram_value[i] = symbols_value[v[i]];
@@ -444,7 +424,7 @@ impl ReaderState {
         gram_assoc[start_symbol] = TOKEN;
 
         // Propagate non-terminal symbols
-        for i in range(start_symbol + 1, nsyms) {
+        for i in (start_symbol + 1 .. nsyms) {
             let k = map_to_packed[v[i]] as usize;
             assert!(k != NO_SYMBOL);
             let from = &self.symbols[v[i]];
@@ -455,7 +435,7 @@ impl ReaderState {
         }
 
         debug!("packed symbol table:");
-        for i in range(0, nsyms) {
+        for i in (0 .. nsyms) {
             debug!("    {:3} {} {:20} value {:3} prec {:2} assoc {:2}", i,
             if i < ntokens { "token" } else { "var  " },
             gram_name[i],
@@ -507,7 +487,7 @@ impl ReaderState {
         let symbols = &self.symbols;
 
         let mut j = PREDEFINED_ITEMS; // index of next item to process
-        for i in range(PREDEFINED_RULES, nrules) {
+        for i in (PREDEFINED_RULES .. nrules) {
             rlhs[i] = map_to_packed[plhs[i]] as i16;
             rrhs[i] = j as i16;
             let mut assoc = TOKEN;
@@ -564,7 +544,7 @@ impl ReaderState {
         assert!(gram.ritem.len() == gram.nitems);
 
         debug!("symbols: ntokens={} nvars={} nsyms={}", gram.ntokens, gram.nvars, gram.nsyms);
-        for i in range(0, gram.nsyms) {
+        for i in 0 .. gram.nsyms {
             if gram.is_var(i) {
                 debug!("    {:3}  var    {}", i, gram.name[i]);
             }
@@ -575,7 +555,7 @@ impl ReaderState {
         debug!("");
         debug!("raw items:");
 
-        for i in range(0, gram.ritem.len()) {
+        for i in 0 .. gram.ritem.len() {
             let it = gram.ritem[i];
             if it < 0 {
                 debug!("    {:3} --> {:3}", i, it);
@@ -590,9 +570,8 @@ impl ReaderState {
 
         let mut k: usize = 1;
         let mut line = String::new();
-        for i in range(2, gram.nrules) {
+        for i in 2 .. gram.nrules {
             line.push_str(format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as usize]).as_slice());
-
             while gram.ritem[k] >= 0 {
                 line.push_str(" ");
                 line.push_str(gram.name[gram.ritem[k] as usize].as_slice());
@@ -643,7 +622,6 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                 //      = (defines a token with a specific value)
                 //      ; (defines a token with an automatically-assigned value)
 
-                // debug!("ident: id='{}'", id.as_str());
                 let name_def_str = id.as_str();
                 let name_def_span = parser.span;
                 let lhs = reader.lookup(name_def_str.as_slice(), name_def_span);
@@ -794,7 +772,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
     debug!("goal symbol = {}_{}", reader.symbols[goal_symbol].name, goal_symbol);
 
     // Check for any symbols that were not defined.
-    for i in range(0, reader.symbols.len()) {
+    for i in 0 .. reader.symbols.len() {
         let sym = &reader.symbols[i];
         if sym.class == SymClass::Unknown {
             parser.span_err(sym.span, "symbol was used but never defined");

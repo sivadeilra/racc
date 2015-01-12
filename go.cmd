@@ -2,6 +2,7 @@
 
 setlocal
 
+
 echo building
 rem cargo build racc
 set RUST_LOG=
@@ -24,5 +25,9 @@ rem if errorlevel 1 exit /b 1
 echo filtering
 perl filter-trace.pl <port-raw.txt >port.txt
 
+echo running c++ reference code
+orig\debug\yacc_orig.exe temp\test.y
+if errorlevel 1 exit /b 1
+
 echo windiffing
-windiff temp\trace.txt port.txt
+windiff trace.txt port.txt

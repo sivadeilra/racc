@@ -63,7 +63,7 @@ struct LR0State<'a>
 
 fn sort_shift_symbols(shift_symbol: &mut [i16]) {
     // this appears to be a bubble-sort of shift_symbol?
-    for i in range(1, shift_symbol.len()) {
+    for i in 1 .. shift_symbol.len() {
         let symbol = shift_symbol[i];
         let mut j = i;
         while j > 0 && (shift_symbol[j - 1]) > symbol {
@@ -74,24 +74,7 @@ fn sort_shift_symbols(shift_symbol: &mut [i16]) {
     }
 }
 
-// shift_symbol contains a list of symbols.  it will be sorted.
-// shiftset is empty when called, and will be filled with the states that correspond
-// to the given shifted symbols.
-fn append_states(lr0: &mut LR0State, shiftset: &mut Vec<i16>, shift_symbol: &Vec<i16>)
-{
-    assert!(shiftset.len() == 0);
-
-    for i in range(0, shift_symbol.len()) {
-        let symbol = shift_symbol[i] as usize;
-        let state = get_state(lr0, symbol) as i16;
-        shiftset.push(state as i16);
-    }
-
-    assert!(shiftset.len() == shift_symbol.len());
-}
-
-pub fn compute_lr0(gram: &Grammar) -> LR0Output
-{
+pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let (derives, derives_rules) = set_derives(gram);
 
     // was: allocate_item_sets()
@@ -131,8 +114,6 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
     // These vectors are used for building tables during each state.
     // It is inefficient to allocate and free these vectors within
     // the scope of processing each state.
-    let mut red_set: Vec<i16> = Vec::new();
-    let mut shift_set: Vec<i16> = Vec::with_capacity(gram.nsyms);
     let mut item_set: Vec<i16> = Vec::with_capacity(gram.nitems);
     let mut rule_set: Bitv32 = Bitv32::from_elem(gram.nrules, false);
     let mut shift_symbol: Vec<i16> = Vec::new();
@@ -140,7 +121,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
     // this_state represents our position within our work list.  The output.states
     // array represents both our final output, and this_state is the next state
     // within that array, where we need to generate new states from.  New states
-    // are added to output.states within append_states().
+    // are added to output.states within get_state() (called below).
     let mut this_state: usize = 0;
 
     // State which becomes the output
@@ -155,33 +136,29 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
         // debug!("    nucleus items: {}", lr0.states[this_state].items.as_slice());
-        closure(gram, lr0.states[this_state].items.as_slice(), &first_derives, gram.nrules, &mut rule_set, &mut item_set);
+        closure(gram, &lr0.states[this_state].items[], &first_derives, gram.nrules, &mut rule_set, &mut item_set);
 
         // The output of save_reductions() is stored in reductions.
-        // red_set is used only as temporary storage.
-        save_reductions(gram, this_state, item_set.as_slice(), &mut red_set, &mut reductions);
+        save_reductions(gram, this_state, &item_set[], &mut reductions);
 
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
         debug!("    new_item_sets: item_set = {:?}", item_set);
-        new_item_sets(gram, &mut lr0, item_set.as_slice(), &mut shift_symbol);
-        sort_shift_symbols(shift_symbol.as_mut_slice());
+        new_item_sets(gram, &mut lr0, &item_set[], &mut shift_symbol);
+        sort_shift_symbols(&mut shift_symbol[]);
 
-        // append_states() potentially adds new states to lr0.states
-        append_states(&mut lr0, &mut shift_set, &shift_symbol);
-        debug!("    shifts: {:?}", shift_set.as_slice());
-
-        // If there are any shifts for this state, record them.
+        // Find or create states for shifts in the current state.  This can potentially add new
+        // states to lr0.states.  Then record the resulting shifts in 'shifts'.
         if shift_symbol.len() > 0 {
+            let shift_set: Vec<i16> = shift_symbol.iter().map(|&mut: symbol| get_state(&mut lr0, *symbol as usize) as i16).collect();
+            debug!("    shifts: {:?}", shift_set);
             shifts.push(Shifts {
                 state: this_state,
-                shifts: vec_from_slice(shift_set.as_slice())
+                shifts: shift_set
             });
         }
 
         item_set.clear();
-        shift_set.clear();
-        red_set.clear();
         shift_symbol.clear();
 
         debug!("");
@@ -201,8 +178,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output
 
 // Gets the state for a particular symbol.  If no appropriate state exists,
 // then a new state will be created.
-fn get_state(lr0: &mut LR0State, symbol: usize) -> usize
-{
+fn get_state(lr0: &mut LR0State, symbol: usize) -> usize {
     let isp = lr0.kernel_base[symbol] as usize;
     let iend = lr0.kernel_end[symbol] as usize;
     let n = iend - isp;
@@ -251,8 +227,7 @@ fn get_state(lr0: &mut LR0State, symbol: usize) -> usize
 // other states, by examining a state, the next variables that could be
 // encountered in those states, and finding the transitive closure over same.
 // Initializes the state table.
-fn initialize_states(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Vec<Core>
-{
+fn initialize_states(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Vec<Core> {
     debug!("initialize_states");
 
     let start_derives: usize = derives[gram.start_symbol] as usize;
@@ -285,8 +260,7 @@ fn initialize_states(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> 
     states
 }
 
-fn print_core(gram: &Grammar, state: usize, core: &Core)
-{
+fn print_core(gram: &Grammar, state: usize, core: &Core) {
     debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol]);
 
     let mut line = String::new();
@@ -320,8 +294,7 @@ fn print_core(gram: &Grammar, state: usize, core: &Core)
 }
 
 // fills shift_symbol with shifts
-fn new_item_sets(gram: &Grammar, lr0: &mut LR0State, item_set: &[i16], shift_symbol: &mut Vec<i16>)
-{
+fn new_item_sets(gram: &Grammar, lr0: &mut LR0State, item_set: &[i16], shift_symbol: &mut Vec<i16>) {
     assert!(shift_symbol.len() == 0);
 
     // reset kernel_end
@@ -345,31 +318,29 @@ fn new_item_sets(gram: &Grammar, lr0: &mut LR0State, item_set: &[i16], shift_sym
     }
 }
 
-fn save_reductions(gram: &Grammar, this_state: usize, item_set: &[i16], red_set: &mut Vec<i16>, reductions: &mut Vec<Reductions>)
-{
-    assert!(red_set.len() == 0);
-
+fn save_reductions(gram: &Grammar, this_state: usize, item_set: &[i16], reductions: &mut Vec<Reductions>) {
     // Examine the items in the given item set.  If any of the items have reached the
     // end of the rhs list for a particular rule, then add that rule to the reduction set.
     // We discover this by testing the sign of the next symbol in the item; if it is
     // negative, then we have reached the end of the symbols on the rhs of a rule.  See
     // the code in reader::pack_grammar(), where this information is set up.
-    for &i in item_set.iter() {
-        assert!(i >= 0);
-        let item = gram.ritem[i as usize];
-        if item < 0 {
-            let rule = (-item) as usize;
-            debug!("        reduction: r{}  {}", rule, gram.rule_to_str(rule));
-            red_set.push(-item);
-        }
-    }
-
-    if red_set.len() != 0 {
+    let red_count = item_set.iter().filter(|&&i| gram.ritem[i as usize] < 0).count();
+    if red_count != 0 {
         reductions.push(Reductions {
             state: this_state,
-            rules: vec_from_slice(red_set.as_slice())
+            rules: {
+                let mut rules: Vec<i16> = Vec::with_capacity(red_count);
+                rules.extend(item_set.iter()
+                    .map(|&i| gram.ritem[i as usize])
+                    .filter(|&item| item < 0)
+                    .map(|item| {
+                        let rule = -item;
+                        debug!("        reduction: r{}  {}", rule, gram.rule_to_str(rule as usize));
+                        rule
+                    }));
+                rules
+            }
         });
-        red_set.clear();
     }
     else {
         debug!("    no reductions");

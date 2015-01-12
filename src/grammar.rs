@@ -1,5 +1,3 @@
-use std::default::Default;
-
 /* keyword codes */
 
 pub const TOKEN: u8 =0;
@@ -36,7 +34,6 @@ pub const PREDEFINED_ITEMS: usize = 4;
 //       any combination of tokens or variables
 //     * (optional) precedence and associativity rules for rules
 //
-#[derive(Default)]
 pub struct Grammar {
     // the symbols (non-terminals and terminals/tokens)
     // symbols are ordered as tokens first, then non-terminals.
@@ -67,19 +64,6 @@ pub struct Grammar {
 }
 
 impl Grammar {
-	pub fn new() -> Grammar {
-        Grammar {
-            nitems: 4,
-            nrules: 3,
-            ritem: Vec::new(),
-            rlhs: Vec::new(),
-            rrhs: Vec::new(),
-            rprec: vec![0, 0, 0],
-            rassoc: vec![TOKEN, TOKEN, TOKEN],
-		    .. Default::default()
-        }
-	}
-
     pub fn is_var(&self, s: usize) -> bool {
         s >= self.start_symbol
     }
