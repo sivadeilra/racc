@@ -53,7 +53,7 @@ impl BorrowFrom<Rc<String>> for str {
 }
 
 // symbol classes
-#[derive(Copy,PartialEq,Show)]
+#[derive(Copy,PartialEq,Debug)]
 enum SymClass {
     Unknown = 0,
     Terminal = 1,

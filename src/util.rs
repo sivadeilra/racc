@@ -67,7 +67,7 @@ impl Bitmat
         assert!(r < self.rows);
         // debug!("Bitmat.iter_ones_in_row: rows={} cols={} rowsize={} r={} (rowsize * r)={}", self.rows, self.cols, self.rowsize, r, self.rowsize * r);
         let rpos = self.rowsize * r;
-        bit_vector_iter_ones(self.data.slice(rpos, rpos + self.rowsize), self.cols)
+        bit_vector_iter_ones(&self.data[rpos .. rpos + self.rowsize], self.cols)
     }
 
     // Performs a row-major scan for bits that are set to one, and enumerates (row,col) items.

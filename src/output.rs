@@ -9,7 +9,6 @@ use syntax::ext::quote::rt::ExtParseUtils;
 use syntax::parse::token::{intern_and_get_ident};
 use syntax::ptr::P;
 use syntax::codemap::{Span};
-
 use syntax::owned_slice::OwnedSlice;
 
 use grammar::Grammar;
@@ -42,7 +41,6 @@ fn no_where() -> WhereClause {
         predicates: vec![],
     }
 }
-
 
 // Given a constructed parser (a description of a state machine which parses
 // a given grammar), produces a Rust AST which implements the parser.
@@ -83,33 +81,7 @@ pub fn output_parser_to_ast(
     }
 
     // Generate YYFINAL constant.
-    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, usize), cx.expr_uint(sp, parser.final_state)));
-
-    /*
-    items.push((quote_item!(cx, 
-        pub fn get_parser_tables() -> ParserTables<i16, AppContext> {
-            ParserTables {
-                yyrindex: YYRINDEX.as_slice(),
-                yygindex: YYGINDEX.as_slice(),
-                yysindex: YYSINDEX.as_slice(),
-                yytable: YYTABLE.as_slice(),
-                yydefred: YYDEFRED.as_slice(),
-                yylen: YYLEN.as_slice(),
-                yylhs: YYLHS.as_slice(),
-                yycheck: YYCHECK.as_slice(),
-                yyfinal: YYFINAL,
-
-                // debugging
-                yyrules: YYRULES.as_slice(),
-                reduce: reduce
-            }
-        })).unwrap());
-
-    items.push((quote_item!(cx,
-        pub fn new_parser<SymbolValue>() -> ParserState<SymbolValue> {
-            ParserState::new(get_parser_tables())
-        })).unwrap());
-        */
+    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, usize), cx.expr_usize(sp, parser.final_state)));
 
     // Build up actions
     let mut action_arms: Vec<Arm> = Vec::new();
@@ -122,7 +94,7 @@ pub fn output_parser_to_ast(
             continue;
         }
 
-        let pat: P<Pat> = cx.pat_lit(sp, cx.expr_uint(sp, rule - 2));
+        let pat: P<Pat> = cx.pat_lit(sp, cx.expr_usize(sp, rule - 2));
 
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
@@ -229,7 +201,6 @@ pub fn output_parser_to_ast(
                 sp,
                 /*path: */ cx.path_ident(sp, cx.ident_of("ParserTables")),
                 /*fields:*/ {
-                    // cx.field_imm(sp, cx.ident_of("yylen"), cx.expr_method_call(sp, cx.expr_ident(sp, cx.ident_of("YYLEN")), cx.ident_of("as_slice"), vec![]))
                     let as_slice_ident = cx.ident_of("as_slice");
                     let mut fields: Vec<ast::Field> = (vec![
                         ("yyrindex", "YYRINDEX"),
@@ -240,11 +211,9 @@ pub fn output_parser_to_ast(
                         ("yylen", "YYLEN"),
                         ("yylhs", "YYLHS"),
                         ("yycheck", "YYCHECK"),
-                        // ("yyfinal", "YYFINAL"),
                         ("yydgoto", "YYDGOTO"),
-                        ("yyname", "YYNAME"),           // for debugging
-                        ("yyrules", "YYRULES")         // for debugging
-                        // reduce: reduce
+                        ("yyname", "YYNAME"),       // for debugging
+                        ("yyrules", "YYRULES")      // for debugging
                     ]).into_iter().map(|(field, sitem)|
                             cx.field_imm(sp, cx.ident_of(field), cx.expr_method_call(sp, cx.expr_ident(sp, cx.ident_of(sitem)), as_slice_ident, vec![]))
                         ).collect();
@@ -255,19 +224,6 @@ pub fn output_parser_to_ast(
             )
         )
         ));
-
-    /*
-    // Generate the new_parser() function.
-    items.push(cx.item_fn(sp,
-        cx.ident_of("new_parser"),
-        vec![], // inputs
-        ty_parser_state,
-        cx.block_expr(
-            cx.expr_call(sp, vec![ cx.ident_of("ParserState"), cx.ident_of("new") ],
-                vec![
-                    cx.expr_call_ident(sp, cx.ident_of("get_parser_tables"), vec![])
-                ]))));
-    */
 
     items.push(output_rule_data(cx, sp, gram));
 
@@ -320,7 +276,7 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
 fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>) -> P<Item> {
     cx.item_static(span, 
         cx.ident_of(name), 
-        cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_uint(span, strings.len()))),
+        cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_usize(span, strings.len()))),
         Mutability::MutImmutable,
         cx.expr_vec(span, range(0, strings.len()).map(|i| {
             let iname = intern_and_get_ident(strings[i].as_slice());
@@ -334,13 +290,12 @@ fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
     make_table_string(cx, span, "YYRULES", &rules)
 }
 
-
 #[allow(dead_code)]
 fn make_table_usize(cx: &ExtCtxt, span: Span, name: &str, values: &[usize]) -> P<Item> {
-    let values_expr = cx.expr_vec(span, values.iter().map(|value| cx.expr_uint(span, *value)).collect());
+    let values_expr = cx.expr_vec(span, values.iter().map(|value| cx.expr_usize(span, *value)).collect());
     let ty_usize = quote_ty!(cx, usize);
     let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_usize, cx.expr_uint(span, values.len())));
+    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_usize, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     // debug!("built table item for '{}': values {}", name, values);
     // debug!("item: {}", pprust::item_to_string(&*table_item));
@@ -355,7 +310,7 @@ fn make_table_i16_real(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> 
     let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_i16(cx, span, *value)).collect());
     let ty_i16 = quote_ty!(cx, i16);
     let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_i16, cx.expr_uint(span, values.len())));
+    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_i16, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     // debug!("built table item for '{}': values {}", name, values);
     // debug!("item: {}", pprust::item_to_string(&*table_item));
@@ -379,12 +334,10 @@ fn make_table_i16_as_u16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -
     let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_u16(cx, span, *value as u16)).collect());
     let ty_u16 = quote_ty!(cx, u16);
     let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_uint(span, values.len())));
+    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     table_item
 }
-
-
 
 fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<P<Item>> {
     // debug!("output_actions");
@@ -399,20 +352,19 @@ fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, par
     let packed = pack_table(parser.nstates, nentries, order.as_slice(), &act);
 
     // debug!("emitting tables");
-
     items.push(make_table_i16(cx, span, "YYDGOTO", dgoto.as_slice()));
 
     // was output_base
-    items.push(make_table_i16(cx, span, "YYSINDEX", packed.base.slice(0, nstates)));
-    items.push(make_table_i16(cx, span, "YYRINDEX", packed.base.slice(nstates, nstates * 2)));
-    items.push(make_table_i16(cx, span, "YYGINDEX", packed.base.slice(nstates * 2, act.nvectors)));
+    items.push(make_table_i16(cx, span, "YYSINDEX", &packed.base[.. nstates]));
+    items.push(make_table_i16(cx, span, "YYRINDEX", &packed.base[nstates .. nstates * 2]));
+    items.push(make_table_i16(cx, span, "YYGINDEX", &packed.base[nstates * 2 .. act.nvectors]));
 
     // was output_table
     // todo, emit const YYTABLESIZE = m_high
-    items.push(make_table_i16(cx, span, "YYTABLE", packed.table.slice(0, packed.high + 1)));
+    items.push(make_table_i16(cx, span, "YYTABLE", &packed.table[.. packed.high + 1]));
 
     // was output_check
-    items.push(make_table_i16(cx, span, "YYCHECK", packed.check.slice(0, packed.high + 1)));
+    items.push(make_table_i16(cx, span, "YYCHECK", &packed.check[.. packed.high + 1]));
 
     items
 }

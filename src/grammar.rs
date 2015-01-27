@@ -77,7 +77,7 @@ impl Grammar {
         s.push_str(format!("(r{}) ", r).as_slice());
         s.push_str(self.name[self.rlhs[r] as usize].as_slice());
         s.push_str(" :");
-        for it in self.ritem.slice_from(self.rrhs[r] as usize).iter() {
+        for it in self.ritem[self.rrhs[r] as usize ..].iter() {
             if *it < 0 { break; } // end of this rule
             s.push_str(" ");
             s.push_str(self.name[*it as usize].as_slice());
@@ -92,6 +92,6 @@ impl Grammar {
         while self.ritem[end] >= 0 {
             end += 1;
         }
-        self.ritem.slice(rhs as usize, end)
+        &self.ritem[rhs as usize .. end]
     }
 }

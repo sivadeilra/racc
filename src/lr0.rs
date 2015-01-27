@@ -210,7 +210,7 @@ fn get_state(lr0: &mut LR0State, symbol: usize) -> usize {
     let new_state = lr0.states.len();
     lr0.states.push(Core {
         accessing_symbol: symbol,
-        items: vec_from_slice(lr0.kernel_items.slice(lr0.kernel_base[symbol] as usize, lr0.kernel_end[symbol] as usize))
+        items: vec_from_slice(&lr0.kernel_items[lr0.kernel_base[symbol] as usize .. lr0.kernel_end[symbol] as usize])
     });
 
     // Add the new state to the state set for this symbol.
