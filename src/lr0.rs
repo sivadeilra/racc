@@ -2,7 +2,6 @@ use grammar::Grammar;
 use closure::set_first_derives;
 use closure::closure;
 use util::Bitv32;
-use std::collections::Bitv;
 use std::iter::repeat;
 
 /// the structure of the LR(0) state machine
@@ -32,7 +31,7 @@ pub struct LR0Output
     pub states: Vec<Core>,
     pub shifts: Vec<Shifts>,
     pub reductions: Vec<Reductions>,
-    pub nullable: Bitv,
+    pub nullable: Vec<bool>,
     pub derives: Vec<i16>,
     pub derives_rules: Vec<i16>
 }
@@ -83,7 +82,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // not well-defined yet.
     let mut kernel_items_count: usize = 0;
     let mut symbol_count: Vec<i16> = repeat(0).take(gram.nsyms).collect();
-    for i in range(0, gram.nitems) {
+    for i in 0..gram.nitems {
         let symbol = gram.ritem[i];
         if symbol >= 0 {
             kernel_items_count += 1;
@@ -93,7 +92,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let kernel_base = {
         let mut kernel_base: Vec<i16> = repeat(0).take(gram.nsyms).collect();
         let mut count: usize = 0;
-        for i in range(0, gram.nsyms) {
+        for i in 0..gram.nsyms {
             kernel_base[i] = count as i16;
             count += symbol_count[i] as usize;
         }
@@ -102,7 +101,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
     let mut lr0: LR0State = LR0State {
         gram: gram,
-        state_set: range(0, gram.nitems).map(|_| Vec::new()).collect(),
+        state_set: (0..gram.nitems).map(|_| Vec::new()).collect(),
         kernel_base: kernel_base,
         kernel_end: repeat(-1).take(gram.nsyms).collect(),
         kernel_items: repeat(0).take(kernel_items_count).collect(),
@@ -136,21 +135,23 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
         // debug!("    nucleus items: {}", lr0.states[this_state].items.as_slice());
-        closure(gram, &lr0.states[this_state].items[], &first_derives, gram.nrules, &mut rule_set, &mut item_set);
+        closure(gram, &lr0.states[this_state].items, &first_derives, gram.nrules, &mut rule_set, &mut item_set);
 
         // The output of save_reductions() is stored in reductions.
-        save_reductions(gram, this_state, &item_set[], &mut reductions);
+        save_reductions(gram, this_state, &item_set, &mut reductions);
 
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
         debug!("    new_item_sets: item_set = {:?}", item_set);
-        new_item_sets(gram, &mut lr0, &item_set[], &mut shift_symbol);
-        sort_shift_symbols(&mut shift_symbol[]);
+        new_item_sets(gram, &mut lr0, &item_set, &mut shift_symbol);
+        sort_shift_symbols(&mut shift_symbol);
 
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to lr0.states.  Then record the resulting shifts in 'shifts'.
         if shift_symbol.len() > 0 {
-            let shift_set: Vec<i16> = shift_symbol.iter().map(|&mut: symbol| get_state(&mut lr0, *symbol as usize) as i16).collect();
+            let shift_set: Vec<i16> = shift_symbol.iter().map(|symbol|
+                get_state(&mut lr0, *symbol as usize) as i16
+            ).collect();
             debug!("    shifts: {:?}", shift_set);
             shifts.push(Shifts {
                 state: this_state,
@@ -190,7 +191,7 @@ fn get_state(lr0: &mut LR0State, symbol: usize) -> usize {
         let sp_items = &lr0.states[state].items;
         if sp_items.len() == n {
             let mut found = true;
-            for j in range(0, n) {
+            for j in 0..n {
                 if lr0.kernel_items[isp + j] != sp_items[j] {
                     found = false;
                     break;
@@ -264,9 +265,9 @@ fn print_core(gram: &Grammar, state: usize, core: &Core) {
     debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol]);
 
     let mut line = String::new();
-    for i in range(0, core.items.len()) {
+    for i in 0..core.items.len() {
         let rhs = core.items[i] as usize;
-        line.push_str(format!("item {:4} : ", rhs).as_slice());
+        line.push_str(&format!("item {:4} : ", rhs));
 
         // back up to start of this rule
         let mut rhs_first = rhs;
@@ -280,8 +281,9 @@ fn print_core(gram: &Grammar, state: usize, core: &Core) {
             if j == rhs {
                 line.push_str(" .");
             }
-            line.push(' ');
-            line.push_str(gram.name[gram.ritem[j] as usize].as_slice());
+            line.push_str(
+                &format!(" {}", gram.name[gram.ritem[j] as usize])
+            );
             j += 1;
         }
         if j == rhs {
@@ -355,9 +357,9 @@ fn set_derives(gram: &Grammar) -> (Vec<i16>, Vec<i16>) // (derives, derives_rule
 	let mut derives: Vec<i16> = repeat(0).take(gram.nsyms).collect();
     let mut derives_rules: Vec<i16> = Vec::with_capacity(gram.nvars + gram.nrules);
 
-    for lhs in range(gram.start_symbol, gram.nsyms) {
+    for lhs in gram.start_symbol..gram.nsyms {
         derives[lhs] = derives_rules.len() as i16;
-        for r in range(0, gram.nrules) {
+        for r in 0..gram.nrules {
             if gram.rlhs[r] as usize == lhs {
                 derives_rules.push(r as i16);
             }
@@ -376,21 +378,21 @@ fn print_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
     debug!("DERIVES:");
     debug!("");
 
-    for lhs in range(gram.start_symbol, gram.nsyms) {
+    for lhs in gram.start_symbol..gram.nsyms {
         debug!("    {} derives rules: ", gram.name[lhs]);
         let mut sp = derives[lhs] as usize;
         while derives_rules[sp] >= 0 {
             let r = derives_rules[sp] as usize;
-            debug!("        {}", gram.rule_to_str(r).as_slice());
+            debug!("        {}", &gram.rule_to_str(r));
             sp += 1;
         }
     }
     debug!("");
 }
 
-fn set_nullable(gram: &Grammar) -> Bitv
+fn set_nullable(gram: &Grammar) -> Vec<bool>
 {
-    let mut nullable = Bitv::from_elem(gram.nsyms, false);
+    let mut nullable: Vec<bool> = (0..gram.nsyms).map(|i| false).collect();
 
     let mut done_flag = false;
     while !done_flag {
@@ -412,7 +414,7 @@ fn set_nullable(gram: &Grammar) -> Bitv
             if empty {
                 j = gram.rlhs[(-j) as usize];
                 if !nullable[j as usize] {
-                    nullable.set(j as usize, true);
+                    nullable[j as usize] = true;
                     done_flag = false;
                 }
             }
@@ -420,7 +422,7 @@ fn set_nullable(gram: &Grammar) -> Bitv
         }
     }
 
-    for i in range(gram.start_symbol, gram.nsyms) {
+    for i in gram.start_symbol..gram.nsyms {
         if nullable[i] {
             debug!("{} is nullable", gram.name[i]);
         }

@@ -45,7 +45,7 @@ pub fn reflexive_transitive_closure(r: &mut Bitmat) {
     transitive_closure(r);
 
     // set diagonals
-    for i in range(0, r.rows) {
+    for i in 0..r.rows {
         r.set(i, i);
     }
 }

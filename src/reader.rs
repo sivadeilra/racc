@@ -41,19 +41,13 @@ use syntax::codemap::Span;
 use grammar::{TOKEN, UNDEFINED, PREDEFINED_RULES, PREDEFINED_ITEMS};
 use grammar::Grammar;
 
-use std::borrow::BorrowFrom;
+use std::borrow::Borrow;
 
 const NO_SYMBOL: usize = !0;
 const NO_ITEM: usize = !0;
 
-impl BorrowFrom<Rc<String>> for str {
-    fn borrow_from(owned: &Rc<String>) -> &str {
-        owned.as_slice()
-    }
-}
-
 // symbol classes
-#[derive(Copy,PartialEq,Debug)]
+#[derive(Clone,Copy,PartialEq,Debug)]
 enum SymClass {
     Unknown = 0,
     Terminal = 1,

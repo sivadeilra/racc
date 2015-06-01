@@ -254,7 +254,7 @@ extern crate rustc;
 extern crate syntax;
 
 use syntax::ast;
-use syntax::ext::base::{ExtCtxt, MacResult, MacItems};
+use syntax::ext::base::{ExtCtxt, MacResult, MacEager};
 use syntax::codemap;
 use syntax::parse::token::Token;
 use syntax::ptr::P;
@@ -317,5 +317,8 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
         debug!("{}", pprust::item_to_string(&**it));
     }
 
-    MacItems::new(gen_items.into_iter())
+    MacEager {
+        items: Some(gen_items.into_iter()),
+        ..Default::default()
+    }
 }

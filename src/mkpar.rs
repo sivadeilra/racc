@@ -1,12 +1,10 @@
-use std::collections::Bitv;
 use std::iter::repeat;
 
 use grammar::Grammar;
 use lr0::LR0Output;
 use lalr::LALROutput;
-use util::{reverse_range};
 
-#[derive(Copy,PartialEq)]
+#[derive(Clone,Copy,PartialEq)]
 pub enum ActionCode {
     Shift = 1,
     Reduce = 2,
@@ -61,7 +59,7 @@ fn get_shifts(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput, stateno: usize
     if lalr.shift_table[stateno] != -1 {
         let sp = &lr0.shifts[lalr.shift_table[stateno] as usize];
         let to_state2 = &sp.shifts;
-        for i in reverse_range(sp.shifts.len(), 0) {
+        for i in (0..sp.shifts.len()).rev() {
             let k = to_state2[i] as usize;
             let symbol = lr0.states[k].accessing_symbol;
             if gram.is_token(symbol) {
@@ -87,7 +85,7 @@ fn add_reductions(gram: &Grammar, lalr: &LALROutput, stateno: usize, actions: &m
     let n = lalr.lookaheads[stateno + 1] as usize;
     for i in (m..n) {
         let ruleno = lalr.laruleno[i] as usize;
-        for j in reverse_range(gram.ntokens, 0) {
+        for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
                 add_reduce(gram, actions, ruleno, j);
             }
@@ -127,7 +125,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize
     let to_state2 = &p.shifts;
     let goal = gram.ritem[1] as usize;
     let mut final_state: usize = 0;
-    for i in reverse_range(to_state2.len(), 0) {
+    for i in (0..to_state2.len()).rev() {
         final_state = to_state2[i] as usize;
         if lr0.states[final_state].accessing_symbol == goal {
             break;
@@ -137,12 +135,12 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize
 }
 
 fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
-    let mut rules_used: Bitv = Bitv::from_elem(gram.nrules, false);
+    let mut rules_used = (0..gram.nrules).map(|i| false).collect();
 
     for pi in parser.iter() {
         for p in pi.iter() {
             if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-                rules_used.set(p.number as usize, true);
+                rules_used[p.number] = true;
             }
         }
     }
