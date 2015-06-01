@@ -36,7 +36,6 @@ pub enum FinishParseResult<SymbolValue> {
 /// //         }
 /// //     }
 /// // ```
-#[derive(Clone,Copy)]
 pub struct ParserTables<SymbolValue:Debug, AppContext> {
     pub yyrindex: &'static [u16],
     pub yysindex: &'static [u16],

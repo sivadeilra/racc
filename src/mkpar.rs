@@ -135,12 +135,12 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize
 }
 
 fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
-    let mut rules_used = (0..gram.nrules).map(|i| false).collect();
+    let mut rules_used: Vec<bool> = (0..gram.nrules).map(|i| false).collect();
 
     for pi in parser.iter() {
         for p in pi.iter() {
             if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-                rules_used[p.number] = true;
+                rules_used[p.number as usize] = true;
             }
         }
     }

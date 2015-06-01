@@ -74,7 +74,7 @@ pub fn output_parser_to_ast(
     for t in 1..gram.ntokens {
         // todo: use the original Ident from parsing, for better error reporting
         let tokvalue = gram.value[t];
-        let tok_ident = cx.ident_of(gram.name[t].as_slice());
+        let tok_ident = cx.ident_of(&gram.name[t]);
         let ty_u32 = quote_ty!(cx, u32);
         items.push(cx.item_const(sp, tok_ident, ty_u32, expr_u32(cx, sp, tokvalue as u32)));
     }
@@ -278,7 +278,7 @@ fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>
         cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_usize(span, strings.len()))),
         Mutability::MutImmutable,
         cx.expr_vec(span, (0..strings.len()).map(|i| {
-            let iname = intern_and_get_ident(strings[i].as_slice());
+            let iname = intern_and_get_ident(&strings[i]);
             cx.expr_str(span, iname)
         }
         ).collect()))
@@ -642,7 +642,7 @@ fn matching_vector(pack: &PackState, vector: usize) -> Option<usize>
         }
 
         let mut is_match = true;
-        for k in 0..t {
+        for k in 0..(t as usize) {
             if act.tos[j][k] != act.tos[i][k] || act.froms[j][k] != act.froms[i][k] {
                 is_match = false;
                 break;

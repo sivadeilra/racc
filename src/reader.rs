@@ -87,7 +87,7 @@ struct ReaderState {
     symbols: Vec<Symbol>,
 
     /// A lookup table, which gives you an index into self.symbols
-    symbol_table: HashMap<Rc<String>, usize>,
+    symbol_table: HashMap<String, usize>,
 
     // used for generating names for anonymous symbols
     gensym: u32,
@@ -137,7 +137,7 @@ impl ReaderState {
         let index = self.symbols.len();
         let s = make_symbol(name, span);
         self.symbols.push(s);
-        self.symbol_table.insert(Rc::new(name.to_string()), index);
+        self.symbol_table.insert(name.to_string(), index);
         // debug!("added {}_{} to table", name, index);
         return index;
     }
@@ -211,9 +211,9 @@ impl ReaderState {
 
         debug!("insert_empty_rule: added symbol {}", symname);
 
-        let tag = self.symbols[self.plhs[self.nrules]].tag.clone();
+        let tag: Option<Rc<String>> = self.symbols[self.plhs[self.nrules]].tag.clone();
         let sym_index = {
-            let (sym_index, sym) = self.lookup_ref_mut(symname.as_slice(), span);
+            let (sym_index, sym) = self.lookup_ref_mut(&symname, span);
             sym.tag = tag;
             sym.class = SymClass::NonTerminal;
             sym_index
@@ -565,10 +565,13 @@ impl ReaderState {
         let mut k: usize = 1;
         let mut line = String::new();
         for i in 2 .. gram.nrules {
-            line.push_str(format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as usize]).as_slice());
+            line.push_str(
+                &format!("    [r{:-3} ]   {:-10} : ", i, gram.name[gram.rlhs[i] as usize])
+            );
             while gram.ritem[k] >= 0 {
-                line.push_str(" ");
-                line.push_str(gram.name[gram.ritem[k] as usize].as_slice());
+                line.push_str(
+                    &format!(" {}", gram.name[gram.ritem[k] as usize])
+                );
                 k += 1;
             }
             k += 1;
@@ -618,7 +621,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
 
                 let name_def_str = id.as_str();
                 let name_def_span = parser.span;
-                let lhs = reader.lookup(name_def_str.as_slice(), name_def_span);
+                let lhs = reader.lookup(name_def_str, name_def_span);
 
                 parser.bump();
             
@@ -662,7 +665,7 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                                 Token::Ident(rhs_ident, _) => {
                                     let rhs_name = rhs_ident.as_str();
                                     // debug!("rule: found token/symbol ref '{}'", rhs_name);                                    
-                                    let rhs = reader.lookup(rhs_name.as_slice(), parser.span);
+                                    let rhs = reader.lookup(rhs_name, parser.span);
                                     parser.bump();
 
                                     // see if the symbol is followed by "= binding".
@@ -694,7 +697,10 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                                     if reader.last_was_action {
                                         reader.insert_empty_rule(parser.span);
                                     }
-                                    let block = parser.parse_block();
+                                    let block = match parser.parse_block() {
+                                        Ok(ptr) => ptr,
+                                        Err(_)  => panic!("Fatal Error in parse_block")
+                                    };
                                     reader.rule_blocks.push(Some(block));
                                     reader.last_was_action = true;
                                 }
@@ -740,7 +746,9 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                                     parser.bump();
                                     parser.expect(&Token::Semi);
                                 }
-                                _ => parser.unexpected()
+                                _ => {
+                                    parser.unexpected();
+                                }
                             }                                                        
                         }
                     }
