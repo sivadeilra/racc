@@ -1,5 +1,5 @@
 use grammar::Grammar;
-use util::{Bitmat,reverse_range};
+use util::Bitmat;
 use lr0::LR0Output;
 use std::iter::repeat;
 
@@ -54,7 +54,7 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput
 fn set_shift_table(lr0: &LR0Output) -> Vec<i16>
 {
     let mut shift_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
-    for i in range(0, lr0.shifts.len()) {
+    for i in 0..lr0.shifts.len() {
         let state = lr0.shifts[i].state;
         assert!(shift_table[state] == -1);
         shift_table[state] = i as i16;
@@ -68,7 +68,7 @@ fn set_shift_table(lr0: &LR0Output) -> Vec<i16>
 // do not have any reductions, or an index into LR0Output.reductions.
 fn set_reduction_table(lr0: &LR0Output) -> Vec<i16> {
     let mut reduction_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
-    for i in range(0, lr0.reductions.len()) {
+    for i in 0..lr0.reductions.len() {
         let state = lr0.reductions[i].state;
         assert!(reduction_table[state] == -1);
         reduction_table[state] = i as i16;
@@ -80,7 +80,7 @@ fn set_reduction_table(lr0: &LR0Output) -> Vec<i16> {
 fn set_max_rhs(gram: &Grammar) -> usize {
     let mut length: usize = 0;
     let mut max: usize = 0;
-    for itemp in range(0, gram.nitems) {
+    for itemp in 0..gram.nitems {
         if gram.ritem[itemp] >= 0 {
             length += 1;
         }
@@ -103,7 +103,7 @@ fn create_lookaheads(lr0: &LR0Output, reduction_table: &[i16]) -> Vec<i16> {
 
     // Count the total number of reductions, and also build the lookaheads table.
     let mut k = 0;
-    for i in range(0, lr0.states.len()) {
+    for i in 0..lr0.states.len() {
         lookaheads.push(k as i16);
         let rp = reduction_table[i];
         if rp != -1 {
@@ -119,11 +119,11 @@ fn create_lookaheads(lr0: &LR0Output, reduction_table: &[i16]) -> Vec<i16> {
 fn initialize_LA(lr0: &LR0Output, LA_len: usize, reduction_table: &[i16]) -> Vec<i16> {
     let mut laruleno: Vec<i16> = repeat(0).take(LA_len).collect();
     let mut k: usize = 0;
-    for i in range(0, lr0.states.len()) {
+    for i in 0..lr0.states.len() {
         let rp = reduction_table[i];
         if rp != -1 {
             let r = &lr0.reductions[rp as usize];
-            for j in range(0, r.rules.len()) {
+            for j in 0..r.rules.len() {
                 laruleno[k] = r.rules[j];
                 k += 1;
             }
@@ -138,7 +138,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     let mut goto_map: Vec<i16> = repeat(0).take(gram.nvars + 1).collect();
     let mut ngotos: usize = 0;
     for sp in lr0.shifts.iter() {
-        for i in reverse_range(sp.shifts.len(), 0) {
+        for i in (0..sp.shifts.len()).rev() {
             let state = sp.shifts[i] as usize;
             let symbol = lr0.states[state].accessing_symbol;
 
@@ -159,11 +159,11 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // that this could easily be done in place.
     let mut k: i16 = 0;
     let mut temp_map: Vec<i16> = Vec::with_capacity(gram.nvars + 1);
-    for i in range(0, gram.nvars) {
+    for i in 0..gram.nvars {
         temp_map.push(k);
         k += goto_map[i];
     }
-    for i in range(0, gram.nvars) {
+    for i in 0..gram.nvars {
         goto_map[i] = temp_map[i];
     }
 
@@ -175,7 +175,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     let mut to_state: Vec<i16> = repeat(0).take(ngotos).collect();
 
     for sp in lr0.shifts.iter() {
-        for i in reverse_range(sp.shifts.len(), 0) {
+        for i in (0..sp.shifts.len()).rev() {
             let state2 = sp.shifts[i];
             let symbol = lr0.states[state2 as usize].accessing_symbol;
             if gram.is_token(symbol as usize) {
@@ -190,12 +190,12 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     }
 
     debug!("set_goto_map: ngotos={}", ngotos);
-    for i in range(0, ngotos) {
+    for i in 0..ngotos {
         debug!("    from {:3} to {:3}", from_state[i], to_state[i]);
     }
 
     debug!("goto_map:");
-    for i in range(0, gram.nvars) {
+    for i in 0..gram.nvars {
         debug!("    {:3} {} --> {}", i, gram.name[i + gram.ntokens], goto_map[i]);
     }
     debug!(".");
@@ -246,7 +246,7 @@ fn initialize_F(
     let mut reads: Vec<Vec<i16>> = repeat(Vec::new()).take(ngotos).collect();
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);
 
-    for i in range(0, ngotos) {
+    for i in 0..ngotos {
         let stateno = gotos.to_state[i] as usize;
         let sp = shift_table[stateno];
 
@@ -307,7 +307,7 @@ fn build_relations(
     let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1);   // temporary, reused in loops
     let mut lookback: Vec<Vec<i16>> = repeat(Vec::new()).take(LA_len).collect();
 
-    for i in range(0, ngotos) {
+    for i in 0..ngotos {
         assert!(edge.len() == 0);
         assert!(states.len() == 0);
 
@@ -388,7 +388,7 @@ fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>>
     assert!(r2.len() == n);
 
     let mut nedges: Vec<i16> = repeat(0).take(n).collect();
-    for i in range(0, n) {
+    for i in 0..n {
         let sp = &r2[i];
         if sp.len() > 0 {
             let mut j: usize = 0;
@@ -402,7 +402,7 @@ fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>>
 
     let mut new_R: Vec<Vec<i16>> = repeat(Vec::new()).take(n).collect();
 
-    for i in range(0, n) {
+    for i in 0..n {
         let k = nedges[i];
         if k > 0 {
             let mut sp: Vec<i16> = repeat(0).take((k as usize) + 1).collect();
@@ -413,7 +413,7 @@ fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>>
     drop(nedges);
 
     let mut temp_R: Vec<i16> = repeat(0).take(n).collect();        // contains output columns
-    for i in range(0, n) {              // i is old-row
+    for i in 0..n {              // i is old-row
         let sp = &r2[i];
         let mut j: usize = 0;            // j is old-col
         if sp.len() > 0 {
@@ -445,7 +445,7 @@ fn compute_lookaheads(gram: &Grammar, lr0: &LR0Output, lookaheads: &[i16], lookb
     assert!(F.cols == LA.cols);
     assert!(F.rowsize == LA.rowsize);
 
-    for i in range(0, n) {
+    for i in 0..n {
         let fp3 = (i + 1) * LA.rowsize;
         for sp in lookback[i].iter() {
             let mut fp1 = i * LA.rowsize;
@@ -484,7 +484,7 @@ fn digraph(relation: &Vec<Vec<i16>>, F: &mut Bitmat) {
         F: F
     };
 
-    for i in range(0, ngotos) {
+    for i in 0..ngotos {
         if ds.index[i] == 0 && relation[i].len() != 0 {
             traverse(&mut ds, i);
         }

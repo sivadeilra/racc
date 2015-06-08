@@ -254,11 +254,12 @@ extern crate rustc;
 extern crate syntax;
 
 use syntax::ast;
-use syntax::ext::base::{ExtCtxt, MacResult, MacItems};
+use syntax::ext::base::{ExtCtxt, MacResult, MacEager};
 use syntax::codemap;
 use syntax::parse::token::Token;
 use syntax::ptr::P;
 use syntax::print::pprust;
+use syntax::util::small_vector::SmallVector;
 use rustc::plugin::Registry;
 
 mod closure;
@@ -292,7 +293,10 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
     //      <context-type> <context-param> ;
     //     
     let context_type_ident = parser.parse_ty();
-    let context_param_ident = parser.parse_ident();
+    let context_param_ident = match parser.parse_ident() {
+        Ok(ident) => ident,
+        Err(_)    => panic!("Fatal Error at parse_ident")
+    };
     parser.expect(&Token::Semi);
 
     // The type of the symbol values (on values.stack)
@@ -317,5 +321,10 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
         debug!("{}", pprust::item_to_string(&**it));
     }
 
-    MacItems::new(gen_items.into_iter())
+    Box::new(
+        MacEager {
+            items: Some(SmallVector::many(gen_items)),
+            ..Default::default()
+        }
+    )
 }

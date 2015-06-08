@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-#[derive(Copy,Debug)]
+#[derive(Clone,Copy,Debug)]
 pub enum PushTokenResult {
     Ok,                         // The token was consumed.
     SyntaxError
@@ -36,7 +36,6 @@ pub enum FinishParseResult<SymbolValue> {
 /// //         }
 /// //     }
 /// // ```
-#[derive(Copy)]
 pub struct ParserTables<SymbolValue:Debug, AppContext> {
     pub yyrindex: &'static [u16],
     pub yysindex: &'static [u16],
@@ -116,7 +115,7 @@ impl<SymbolValue:Debug, AppContext> ParserState<SymbolValue, AppContext> {
         self.value_stack.push(reduce_value);
 
         // pop states
-        for _ in range(0, len) {
+        for _ in 0..len {
             self.state_stack.pop().unwrap();
         }
         let top_state = self.state_stack[self.state_stack.len() - 1] as usize;

@@ -14,7 +14,6 @@ use syntax::owned_slice::OwnedSlice;
 use grammar::Grammar;
 use mkpar::{ActionCode, YaccParser};
 use lalr::GotoMap;
-use util::reverse_range;
 
 const I16_MAX: i16 = 0x7fff;
 const I16_MIN: i16 = -0x8000;
@@ -72,10 +71,10 @@ pub fn output_parser_to_ast(
         items.push(i);
     }
 
-    for t in range(1, gram.ntokens) {
+    for t in 1..gram.ntokens {
         // todo: use the original Ident from parsing, for better error reporting
         let tokvalue = gram.value[t];
-        let tok_ident = cx.ident_of(gram.name[t].as_slice());
+        let tok_ident = cx.ident_of(&gram.name[t]);
         let ty_u32 = quote_ty!(cx, u32);
         items.push(cx.item_const(sp, tok_ident, ty_u32, expr_u32(cx, sp, tokvalue as u32)));
     }
@@ -107,7 +106,7 @@ pub fn output_parser_to_ast(
                 // We need to pop items off the stack and associate them with variables from right to left.
                 let rhs_index = gram.rrhs[rule] as usize;
                 let rhs = gram.get_rhs_items(rule);
-                for i in reverse_range(rhs.len(), 0) {
+                for i in (0..rhs.len()).rev() {
                     match rhs_binding[rhs_index + i] {
                         Some(rbind) => {
                             stmts.push(cx.stmt_let_typed(sp, false, rbind, 
@@ -229,7 +228,7 @@ pub fn output_parser_to_ast(
 
     // Emit the YYLEN table.
     items.push({
-        let yylen: Vec<i16> = range(2, gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
+        let yylen: Vec<i16> = (2..gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
         make_table_i16(cx, sp, "YYLEN", yylen.as_slice())
     });
 
@@ -244,7 +243,7 @@ pub fn output_parser_to_ast(
 fn output_rule_data(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
     let mut data: Vec<i16> = Vec::new();
     data.push(gram.value[gram.start_symbol]);
-    for i in range(3, gram.nrules) {
+    for i in 3..gram.nrules {
         data.push(gram.value[gram.rlhs[i] as usize]);
     }
     make_table_i16(cx, span, "YYLHS", data.as_slice())
@@ -255,7 +254,7 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
     // This is ugly and inefficient.
 
     let mut max_value: i16 = I16_MIN;
-    for i in range(0, gram.ntokens) {
+    for i in 0..gram.ntokens {
         max_value = cmp::max(max_value, gram.value[i]);
     }
 
@@ -266,7 +265,7 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
     let mut toknames: Vec<String> = repeat(String::new()).take(length).collect();
     
     // Now put the names into proper places.
-    for i in range(0, gram.ntokens) {
+    for i in 0..gram.ntokens {
         toknames[gram.value[i] as usize] = gram.name[i].clone();
     }
 
@@ -278,15 +277,15 @@ fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>
         cx.ident_of(name), 
         cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_usize(span, strings.len()))),
         Mutability::MutImmutable,
-        cx.expr_vec(span, range(0, strings.len()).map(|i| {
-            let iname = intern_and_get_ident(strings[i].as_slice());
+        cx.expr_vec(span, (0..strings.len()).map(|i| {
+            let iname = intern_and_get_ident(&strings[i]);
             cx.expr_str(span, iname)
         }
         ).collect()))
 }
 
 fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
-    let rules: Vec<String> = range(2, gram.nrules).map(|rule| gram.rule_to_str(rule)).collect();
+    let rules: Vec<String> = (2..gram.nrules).map(|rule| gram.rule_to_str(rule)).collect();
     make_table_string(cx, span, "YYRULES", &rules)
 }
 
@@ -380,7 +379,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     let mut tos: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
     let mut actionrow: Vec<i16> = repeat(0).take(2 * gram.ntokens).collect();
 
-    for i in range(0, nstates) {
+    for i in 0..nstates {
         let actions = &parser.actions[i];
         if actions.len() != 0 {
             debug!("    state={}", i);
@@ -417,7 +416,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut s: Vec<i16> = Vec::with_capacity(shiftcount);
                 let mut min = I16_MAX;
                 let mut max = 0;
-                for j in range(0, gram.ntokens) {
+                for j in 0..gram.ntokens {
                     if actionrow[j] != 0 {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
@@ -436,7 +435,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut s: Vec<i16> = Vec::with_capacity(reducecount);
                 let mut min = I16_MAX;
                 let mut max = 0;
-                for j in range(0, gram.ntokens) {
+                for j in 0..gram.ntokens {
                     if actionrow[gram.ntokens + j] != 0 {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
@@ -477,17 +476,17 @@ fn default_goto(
         return 0;
     }
 
-    for i in range(0, nstates) {
+    for i in 0..nstates {
         state_count[i] = 0;
     }
 
-    for i in range(m, n) {
+    for i in m..n {
         state_count[gotos.to_state[i] as usize] += 1;
     }
 
     let mut max = 0;
     let mut default_state = 0;
-    for i in range(0, nstates) {
+    for i in 0..nstates {
         if state_count[i] > max {
             max = state_count[i];
             default_state = i;
@@ -512,7 +511,7 @@ fn save_column(
     debug!("save_column: symbol={} default_state={} m={} n={}", symbol, default_state, m, n);
 
     let mut count: usize = 0;
-    for i in range(m, n) {
+    for i in m..n {
         if (gotos.to_state[i] as usize) != default_state {
             debug!("    to_state[{}]={}", i, gotos.to_state[i]);
             count += 1;
@@ -526,7 +525,7 @@ fn save_column(
 
     let mut spf: Vec<i16> = Vec::with_capacity(count);
     let mut spt: Vec<i16> = Vec::with_capacity(count);
-    for i in range(m, n) {
+    for i in m..n {
         if (gotos.to_state[i] as usize) != default_state {
             spf.push(gotos.from_state[i]);
             spt.push(gotos.to_state[i]);
@@ -553,7 +552,7 @@ fn goto_actions(gram: &Grammar, nstates: usize, gotos: &GotoMap, act: &mut Actio
     dgoto_table.push(k as i16);
     save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
 
-    for i in range(gram.start_symbol + 2, gram.nsyms) {
+    for i in (gram.start_symbol + 2)..gram.nsyms {
         let k = default_goto(gram, gotos, i, nstates, &mut state_count);
         dgoto_table.push(k as i16);
         save_column(gram, nstates, gotos, i, k, act);
@@ -568,7 +567,7 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
     let mut order: Vec<usize> = repeat(0).take(act.nvectors).collect();
     let mut nentries: isize = 0;
 
-    for i in range(0, act.nvectors) {
+    for i in 0..act.nvectors {
         debug!("tally[{}]={}", i, act.tally[i]);
         if act.tally[i] > 0 {
             let t = act.tally[i];
@@ -600,7 +599,7 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
     }
 
     debug!("order:");
-    for i in range(0, order.len()) {
+    for i in 0..order.len() {
         debug!("    {}", order[i]);
     }
     debug!("nentries={}", nentries);
@@ -636,14 +635,14 @@ fn matching_vector(pack: &PackState, vector: usize) -> Option<usize>
 
     let act = pack.act;
 
-    for prev in reverse_range(vector, 0) {
+    for prev in (0..vector).rev() {
         let j = pack.order[prev];
         if act.width[j] != w || act.tally[j] != t {
             return None;
         }
 
         let mut is_match = true;
-        for k in range(0, t as usize) {
+        for k in 0..(t as usize) {
             if act.tos[j][k] != act.tos[i][k] || act.froms[j][k] != act.froms[i][k] {
                 is_match = false;
                 break;

@@ -1,4 +1,3 @@
-use std::num::Int;
 use std::iter::repeat;
 
 pub const BITS_PER_WORD: usize = 32;
@@ -216,32 +215,3 @@ impl Bitv32 {
         bit_vector_iter_ones(self.data.as_slice(), self.nbits)
     }
 }
-
-pub struct ReverseRange<A:Int> {
-    state: A,
-    stop: A,
-    one: A,
-}
-
-pub fn reverse_range<A:Int>(start: A, stop: A) -> ReverseRange<A> {
-    ReverseRange {
-        state: start,
-        stop: stop,
-        one: Int::one(),
-    }
-}
-
-impl<A:Int> Iterator for ReverseRange<A> {
-    type Item = A;
-    fn next(&mut self) -> Option<A> {
-        if self.state > self.stop {
-            self.state = self.state - self.one;
-            Some(self.state)
-        }
-        else {
-            None
-        }
-    }
-}
-
-
