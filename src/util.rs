@@ -212,6 +212,6 @@ impl Bitv32 {
     }
 
     pub fn iter_ones<'a>(&'a self) -> BitMaskIterator<'a> {
-        bit_vector_iter_ones(self.data.as_slice(), self.nbits)
+        bit_vector_iter_ones(&self.data, self.nbits)
     }
 }
