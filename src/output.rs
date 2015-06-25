@@ -64,7 +64,7 @@ pub fn output_parser_to_ast(
 
     items.push({
         let v: Vec<i16> = parser.default_reductions.iter().map(|s| if *s != 0 { *s - 2 } else { 0 }).collect();
-        make_table_i16(cx, grammar_span, "YYDEFRED", v.as_slice())
+        make_table_i16(cx, grammar_span, "YYDEFRED", &v)
     });
 
     for i in output_actions(cx, grammar_span, gram, gotos, parser).into_iter() {
@@ -200,7 +200,6 @@ pub fn output_parser_to_ast(
                 sp,
                 /*path: */ cx.path_ident(sp, cx.ident_of("ParserTables")),
                 /*fields:*/ {
-                    let as_slice_ident = cx.ident_of("as_slice");
                     let mut fields: Vec<ast::Field> = (vec![
                         ("yyrindex", "YYRINDEX"),
                         ("yygindex", "YYGINDEX"),
@@ -214,7 +213,7 @@ pub fn output_parser_to_ast(
                         ("yyname", "YYNAME"),       // for debugging
                         ("yyrules", "YYRULES")      // for debugging
                     ]).into_iter().map(|(field, sitem)|
-                            cx.field_imm(sp, cx.ident_of(field), cx.expr_method_call(sp, cx.expr_ident(sp, cx.ident_of(sitem)), as_slice_ident, vec![]))
+                            cx.field_imm(sp, cx.ident_of(field), cx.expr_addr_of(sp, cx.expr_ident(sp, cx.ident_of(sitem))))
                         ).collect();
                     fields.push(cx.field_imm(sp, cx.ident_of("yyfinal"), cx.expr_ident(sp, cx.ident_of("YYFINAL"))));
                     fields.push(cx.field_imm(sp, cx.ident_of("reduce"), cx.expr_ident(sp, cx.ident_of("reduce"))));
@@ -229,7 +228,7 @@ pub fn output_parser_to_ast(
     // Emit the YYLEN table.
     items.push({
         let yylen: Vec<i16> = (2..gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
-        make_table_i16(cx, sp, "YYLEN", yylen.as_slice())
+        make_table_i16(cx, sp, "YYLEN", &yylen)
     });
 
     // emit some tables just for debugging
@@ -246,7 +245,7 @@ fn output_rule_data(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
     for i in 3..gram.nrules {
         data.push(gram.value[gram.rlhs[i] as usize]);
     }
-    make_table_i16(cx, span, "YYLHS", data.as_slice())
+    make_table_i16(cx, span, "YYLHS", &data)
 }
 
 fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
@@ -348,10 +347,10 @@ fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, par
     let dgoto = goto_actions(gram, nstates, gotos, &mut act);
     let (nentries, order) = sort_actions(&mut act);
     
-    let packed = pack_table(parser.nstates, nentries, order.as_slice(), &act);
+    let packed = pack_table(parser.nstates, nentries, &order, &act);
 
     // debug!("emitting tables");
-    items.push(make_table_i16(cx, span, "YYDGOTO", dgoto.as_slice()));
+    items.push(make_table_i16(cx, span, "YYDGOTO", &dgoto));
 
     // was output_base
     items.push(make_table_i16(cx, span, "YYSINDEX", &packed.base[.. nstates]));

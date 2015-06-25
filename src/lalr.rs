@@ -25,21 +25,21 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput
 {
     let shift_table = set_shift_table(lr0);
     let reduction_table = set_reduction_table(lr0);
-    let lookaheads = create_lookaheads(lr0, reduction_table.as_slice());
+    let lookaheads = create_lookaheads(lr0, &reduction_table);
 
     // the LA and lookback tables have len() = LA_len
     let LA_len = lookaheads[lookaheads.len() - 1] as usize;
 
-    let laruleno = initialize_LA(lr0, LA_len, reduction_table.as_slice());
+    let laruleno = initialize_LA(lr0, LA_len, &reduction_table);
     let gotos = set_goto_map(gram, lr0);
 
-    let mut F = initialize_F(gram, lr0, &gotos, shift_table.as_slice());
+    let mut F = initialize_F(gram, lr0, &gotos, &shift_table);
 
-    let (includes, lookback) = build_relations(gram, lr0, shift_table.as_slice(), &gotos, lookaheads.as_slice(), laruleno.as_slice(), LA_len);
+    let (includes, lookback) = build_relations(gram, lr0, &shift_table, &gotos, &lookaheads, &laruleno, LA_len);
     
     compute_FOLLOWS(&includes, &mut F);
     
-    let LA = compute_lookaheads(gram, lr0, lookaheads.as_slice(), &lookback, &F);
+    let LA = compute_lookaheads(gram, lr0, &lookaheads, &lookback, &F);
 
     LALROutput {
         shift_table: shift_table,
@@ -276,7 +276,7 @@ fn initialize_F(
             if edge.len() != 0 {
                 let mut rp: Vec<i16> = Vec::with_capacity(edge.len() + 1);
                 rp.reserve_exact(edge.len() + 1);
-                rp.push_all(edge.as_slice());
+                rp.push_all(&edge);
                 rp.push(-1);
                 reads[i] = rp;
                 edge.clear();
@@ -355,7 +355,7 @@ fn build_relations(
 
         if edge.len() != 0 {
             let mut shortp: Vec<i16> = Vec::with_capacity(edge.len() + 1);
-            shortp.push_all(edge.as_slice());
+            shortp.push_all(&edge);
             shortp.push(-1);
             includes[i] = shortp;
         }

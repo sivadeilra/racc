@@ -241,6 +241,8 @@
 #![feature(plugin_registrar)]
 #![feature(quote)]
 #![feature(plugin)]
+#![feature(rustc_private)]
+#![feature(collections)]
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]

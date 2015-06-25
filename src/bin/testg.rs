@@ -1,4 +1,4 @@
-#![feature(plugin)]
+#![feature(plugin, core, std_misc)]
 
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
@@ -6,14 +6,16 @@
 #![allow(unused_variables)]
 #![allow(unstable)]
 
-#[plugin]
+#![plugin(racc)]
+ 
 #[macro_use]
-extern crate log;
 
-#[plugin]
+extern crate log;
 extern crate racc;
+extern crate core;
 
 use racc::runtime::{ParserState,ParserTables,FinishParseResult};
+use core::array::FixedSizeArray;
 
 struct AppContext {
     x: usize

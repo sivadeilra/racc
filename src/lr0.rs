@@ -105,10 +105,10 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         kernel_base: kernel_base,
         kernel_end: repeat(-1).take(gram.nsyms).collect(),
         kernel_items: repeat(0).take(kernel_items_count).collect(),
-        states: initialize_states(gram, derives.as_slice(), derives_rules.as_slice())
+        states: initialize_states(gram, &derives, &derives_rules)
     };
 
-    let first_derives = set_first_derives(gram, derives.as_slice(), derives_rules.as_slice());
+    let first_derives = set_first_derives(gram, &derives, &derives_rules);
 
     // These vectors are used for building tables during each state.
     // It is inefficient to allocate and free these vectors within
@@ -134,7 +134,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
-        // debug!("    nucleus items: {}", lr0.states[this_state].items.as_slice());
+        // debug!("    nucleus items: {}", &lr0.states[this_state].items);
         closure(gram, &lr0.states[this_state].items, &first_derives, gram.nrules, &mut rule_set, &mut item_set);
 
         // The output of save_reductions() is stored in reductions.
@@ -367,7 +367,7 @@ fn set_derives(gram: &Grammar) -> (Vec<i16>, Vec<i16>) // (derives, derives_rule
         derives_rules.push(-1);
     }
 
-    print_derives(gram, derives.as_slice(), derives_rules.as_slice());
+    print_derives(gram, &derives, &derives_rules);
 
     (derives, derives_rules)
 }
