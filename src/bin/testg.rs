@@ -1,4 +1,4 @@
-#![feature(plugin, core, std_misc)]
+#![feature(plugin, core, std_misc, fixed_size_array, rt)]
 
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]

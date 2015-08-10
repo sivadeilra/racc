@@ -243,6 +243,7 @@
 #![feature(plugin)]
 #![feature(rustc_private)]
 #![feature(collections)]
+#![feature(vec_push_all)]
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
