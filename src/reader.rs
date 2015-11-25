@@ -619,9 +619,9 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                 //      = (defines a token with a specific value)
                 //      ; (defines a token with an automatically-assigned value)
 
-                let name_def_str = id.as_str();
+                let name_def_str = id.name.as_str();
                 let name_def_span = parser.span;
-                let lhs = reader.lookup(name_def_str, name_def_span);
+                let lhs = reader.lookup(&name_def_str, name_def_span);
 
                 parser.bump();
             
@@ -663,9 +663,9 @@ pub fn read_grammar<'a>(grammar_sp: codemap::Span, parser: &mut Parser)
                         loop {
                             match parser.token {
                                 Token::Ident(rhs_ident, _) => {
-                                    let rhs_name = rhs_ident.as_str();
+                                    let rhs_name = rhs_ident.name.as_str();
                                     // debug!("rule: found token/symbol ref '{}'", rhs_name);                                    
-                                    let rhs = reader.lookup(rhs_name, parser.span);
+                                    let rhs = reader.lookup(&rhs_name, parser.span);
                                     parser.bump();
 
                                     // see if the symbol is followed by "= binding".
