@@ -1,16 +1,16 @@
-use grammar::Grammar;
-use util::{Bitmat,Bitv32,word_size};
-use warshall::reflexive_transitive_closure;
+use crate::grammar::Grammar;
+use crate::util::{word_size, Bitmat, Bitv32};
+use crate::warshall::reflexive_transitive_closure;
+use log::debug;
 
 /// Computes the "epsilon-free firsts" (EFF) relation.
 /// The EFF is a bit matrix [nvars, nvars].
-fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat
-{
+fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
     let nvars = gram.nvars;
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
-    for row in (0..nvars) {
+    for row in 0..nvars {
         let mut sp = derives[gram.start_symbol + row] as usize;
-		let mut rule = derives_rules[sp];
+        let mut rule = derives_rules[sp];
         while rule > 0 {
             let symbol = gram.ritem[gram.rrhs[rule as usize] as usize] as usize;
             if gram.is_var(symbol) {
@@ -36,17 +36,13 @@ fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat
 ///
 /// This implementation processes bits in groups of 32, for the sake of efficiency.
 /// It is not clear whether this complexity is still justifiable, but it is preserved.
-pub fn set_first_derives(
-    gram: &Grammar, 
-    derives: &[i16], 
-    derives_rules: &[i16]) -> Bitmat
-{
+pub fn set_first_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
     // Compute EFF, which is a [nvars, nvars] bit matrix
     let eff = set_eff(gram, derives, derives_rules);
 
     let mut first_derives = Bitmat::new(gram.nvars, gram.nrules);
 
-        /* known good, old
+    /* known good, old
     for i in range(0, gram.nvars) {
         let mut vrow = i * eff.rowsize;     // used to read cols for an eff row, j is column
         let mut cword: u32 = 0;
@@ -66,14 +62,13 @@ pub fn set_first_derives(
                     rp += 1;
                 }
             }
-        
-        	k += 1; // advance to next bit
+
+            k += 1; // advance to next bit
         }
     }
         */
 
-
-        /* this works! iter based
+    /* this works! iter based
     for i in range(0, gram.nvars) {
         for j in eff.iter_ones_in_row(i) {
             let mut rp = derives[gram.start_symbol + j] as usize;
@@ -93,8 +88,6 @@ pub fn set_first_derives(
             rp += 1;
         }
     }
-
-
 
     print_first_derives(gram, &first_derives);
     first_derives
@@ -117,8 +110,9 @@ pub fn closure(
     nucleus: &[i16],
     first_derives: &Bitmat,
     nrules: usize,
-    rule_set: &mut Bitv32,      // bit vector, size=nrules; temporary data, written and read by this fn
-    item_set: &mut Vec<i16>)    // output is written to this vec
+    rule_set: &mut Bitv32, // bit vector, size=nrules; temporary data, written and read by this fn
+    item_set: &mut Vec<i16>,
+) // output is written to this vec
 {
     assert!(item_set.len() == 0);
 
@@ -138,7 +132,7 @@ pub fn closure(
         let symbol = gram.ritem[ni as usize];
         if symbol >= 0 && gram.is_var(symbol as usize) {
             let dsp: usize = ((symbol as usize) - gram.ntokens) * first_derives.rowsize;
-            for i in (0..rulesetsize) {
+            for i in 0..rulesetsize {
                 rule_set.data[i] |= first_derives.data[dsp + i];
             }
         }
@@ -164,10 +158,9 @@ pub fn closure(
     }
 }
 
-fn print_eff(gram: &Grammar, eff: &Bitmat)
-{
+fn print_eff(gram: &Grammar, eff: &Bitmat) {
     debug!("Epsilon Free Firsts");
-    for i in (0..eff.rows) {
+    for i in 0..eff.rows {
         debug!("{}", gram.name[gram.start_symbol + i]);
         for j in eff.iter_ones_in_row(i) {
             let s: usize = gram.start_symbol + j;
@@ -177,12 +170,11 @@ fn print_eff(gram: &Grammar, eff: &Bitmat)
 }
 
 // first_derives: cols = nrules
-fn print_first_derives(gram: &Grammar, first_derives: &Bitmat)
-{
+fn print_first_derives(gram: &Grammar, first_derives: &Bitmat) {
     debug!("");
     debug!("First Derives");
     debug!("");
-    for i in (0..gram.nvars) {
+    for i in 0..gram.nvars {
         debug!("{} derives:", gram.name[gram.start_symbol + i]);
         for j in first_derives.iter_ones_in_row(i) {
             debug!("    {}", rule_to_string(gram, j));
@@ -190,19 +182,14 @@ fn print_first_derives(gram: &Grammar, first_derives: &Bitmat)
     }
 }
 
-fn rule_to_string(gram: &Grammar, rule: usize) -> String
-{
+fn rule_to_string(gram: &Grammar, rule: usize) -> String {
     let mut result = String::new();
     let rlhs = gram.rlhs[rule] as usize;
-    result.push_str(
-        &format!("(r{}) {} : ", rule, gram.name[rlhs])
-    );
+    result.push_str(&format!("(r{}) {} : ", rule, gram.name[rlhs]));
 
-    for i in gram.rrhs[rule]..gram.rrhs[rule+1]-1 {
+    for i in gram.rrhs[rule]..gram.rrhs[rule + 1] - 1 {
         let rhs = gram.ritem[i as usize];
-        result.push_str(
-            &format!(" {}", gram.name[rhs as usize])
-        );
+        result.push_str(&format!(" {}", gram.name[rhs as usize]));
     }
     result
 }

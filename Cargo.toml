@@ -5,10 +5,15 @@ authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 readme = "README.md"
 license = "MIT"
 description = "RACC is a port of Berkeley YACC to Rust, and allows you to write grammar definitions directly in Rust source code."
+edition = "2018"
 
 [lib]
 name = "racc"
-crate-type = ["dylib"]
+crate-type = ["proc-macro"]
+proc-macro = true
 
-[dependencies.log]
-log = "0.1.19"
+[dependencies]
+log = "0.4.*"
+syn = { version = "0.15", features = ["full"] }
+quote = "0.6"
+proc-macro2 = "0.4"

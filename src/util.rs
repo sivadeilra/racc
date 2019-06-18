@@ -5,45 +5,44 @@ pub const BITS_PER_WORD: usize = 32;
 // An M x N matrix of bits
 // The representation is in row-major form.
 // The representation is exposed.
-pub struct Bitmat
-{
-	pub data: Vec<u32>,			// contains all bits in matrix, in row-major form, with padding at end of row
-	pub rows: usize,				// number of rows
-	pub cols: usize,				// number of columns
-	pub rowsize: usize			// number of u32 elements per row
+pub struct Bitmat {
+    pub data: Vec<u32>, // contains all bits in matrix, in row-major form, with padding at end of row
+    pub rows: usize,    // number of rows
+    pub cols: usize,    // number of columns
+    pub rowsize: usize, // number of u32 elements per row
 }
 
-impl Bitmat
-{
-	pub fn new(rows: usize, cols: usize) -> Bitmat
-	{
-		let rowsize = word_size(cols);
-		let total = rowsize * rows;
-		Bitmat {
-			data: repeat(0).take(total).collect(),
-			rows: rows, cols: cols, rowsize: rowsize
-		}
-	}
+impl Bitmat {
+    pub fn new(rows: usize, cols: usize) -> Bitmat {
+        let rowsize = word_size(cols);
+        let total = rowsize * rows;
+        Bitmat {
+            data: repeat(0).take(total).collect(),
+            rows: rows,
+            cols: cols,
+            rowsize: rowsize,
+        }
+    }
 
-	// note: bit() and set_bit() are carried over from the C definitions
-	// 'r' is an index directly into self.data for a particular row, and
-	// so it does not need to be multipled by rowsize.
+    // note: bit() and set_bit() are carried over from the C definitions
+    // 'r' is an index directly into self.data for a particular row, and
+    // so it does not need to be multipled by rowsize.
 
     // note: r is a word index, not a bit/row index, for the start of a row
-/*
-	pub fn bit(&self, r: usize, n: usize) -> bool {
-    	(((self.data[r + (n >> 5)]) >> (n & 31)) & 1u32) != 0
-	}
-*/
+    /*
+        pub fn bit(&self, r: usize, n: usize) -> bool {
+            (((self.data[r + (n >> 5)]) >> (n & 31)) & 1u32) != 0
+        }
+    */
 
-/*
-    // note: r is a word index, not a bit/row index, for the start of a row
-	pub fn set_bit(&mut self, r: usize, c: usize) {
-        assert!(r < self.rows * self.rowsize);
-        assert!(c < self.cols);
-    	self.data[r + (c >> 5)] |= 1u32 << (c & 31);
-	}
-*/
+    /*
+        // note: r is a word index, not a bit/row index, for the start of a row
+        pub fn set_bit(&mut self, r: usize, c: usize) {
+            assert!(r < self.rows * self.rowsize);
+            assert!(c < self.cols);
+            self.data[r + (c >> 5)] |= 1u32 << (c & 31);
+        }
+    */
 
     // sets an entry to 1, given a row/column index.
     // note that r and c are row and column indices, not word offsets.
@@ -66,7 +65,7 @@ impl Bitmat
         assert!(r < self.rows);
         // debug!("Bitmat.iter_ones_in_row: rows={} cols={} rowsize={} r={} (rowsize * r)={}", self.rows, self.cols, self.rowsize, r, self.rowsize * r);
         let rpos = self.rowsize * r;
-        bit_vector_iter_ones(&self.data[rpos .. rpos + self.rowsize], self.cols)
+        bit_vector_iter_ones(&self.data[rpos..rpos + self.rowsize], self.cols)
     }
 
     // Performs a row-major scan for bits that are set to one, and enumerates (row,col) items.
@@ -76,18 +75,17 @@ impl Bitmat
             col: 0,
             current: 0,
             xormask: 0,
-            mat: self
+            mat: self,
         }
     }
 }
 
-pub struct BitmatIterOnes<'a>
-{
-    row: usize,          // index of current row
-    col: usize,          // index of current col
-    current: u32,       // contents of current word
-    xormask: u32,       // xor mask used when loading current, used to select true/false
-    mat: &'a Bitmat
+pub struct BitmatIterOnes<'a> {
+    row: usize,   // index of current row
+    col: usize,   // index of current col
+    current: u32, // contents of current word
+    xormask: u32, // xor mask used when loading current, used to select true/false
+    mat: &'a Bitmat,
 }
 
 impl<'a> Iterator for BitmatIterOnes<'a> {
@@ -96,13 +94,17 @@ impl<'a> Iterator for BitmatIterOnes<'a> {
     fn next(&mut self) -> Option<(usize, usize)> {
         const LOW_MASK: usize = (1 << BITS_PER_WORD) - 1;
 
-        loop { // loop over rows
-            while self.col < self.mat.cols { // loop over columns
+        loop {
+            // loop over rows
+            while self.col < self.mat.cols {
+                // loop over columns
                 // Are we at a word boundary?  If so, we need to load 'current'.
                 let nextbit = self.col & LOW_MASK;
                 if nextbit == 0 {
                     // Load another word of data.
-                    self.current = self.mat.data[self.row * self.mat.rowsize + self.col / BITS_PER_WORD] ^ self.xormask;
+                    self.current = self.mat.data
+                        [self.row * self.mat.rowsize + self.col / BITS_PER_WORD]
+                        ^ self.xormask;
 
                     // Fast path.  Step over entire words, if they are empty.
                     if self.col + BITS_PER_WORD <= self.mat.cols && self.current == 0 {
@@ -130,22 +132,19 @@ impl<'a> Iterator for BitmatIterOnes<'a> {
     }
 }
 
-pub fn word_size(n: usize) -> usize
-{
+pub fn word_size(n: usize) -> usize {
     (n + (BITS_PER_WORD - 1)) / BITS_PER_WORD
 }
 
-pub struct BitMaskIterator<'a>
-{
+pub struct BitMaskIterator<'a> {
     words: &'a [u32],
-    current: u32,       // contains the bits that we are currently reading
-    xormask: u32,       // xor mask used when loading current, used to select true/false
-    nbits: usize,        // number of bits remaining in entire sequence
-    bitpos: usize,       // current bit position
+    current: u32,  // contains the bits that we are currently reading
+    xormask: u32,  // xor mask used when loading current, used to select true/false
+    nbits: usize,  // number of bits remaining in entire sequence
+    bitpos: usize, // current bit position
 }
 
-impl<'a> Iterator for BitMaskIterator<'a>
-{
+impl<'a> Iterator for BitMaskIterator<'a> {
     type Item = usize;
     // This could be made faster with a "find first set bit" intrinsic.
     fn next(&mut self) -> Option<usize> {
@@ -188,10 +187,9 @@ pub fn bit_vector_iter_ones<'a>(words: &'a [u32], nbits: usize) -> BitMaskIterat
     }
 }
 
-
 pub struct Bitv32 {
     pub data: Vec<u32>,
-    pub nbits: usize
+    pub nbits: usize,
 }
 
 impl Bitv32 {
@@ -200,7 +198,7 @@ impl Bitv32 {
         let nwords = (n + BITS_PER_WORD - 1) / BITS_PER_WORD;
         Bitv32 {
             data: repeat(w).take(nwords).collect(),
-            nbits: n
+            nbits: n,
         }
     }
 

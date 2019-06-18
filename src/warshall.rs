@@ -1,5 +1,5 @@
-use util::BITS_PER_WORD;
-use util::Bitmat;
+use crate::util::Bitmat;
+use crate::util::BITS_PER_WORD;
 
 fn transitive_closure(r: &mut Bitmat) {
     let relend = r.rows * r.rowsize;
@@ -21,8 +21,7 @@ fn transitive_closure(r: &mut Bitmat) {
                     rowj += 1;
                     rp += 1;
                 }
-            }
-            else {
+            } else {
                 rowj += r.rowsize;
             }
 

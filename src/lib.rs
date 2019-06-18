@@ -2,7 +2,7 @@
 // --------------------------------------
 //
 // This is a port of Barkeley YACC to Rust.  It runs as a syntax extension, directly in the compiler.
-// 
+//
 // This port is NOT functional yet.  The front-end (grammar parsing in reader.rs) works, the grammar
 // analysis and table-building works, and it is capable of emitting tables into the AST of the program
 // being generated.  The last missing piece is the driver code which runs the state machine.  That's
@@ -13,14 +13,14 @@
 //!
 //! RACC is implemented as a syntax extension.  You write grammar definitions directly in Rust source
 //! code.  Then you enable RACC by referencing the `racc` crate and enabling it to function as a plug-in.
-//! 
+//!
 //! # How to write a grammar
 //!
 //! Here is a very brief example of how to use RACC.  This program evaluates a very limited class
 //! of numeric expressions.
 //!
 //! ```rust,ignore
-//! 
+//!
 //! #![feature(phase)]
 //!
 //! #[phase(plugin, link)] extern crate racc;
@@ -159,7 +159,7 @@
 //! Ending the action with `;` would mean that the rule evaluates to `()`.
 //!
 //! Note that all rules must evaluate to a value, even if that value is `()` or `None`, and
-//! the type of the value must match the type specified in the grammar.  RACC (like Rust) will 
+//! the type of the value must match the type specified in the grammar.  RACC (like Rust) will
 //! not perform any implicit conversions, or insert any implicit `None` values.
 //!
 //! If you do not wish to propagate values in this way, you can use a symbol value of `()`.
@@ -238,45 +238,51 @@
 //! Feel free to send me any feedback on RACC to `arlie.davis@gmail.com`.
 
 #![crate_type = "dylib"]
+/*
 #![feature(plugin_registrar)]
 #![feature(quote)]
 #![feature(plugin)]
 #![feature(rustc_private)]
 #![feature(collections)]
 #![feature(vec_push_all)]
-
+*/
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
-#![allow(unstable)]
+// #![allow(unstable)]
+#![allow(unused_imports)]
 
-#[plugin]
-#[macro_use]
+// #[plugin]
+// #[macro_use]
 extern crate log;
 
-extern crate rustc;
-extern crate syntax;
+// extern crate rustc;
+// extern crate syntax;
 
+/*
 use syntax::ast;
 use syntax::ext::base::{ExtCtxt, MacResult, MacEager};
 use syntax::codemap;
-use syntax::parse::token::Token;
-use syntax::ptr::P;
-use syntax::print::pprust;
-use syntax::util::small_vector::SmallVector;
+use crate::syntax::parse::token::Token;
+use crate::syntax::ptr::P;
+use crate::syntax::print::pprust;
+use crate::syntax::util::small_vector::SmallVector;
 use rustc::plugin::Registry;
+*/
 
 mod closure;
 mod grammar;
 mod lalr;
 mod lr0;
+mod reader;
 mod util;
 mod warshall;
-mod reader;
-mod output;
+//mod output;
 mod mkpar;
 
 /// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
-pub mod runtime;
+mod runtime;
+
+/*
 
 #[plugin_registrar]
 pub fn plugin_registrar(reg: &mut Registry) {
@@ -294,7 +300,7 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
     // First, we read a special list of tokens:
     //
     //      <context-type> <context-param> ;
-    //     
+    //
     let context_type_ident = parser.parse_ty();
     let context_param_ident = match parser.parse_ident() {
         Ok(ident) => ident,
@@ -330,4 +336,22 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
             ..Default::default()
         }
     )
+}
+
+*/
+
+extern crate proc_macro;
+extern crate proc_macro2;
+
+extern crate syn;
+
+//use proc_macro2::TokenStream;
+use syn::{parse_macro_input, Result};
+
+#[proc_macro]
+pub fn racc(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    //let tokens = proc_macro2::TokenStream::from(tokens);
+    let g = parse_macro_input!(tokens as reader::Grammar2);
+
+    proc_macro::TokenStream::new()
 }

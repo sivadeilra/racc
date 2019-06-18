@@ -1,6 +1,6 @@
 /* keyword codes */
 
-pub const TOKEN: u8 =0;
+pub const TOKEN: u8 = 0;
 /*
 pub const LEFT: u8 =1;
 pub const RIGHT: u8 =2;
@@ -74,25 +74,23 @@ impl Grammar {
 
     pub fn rule_to_str(&self, r: usize) -> String {
         let mut s = String::new();
-        s.push_str(
-            &format!("(r{}) {} :", r, self.name[self.rlhs[r] as usize])
-        );
-        for it in self.ritem[self.rrhs[r] as usize ..].iter() {
-            if *it < 0 { break; } // end of this rule
-            s.push_str(
-                &format!(" {}", self.name[*it as usize])
-            );
+        s.push_str(&format!("(r{}) {} :", r, self.name[self.rlhs[r] as usize]));
+        for it in self.ritem[self.rrhs[r] as usize..].iter() {
+            if *it < 0 {
+                break;
+            } // end of this rule
+            s.push_str(&format!(" {}", self.name[*it as usize]));
         }
         s
     }
 
-    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a[i16] {
+    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a [i16] {
         let rhs = self.rrhs[r];
         assert!(rhs >= 0);
         let mut end = rhs as usize;
         while self.ritem[end] >= 0 {
             end += 1;
         }
-        &self.ritem[rhs as usize .. end]
+        &self.ritem[rhs as usize..end]
     }
 }

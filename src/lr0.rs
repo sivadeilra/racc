@@ -1,68 +1,63 @@
-use grammar::Grammar;
-use closure::set_first_derives;
-use closure::closure;
-use util::Bitv32;
+use crate::closure::closure;
+use crate::closure::set_first_derives;
+use crate::grammar::Grammar;
+use crate::util::Bitv32;
+use log::debug;
 use std::iter::repeat;
 
 /// the structure of the LR(0) state machine
-pub struct Core
-{
+pub struct Core {
     pub accessing_symbol: usize,
     pub items: Vec<i16>,
 }
 
 /// The structure used to record shifts
-pub struct Shifts
-{
+pub struct Shifts {
     pub state: usize,
     pub shifts: Vec<i16>,
 }
 
 /// the structure used to store reductions
-pub struct Reductions
-{
+pub struct Reductions {
     pub state: usize,
     pub rules: Vec<i16>,
 }
 
 #[derive(Default)]
-pub struct LR0Output
-{
+pub struct LR0Output {
     pub states: Vec<Core>,
     pub shifts: Vec<Shifts>,
     pub reductions: Vec<Reductions>,
     pub nullable: Vec<bool>,
     pub derives: Vec<i16>,
-    pub derives_rules: Vec<i16>
+    pub derives_rules: Vec<i16>,
 }
 
-impl LR0Output
-{
+impl LR0Output {
     pub fn nstates(&self) -> usize {
         self.states.len()
     }
 }
 
 // intermediate variables for LR(0)
-struct LR0State<'a>
-{
+struct LR0State<'a> {
     gram: &'a Grammar,
 
     // Contains the set of states that are relevant for each item.  Each entry in this
     // table corresponds to an item, so state_set.len() = nitems.  The contents of each
     // entry is a list of state indices (into LR0Output.states).
-    state_set: Vec<Vec<usize>>, 
-    
+    state_set: Vec<Vec<usize>>,
+
     states: Vec<Core>,
 
-    kernel_base: Vec<i16>,      // values in this array are indexes into the kernel_items array    
-    kernel_end: Vec<i16>,       // values in this array are indexes into the kernel_items array
+    kernel_base: Vec<i16>, // values in this array are indexes into the kernel_items array
+    kernel_end: Vec<i16>,  // values in this array are indexes into the kernel_items array
     kernel_items: Vec<i16>,
 }
 
 fn sort_shift_symbols(shift_symbol: &mut [i16]) {
     // this appears to be a bubble-sort of shift_symbol?
-    for i in 1 .. shift_symbol.len() {
+    for i in 1..shift_symbol.len() {
         let symbol = shift_symbol[i];
         let mut j = i;
         while j > 0 && (shift_symbol[j - 1]) > symbol {
@@ -105,7 +100,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         kernel_base: kernel_base,
         kernel_end: repeat(-1).take(gram.nsyms).collect(),
         kernel_items: repeat(0).take(kernel_items_count).collect(),
-        states: initialize_states(gram, &derives, &derives_rules)
+        states: initialize_states(gram, &derives, &derives_rules),
     };
 
     let first_derives = set_first_derives(gram, &derives, &derives_rules);
@@ -135,7 +130,14 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
         // debug!("    nucleus items: {}", &lr0.states[this_state].items);
-        closure(gram, &lr0.states[this_state].items, &first_derives, gram.nrules, &mut rule_set, &mut item_set);
+        closure(
+            gram,
+            &lr0.states[this_state].items,
+            &first_derives,
+            gram.nrules,
+            &mut rule_set,
+            &mut item_set,
+        );
 
         // The output of save_reductions() is stored in reductions.
         save_reductions(gram, this_state, &item_set, &mut reductions);
@@ -149,13 +151,14 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to lr0.states.  Then record the resulting shifts in 'shifts'.
         if shift_symbol.len() > 0 {
-            let shift_set: Vec<i16> = shift_symbol.iter().map(|symbol|
-                get_state(&mut lr0, *symbol as usize) as i16
-            ).collect();
+            let shift_set: Vec<i16> = shift_symbol
+                .iter()
+                .map(|symbol| get_state(&mut lr0, *symbol as usize) as i16)
+                .collect();
             debug!("    shifts: {:?}", shift_set);
             shifts.push(Shifts {
                 state: this_state,
-                shifts: shift_set
+                shifts: shift_set,
             });
         }
 
@@ -173,7 +176,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         shifts: shifts,
         nullable: set_nullable(gram),
         derives: derives,
-        derives_rules: derives_rules
+        derives_rules: derives_rules,
     }
 }
 
@@ -211,7 +214,8 @@ fn get_state(lr0: &mut LR0State, symbol: usize) -> usize {
     let new_state = lr0.states.len();
     lr0.states.push(Core {
         accessing_symbol: symbol,
-        items: vec_from_slice(&lr0.kernel_items[lr0.kernel_base[symbol] as usize .. lr0.kernel_end[symbol] as usize])
+        items: lr0.kernel_items[lr0.kernel_base[symbol] as usize..lr0.kernel_end[symbol] as usize]
+            .to_vec(),
     });
 
     // Add the new state to the state set for this symbol.
@@ -252,7 +256,7 @@ fn initialize_states(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> 
             }
             items
         },
-        accessing_symbol: 0
+        accessing_symbol: 0,
     });
 
     debug!("initial state:");
@@ -262,7 +266,10 @@ fn initialize_states(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> 
 }
 
 fn print_core(gram: &Grammar, state: usize, core: &Core) {
-    debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol]);
+    debug!(
+        "    s{} : accessing_symbol={}",
+        state, gram.name[core.accessing_symbol]
+    );
 
     let mut line = String::new();
     for i in 0..core.items.len() {
@@ -281,9 +288,7 @@ fn print_core(gram: &Grammar, state: usize, core: &Core) {
             if j == rhs {
                 line.push_str(" .");
             }
-            line.push_str(
-                &format!(" {}", gram.name[gram.ritem[j] as usize])
-            );
+            line.push_str(&format!(" {}", gram.name[gram.ritem[j] as usize]));
             j += 1;
         }
         if j == rhs {
@@ -296,7 +301,12 @@ fn print_core(gram: &Grammar, state: usize, core: &Core) {
 }
 
 // fills shift_symbol with shifts
-fn new_item_sets(gram: &Grammar, lr0: &mut LR0State, item_set: &[i16], shift_symbol: &mut Vec<i16>) {
+fn new_item_sets(
+    gram: &Grammar,
+    lr0: &mut LR0State,
+    item_set: &[i16],
+    shift_symbol: &mut Vec<i16>,
+) {
     assert!(shift_symbol.len() == 0);
 
     // reset kernel_end
@@ -320,31 +330,45 @@ fn new_item_sets(gram: &Grammar, lr0: &mut LR0State, item_set: &[i16], shift_sym
     }
 }
 
-fn save_reductions(gram: &Grammar, this_state: usize, item_set: &[i16], reductions: &mut Vec<Reductions>) {
+fn save_reductions(
+    gram: &Grammar,
+    this_state: usize,
+    item_set: &[i16],
+    reductions: &mut Vec<Reductions>,
+) {
     // Examine the items in the given item set.  If any of the items have reached the
     // end of the rhs list for a particular rule, then add that rule to the reduction set.
     // We discover this by testing the sign of the next symbol in the item; if it is
     // negative, then we have reached the end of the symbols on the rhs of a rule.  See
     // the code in reader::pack_grammar(), where this information is set up.
-    let red_count = item_set.iter().filter(|&&i| gram.ritem[i as usize] < 0).count();
+    let red_count = item_set
+        .iter()
+        .filter(|&&i| gram.ritem[i as usize] < 0)
+        .count();
     if red_count != 0 {
         reductions.push(Reductions {
             state: this_state,
             rules: {
                 let mut rules: Vec<i16> = Vec::with_capacity(red_count);
-                rules.extend(item_set.iter()
-                    .map(|&i| gram.ritem[i as usize])
-                    .filter(|&item| item < 0)
-                    .map(|item| {
-                        let rule = -item;
-                        debug!("        reduction: r{}  {}", rule, gram.rule_to_str(rule as usize));
-                        rule
-                    }));
+                rules.extend(
+                    item_set
+                        .iter()
+                        .map(|&i| gram.ritem[i as usize])
+                        .filter(|&item| item < 0)
+                        .map(|item| {
+                            let rule = -item;
+                            debug!(
+                                "        reduction: r{}  {}",
+                                rule,
+                                gram.rule_to_str(rule as usize)
+                            );
+                            rule
+                        }),
+                );
                 rules
-            }
+            },
         });
-    }
-    else {
+    } else {
         debug!("    no reductions");
     }
 }
@@ -354,7 +378,7 @@ fn set_derives(gram: &Grammar) -> (Vec<i16>, Vec<i16>) // (derives, derives_rule
 {
     // note: 'derives' appears to waste its token space; consider adjusting indices
     // so that only var indices are used
-	let mut derives: Vec<i16> = repeat(0).take(gram.nsyms).collect();
+    let mut derives: Vec<i16> = repeat(0).take(gram.nsyms).collect();
     let mut derives_rules: Vec<i16> = Vec::with_capacity(gram.nvars + gram.nrules);
 
     for lhs in gram.start_symbol..gram.nsyms {
@@ -372,8 +396,7 @@ fn set_derives(gram: &Grammar) -> (Vec<i16>, Vec<i16>) // (derives, derives_rule
     (derives, derives_rules)
 }
 
-fn print_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
-{
+fn print_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) {
     debug!("");
     debug!("DERIVES:");
     debug!("");
@@ -390,9 +413,8 @@ fn print_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
     debug!("");
 }
 
-fn set_nullable(gram: &Grammar) -> Vec<bool>
-{
-    let mut nullable: Vec<bool> = (0..gram.nsyms).map(|i| false).collect();
+fn set_nullable(gram: &Grammar) -> Vec<bool> {
+    let mut nullable: Vec<bool> = repeat(false).take(gram.nsyms).collect();
 
     let mut done_flag = false;
     while !done_flag {
@@ -418,25 +440,17 @@ fn set_nullable(gram: &Grammar) -> Vec<bool>
                     done_flag = false;
                 }
             }
-        	i += 1;
+            i += 1;
         }
     }
 
     for i in gram.start_symbol..gram.nsyms {
         if nullable[i] {
             debug!("{} is nullable", gram.name[i]);
-        }
-        else {
+        } else {
             debug!("{} is not nullable", gram.name[i]);
         }
     }
 
     nullable
-}
-
-fn vec_from_slice<T:Clone>(s: &[T]) -> Vec<T>
-{
-	let mut v = Vec::with_capacity(s.len());
-	v.push_all(s);
-	v
 }
