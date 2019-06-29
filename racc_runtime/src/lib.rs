@@ -1,19 +1,9 @@
 /// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
-
 use log::debug;
 use std::fmt::Debug;
 
-#[derive(Clone, Copy, Debug)]
-pub enum PushTokenResult {
-    Ok, // The token was consumed.
-    SyntaxError,
-}
-
-/// The final result of parsing a stream of tokens.
-///
-/// This value is returned from the `ParserState::finish` method.
-pub enum FinishParseResult<SymbolValue> {
-    Accepted(SymbolValue),
+#[derive(Clone, Debug)]
+pub enum Error {
     SyntaxError,
 }
 
@@ -82,7 +72,7 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
         tables: ParserTables<SymbolValue, AppContext>,
     ) -> ParserState<SymbolValue, AppContext> {
         ParserState {
-            tables: tables,
+            tables,
             yystate: INITIAL_STATE,
             value_stack: Vec::new(),
             state_stack: {
@@ -147,12 +137,11 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
             self.yystate = self.tables.yyfinal;
             self.state_stack.push(self.tables.yyfinal);
 
-        // todo: port acceptance code
+            // todo: port acceptance code
         } else {
             let yyn_0 = self.tables.yygindex[lhs as usize] as i16;
             let yyn_1 = yyn_0 + (self.yystate as i16);
 
-            // debug!("        checking gindex, yym={}, yyn_0={}, yyn_1={}, YYCHECK[yyn_1]={}", lhs, yyn_0, yyn_1, self.tables.yycheck[yyn_1 as usize]);
             let next_state: usize =
                 if (self.tables.yycheck[yyn_1 as usize] as usize) == self.yystate {
                     // debug!("        yystate = yytable[{}] = {}", yyn_1, self.tables.yytable[yyn_1 as usize]);
@@ -234,10 +223,9 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
         ctx: &mut AppContext,
         token: u32,
         lval: SymbolValue,
-    ) -> PushTokenResult {
-        assert!(self.state_stack.len() > 0);
+    ) -> Result<(), Error> {
+        assert!(!self.state_stack.is_empty());
 
-        debug!("");
         debug!(
             "state {}, reading {} ({}) lval {:?}, state_stack = {:?}",
             self.yystate, token, self.tables.yyname[token as usize], lval, self.state_stack
@@ -246,33 +234,30 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
 
         if self.try_shift(token, lval) {
             self.do_defreds(ctx);
-            return PushTokenResult::Ok;
+            return Ok(());
         }
 
         if self.try_reduce(ctx, token) {
             self.do_defreds(ctx);
-            return PushTokenResult::Ok;
+            return Ok(());
         }
 
         // If there is neither a shift nor a reduce action defined for this (state, token),
         // then we have encountered a syntax error.
 
         debug!("syntax error!  token is not recognized in this state.");
-        return PushTokenResult::SyntaxError;
+        Err(Error::SyntaxError)
     }
 
     /// Pushes the final "end of input" token into the state machine, and checks whether the grammar has
     /// accepted or rejected the sequence of tokens.
     ///
     /// Calling this method is the equivalent of returning `YYEOF` from a `yylex()` function in a YACC parser.
-    pub fn finish(&mut self, ctx: &mut AppContext) -> FinishParseResult<SymbolValue> {
-        assert!(self.state_stack.len() > 0);
+    pub fn finish(&mut self, ctx: &mut AppContext) -> Result<SymbolValue, Error> {
+        assert!(!self.state_stack.is_empty());
 
-        // let mut yystate = self.state_stack[self.state_stack.len() - 1] as usize;
-
-        debug!("");
         debug!(
-            "push_end: yystate={:?}  state_stack = {:?}",
+            "finish: yystate={:?}  state_stack = {:?}",
             self.yystate, self.state_stack
         );
 
@@ -282,7 +267,7 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
         if self.value_stack.len() == 1 {
             debug!("accept");
             let final_lval = self.value_stack.pop().unwrap();
-            return FinishParseResult::Accepted(final_lval);
+            return Ok(final_lval);
         }
 
         debug!(
@@ -294,6 +279,6 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
         // then we have encountered a syntax error.
 
         debug!("syntax error!  token is not recognized in this state.");
-        return FinishParseResult::SyntaxError;
+        Err(Error::SyntaxError)
     }
 }

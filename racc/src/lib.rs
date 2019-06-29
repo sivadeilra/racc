@@ -241,8 +241,7 @@
 #![allow(dead_code)]
 //#![allow(non_upper_case_globals)]
 //#![allow(unused_imports)]
-#![recursion_limit="256"]
-
+#![recursion_limit = "256"]
 
 extern crate log;
 
@@ -264,11 +263,11 @@ mod closure;
 mod grammar;
 mod lalr;
 mod lr0;
+mod mkpar;
+mod output;
 mod reader;
 mod util;
 mod warshall;
-mod output;
-mod mkpar;
 
 /*
 
@@ -286,11 +285,11 @@ extern crate proc_macro2;
 
 extern crate syn;
 
-use syn::ItemMod;
-use syn::parse_quote;
-use syn::{parse_macro_input, Ident};
-use proc_macro2::{Span};
+use proc_macro2::Span;
 use syn::export::quote::ToTokens;
+use syn::parse_quote;
+use syn::ItemMod;
+use syn::{parse_macro_input, Ident};
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -298,7 +297,7 @@ pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream 
 
     let g = parse_macro_input!(tokens as reader::Grammar2);
 
-/*
+    /*
     // First, we read a special list of tokens:
     //
     //      <context-type> <context-param> ;
@@ -317,7 +316,6 @@ pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream 
 
     let context_param_ident = Ident::new("context", Span::call_site());
 
-
     // Read the tokens and rules.
 
     let gram = &g.grammar;
@@ -334,7 +332,8 @@ pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream 
         &g.rhs_bindings,
         g.app_context_ty,
         context_param_ident,
-        g.value_ty);
+        g.value_ty,
+    );
 
     // println!("almost done!");
     // println!("{:?}", parser_tokens);

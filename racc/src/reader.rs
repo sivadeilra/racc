@@ -36,7 +36,7 @@ use std::rc::Rc;
 use log::debug;
 use log::warn;
 
-use proc_macro2::{Span};
+use proc_macro2::Span;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{Block, Ident, Token, Type};
@@ -615,13 +615,12 @@ pub struct Grammar2 {
 
 impl Parse for Grammar2 {
     fn parse(input: ParseStream) -> syn::Result<Grammar2> {
-
         let mut reader: ReaderState = ReaderState::new();
 
         use syn::parse_quote;
 
-        let app_context_ty: Type = parse_quote!{ AppContext };
-        let value_ty: Type = parse_quote!{ Option<i16> };
+        let app_context_ty: Type = parse_quote! { AppContext };
+        let value_ty: Type = parse_quote! { Option<i16> };
 
         // Add the well-known "error" symbol to the table.
         {
@@ -819,7 +818,7 @@ impl Parse for Grammar2 {
 
         // -> (Grammar, Vec<Option<Expr>>, Vec<Option<syn::Ident>>)
 
-        // println!("finished parsing grammar");        
+        // println!("finished parsing grammar");
 
         Ok(Grammar2 {
             grammar: gram,

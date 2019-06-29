@@ -31,10 +31,10 @@ pub struct YaccParser {
 }
 
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
-    let mut parser: Vec<Vec<ParserAction>> = Vec::with_capacity(lr0.nstates());
-    for state in 0..lr0.nstates() {
-        parser.push(parse_actions(gram, lr0, lalr, state));
-    }
+    let nstates = lr0.nstates();
+    let mut parser: Vec<Vec<ParserAction>> = (0..nstates)
+        .map(|state| parse_actions(gram, lr0, lalr, state))
+        .collect();
 
     let final_state = find_final_state(gram, lr0, lalr);
     remove_conflicts(lr0, final_state, &mut parser);
@@ -42,7 +42,7 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
     let defred = default_reductions(lr0, &parser);
 
     YaccParser {
-        nstates: lr0.nstates(),
+        nstates: nstates,
         actions: parser,
         default_reductions: defred,
         final_state: final_state,
@@ -157,7 +157,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize
     final_state
 }
 
-fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
+fn unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
     let mut rules_used: Vec<bool> = repeat(false).take(gram.nrules).collect();
 
     for pi in parser.iter() {
@@ -180,16 +180,17 @@ fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
     }
 }
 
-fn remove_conflicts(lr0: &LR0Output, final_state: usize, parser: &mut Vec<Vec<ParserAction>>) {
+fn remove_conflicts(lr0: &LR0Output, final_state: usize, parser: &mut [Vec<ParserAction>]) {
+    let nstates = lr0.nstates();
+    assert_eq!(parser.len(), nstates);
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    let mut srconflicts: Vec<i16> = vec![0; lr0.nstates()];
-    let mut rrconflicts: Vec<i16> = vec![0; lr0.nstates()];
-    for i in 0..lr0.nstates() {
-        let pvec = &mut parser[i];
+    let mut srconflicts: Vec<i16> = vec![0; nstates];
+    let mut rrconflicts: Vec<i16> = vec![0; nstates];
+    for (i, pvec) in parser[0..nstates].iter_mut().enumerate() {
         let mut srcount: usize = 0;
         let mut rrcount: usize = 0;
-        if pvec.len() > 0 {
+        if !pvec.is_empty() {
             let mut symbol: i16 = pvec[0].symbol;
             let mut pref: usize = 0; // index into pvec
             for p in 1..pvec.len() {
@@ -248,7 +249,7 @@ fn total_conflicts(srtotal: usize, rrtotal: usize) {
     }
 }
 
-fn sole_reduction(stateno: usize, parser: &Vec<Vec<ParserAction>>) -> usize {
+fn sole_reduction(stateno: usize, parser: &[Vec<ParserAction>]) -> usize {
     debug!("sole_reduction: state={}", stateno);
     let mut count: usize = 0;
     let mut ruleno: usize = 0;
@@ -282,7 +283,7 @@ fn sole_reduction(stateno: usize, parser: &Vec<Vec<ParserAction>>) -> usize {
     return ruleno;
 }
 
-fn default_reductions(lr0: &LR0Output, parser: &Vec<Vec<ParserAction>>) -> Vec<i16> {
+fn default_reductions(lr0: &LR0Output, parser: &[Vec<ParserAction>]) -> Vec<i16> {
     debug!("default_reductions");
     let mut defred: Vec<i16> = Vec::with_capacity(lr0.nstates());
     for i in 0..lr0.nstates() {

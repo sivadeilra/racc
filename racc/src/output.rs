@@ -1,25 +1,13 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
-
-use syn::ItemStatic;
-use syn::ItemConst;
-use syn::LitInt;
-
-use std::cmp;
-use syn::{Arm, Item,  Type, Stmt, Pat, Block, WhereClause, Generics};
-use syn::token::{Where};
-use syn::punctuated::Punctuated;
-use proc_macro2::{Span, TokenStream};
-use syn::parse::{Parse, ParseStream};
-use syn::spanned::Spanned;
-use syn::{Expr, ExprBlock, Ident, Token};
-
-use std::iter::repeat;
 use crate::grammar::Grammar;
-use crate::mkpar::{ActionCode, YaccParser};
 use crate::lalr::GotoMap;
-use quote::quote;
+use crate::mkpar::{ActionCode, YaccParser};
 use log::debug;
+use proc_macro2::{Span, TokenStream};
+use quote::quote;
+use std::cmp;
+use std::iter::repeat;
+use syn::punctuated::Punctuated;
+use syn::{Block, Generics, Ident, Type};
 
 const I16_MAX: i16 = 0x7fff;
 const I16_MIN: i16 = -0x8000;
@@ -29,28 +17,17 @@ struct ActionsTable {
     tally: Vec<i16>,
     width: Vec<i16>,
     froms: Vec<Vec<i16>>,
-    tos: Vec<Vec<i16>>
+    tos: Vec<Vec<i16>>,
 }
 
 fn no_generics() -> Generics {
-     Generics {
+    Generics {
         lt_token: None,
         params: Punctuated::new(),
         gt_token: None,
-        where_clause: None
+        where_clause: None,
     }
 }
-
-/*
-fn no_where() -> WhereClause {
-    WhereClause {
-        where_token: syn::token::Where(),
-        predicates: Punctuated::new()
-    }
-}
-*/
-
-use syn::export::quote::ToTokens;
 
 // Given a constructed parser (a description of a state machine which parses
 // a given grammar), produces a Rust AST which implements the parser.
@@ -59,12 +36,11 @@ pub fn output_parser_to_ast(
     gotos: &GotoMap,
     parser: &YaccParser,
     blocks: &[Option<Block>],
-    rhs_binding: &[Option<Ident>],
-    context_ty: Type,                      // Ident to use for the context type, passed to the reduce() method
-    context_param_ident: Ident,            // Ident to use for the context arg, passed to the reduce() method
-    symbol_value_ty: Type,                 // type to use for value_stack
-    ) -> TokenStream {
-
+    rhs_bindings: &[Option<Ident>],
+    context_ty: Type, // Ident to use for the context type, passed to the reduce() method
+    context_param_ident: Ident, // Ident to use for the context arg, passed to the reduce() method
+    symbol_value_ty: Type, // type to use for value_stack
+) -> TokenStream {
     assert!(blocks.len() == gram.nrules);
 
     let grammar_span = Span::call_site();
@@ -73,10 +49,12 @@ pub fn output_parser_to_ast(
     let mut items: TokenStream = TokenStream::new();
 
     //  Generate YYDEFRED table.
-    let yydefred: Vec<i16> = parser.default_reductions.iter().map(|s| if *s != 0 { *s - 2 } else { 0 }).collect();
-    items.extend({
-        make_table_i16(Ident::new("YYDEFRED", sp), &yydefred)
-    });
+    let yydefred: Vec<i16> = parser
+        .default_reductions
+        .iter()
+        .map(|s| if *s != 0 { *s - 2 } else { 0 })
+        .collect();
+    items.extend({ make_table_i16(Ident::new("YYDEFRED", sp), &yydefred) });
 
     items.extend(output_actions(grammar_span, gram, gotos, parser));
     // println!("output_actions done");
@@ -91,135 +69,123 @@ pub fn output_parser_to_ast(
 
     // Generate YYFINAL constant.
     let yyfinal = parser.final_state;
-    items.extend(quote!{
+    items.extend(quote! {
         const YYFINAL: usize = #yyfinal;
     });
 
     // Build up actions
     let mut action_arms: TokenStream = TokenStream::new();
-    let mut rule_iter: usize = 0;
-    for block in blocks.iter() {
-        let rule = rule_iter;
-        rule_iter += 1;
-
+    for (rule, block) in blocks.iter().enumerate() {
         if rule < 3 {
             continue;
         }
 
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
-        let mut stmts: TokenStream = TokenStream::new();
 
-        // stmts.push(parse_stmt(format!("debug!(\"{}\");", gram.rule_to_str(rule))));
-
-        let final_expr: Option<Expr> = match block {
+        let stmts: TokenStream = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right to left.
                 let rhs_index = gram.rrhs[rule] as usize;
-                let rhs = gram.get_rhs_items(rule);
-                for i in (0..rhs.len()).rev() {
-                    match &rhs_binding[rhs_index + i] {
+                let num_rhs = gram.get_rhs_items(rule).len();
+                let mut t = TokenStream::new();
+                for rhs_binding in rhs_bindings[rhs_index..rhs_index + num_rhs].iter().rev() {
+                    t.extend(match rhs_binding {
                         Some(ref rbind) => {
-                            // println!("rhs binding: {:?}", rbind);
-                            stmts.extend(quote!{
+                            quote! {
                                 let #rbind = value_stack.pop().unwrap();
-                            });
-                            // println!(".");
+                            }
                         }
                         None => {
-                            // println!("rhs binding: <none>");
                             // The rule has no binding for this value.  Pop it from the stack and discard it.
-                            stmts.extend(quote!{
+                            quote! {
                                 drop(value_stack.pop());
-                                });
+                            }
                         }
-                    }
+                    })
                 }
-                // println!("passing through block");
-                let rr = Some(Expr::Block(ExprBlock { block: block.clone(), attrs:vec![], label: None }));
-                rr
+                t.extend(quote! {#block});
+                t
             }
             None => {
                 // This reduction does not have any code to execute.  Still, we need to
                 // remove items from the value stack.
                 // println!("no action");
-                for _ in gram.get_rhs_items(rule).iter() {
-                    stmts.extend(quote!{
+                let num_rhs = gram.get_rhs_items(rule).len();
+                let mut t = TokenStream::new();
+                for _ in 0..num_rhs {
+                    t.extend(quote! {
                         drop(value_stack.pop());
                     });
                 }
-                None
+                t
             }
         };
 
         let pat_value = rule - 2;
         let rule_str = gram.rule_to_str(rule);
-        action_arms.extend(
-            quote!{
-                #pat_value => {
-                    log::debug!("{}", #rule_str);
-                    #stmts;
-                    #final_expr
-                }
-            }
-        );
-    }
-
-    items.extend(
-        quote!{
-            fn reduce(
-                // Arg::new_self(sp, Mutability::MutImmutable, ident_of("self")),
-                value_stack: &mut Vec<#symbol_value_ty>,
-                reduction: usize,
-                #context_param_ident: &mut #context_ty) -> #symbol_value_ty {
-                match reduction {
-                    #action_arms
-                    _ => unreachable!()
-                }
+        action_arms.extend(quote! {
+            #pat_value => {
+                // log::debug!("reduce: {}", #rule_str);
+                log_reduction(#rule, #rule_str);
+                #stmts
             }
         });
-    // println!("fn reduce is ok");
-    items.extend(
-        quote!{
-            fn get_parser_tables() -> racc_runtime::ParserTables<#symbol_value_ty, #context_ty> {
-                racc_runtime::ParserTables {
-                        yyrindex: &YYRINDEX,
-                        yygindex: &YYGINDEX,
-                        yysindex: &YYSINDEX,
-                        yytable: &YYTABLE,
-                        yydefred: &YYDEFRED,
-                        yylen: &YYLEN,
-                        yylhs: &YYLHS,
-                        yycheck: &YYCHECK,
-                        yydgoto: &YYDGOTO,
-                        yyname: &YYNAME,       // for debugging
-                        yyrules: &YYRULES,      // for debugging
-                        yyfinal: YYFINAL,
-                        reduce: reduce
-                    }
-                }
+    }
+
+    items.extend(quote! {
+    fn reduce(
+        value_stack: &mut Vec<#symbol_value_ty>,
+        reduction: usize,
+        #context_param_ident: &mut #context_ty) -> #symbol_value_ty {
+
+        fn log_reduction(rule: usize, reduction_text: &'static str) {
+            log::debug!("reduction: {} {}", rule, reduction_text);
+        }
+
+        match reduction {
+            #action_arms
+            _ => unreachable!()
+        }
+    }
+
+    fn new_parser() -> racc_runtime::ParserState<#symbol_value_ty, #context_ty> {
+        racc_runtime::ParserState::new(get_parser_tables())
+    }
+
+    fn get_parser_tables() -> racc_runtime::ParserTables<#symbol_value_ty, #context_ty> {
+        racc_runtime::ParserTables {
+                yyrindex: &YYRINDEX,
+                yygindex: &YYGINDEX,
+                yysindex: &YYSINDEX,
+                yytable: &YYTABLE,
+                yydefred: &YYDEFRED,
+                yylen: &YYLEN,
+                yylhs: &YYLHS,
+                yycheck: &YYCHECK,
+                yydgoto: &YYDGOTO,
+                yyname: &YYNAME,       // for debugging
+                yyrules: &YYRULES,      // for debugging
+                yyfinal: YYFINAL,
+                reduce: reduce
             }
-        );
-    // println!("fn get_parser_tables is ok");
+        }
+    });
 
     items.extend(output_rule_data(gram));
-    // println!("output_rule_data is ok");
 
     // Emit the YYLEN table.
     items.extend({
-        let yylen: Vec<i16> = (2..gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
+        let yylen: Vec<i16> = (2..gram.nrules)
+            .map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1)
+            .collect();
         make_table_i16(Ident::new("YYLEN", sp), &yylen)
     });
-    // println!("YYLEN is ok");
 
     // emit some tables just for debugging
     items.extend(make_symbol_names_table(sp, gram));
-    // println!("make_symbol_names_table is ok");
 
     items.extend(make_rule_text_table(sp, gram));
-    // println!("make_rule_text_table is ok");
-
-    // println!("{}", items);
 
     items
 }
@@ -248,7 +214,7 @@ fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
     let length = (max_value + 1) as usize;
 
     let mut toknames: Vec<String> = repeat(String::new()).take(length).collect();
-    
+
     // Now put the names into proper places.
     for i in 0..gram.ntokens {
         toknames[gram.value[i] as usize] = gram.name[i].clone();
@@ -259,33 +225,23 @@ fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
 
 fn make_table_string(name: Ident, strings: &[String]) -> TokenStream {
     let strings_len = strings.len();
-    let strings: Vec<syn::LitStr> = strings.iter().map(|s|  syn::LitStr::new(s,  name.span())).collect();
-    quote!{
+    let strings: Vec<syn::LitStr> = strings
+        .iter()
+        .map(|s| syn::LitStr::new(s, name.span()))
+        .collect();
+    quote! {
         static #name: [&str; #strings_len] = [
             #( #strings ),*
         ];
     }
-
 }
 
 fn make_rule_text_table(span: Span, gram: &Grammar) -> TokenStream {
-    let rules: Vec<String> = (2..gram.nrules).map(|rule| gram.rule_to_str(rule)).collect();
+    let rules: Vec<String> = (2..gram.nrules)
+        .map(|rule| gram.rule_to_str(rule))
+        .collect();
     make_table_string(Ident::new("YYRULES", span), &rules)
 }
-
-/*
-#[allow(dead_code)]
-fn make_table_usize(name: Ident, values: &[usize]) -> Item {
-    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_usize(span, *value)).collect());
-    let ty_usize = quote!(usize);
-    let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_usize, cx.expr_usize(span, values.len())));
-    let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
-    // debug!("built table item for '{}': values {}", name, values);
-    // debug!("item: {}", pprust::item_to_string(&*table_item));
-    table_item
-}
-*/
 
 fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
     make_table_i16_as_u16(name, values)
@@ -293,24 +249,13 @@ fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
 
 fn make_table_i16_real(name: Ident, values: &[i16]) -> TokenStream {
     let values_len = values.len();
-    quote!{
+    quote! {
         static #name: [i16; #values_len] = [
             #(
                 #values
             ),*
         ];
     }
-
-/*
-    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_i16(cx, span, *value)).collect());
-    let ty_i16 = quote!(i16);
-    let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_i16, cx.expr_usize(span, values.len())));
-    let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
-    // debug!("built table item for '{}': values {}", name, values);
-    // debug!("item: {}", pprust::item_to_string(&*table_item));
-    table_item
-    */
 }
 
 // yuck
@@ -318,33 +263,27 @@ fn make_table_i16_as_u16(name: Ident, values: &[i16]) -> TokenStream {
     let u_values: Vec<u16> = values.iter().map(|&value| value as u16).collect();
 
     let values_len = u_values.len();
-    quote!{
+    quote! {
         static #name: [u16; #values_len] = [
             #(
                 #u_values
             ),*
         ];
     }
-
-/*
-    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_u16(cx, span, *value as u16)).collect());
-    let ty_u16 = quote!(u16);
-    let table_ident = cx.ident_of(name);
-    let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_usize(span, values.len())));
-    let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
-    table_item
-    */
 }
 
-fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<TokenStream> {
-    // debug!("output_actions");
-
+fn output_actions(
+    span: Span,
+    gram: &Grammar,
+    gotos: &GotoMap,
+    parser: &YaccParser,
+) -> Vec<TokenStream> {
     let nstates = parser.nstates;
 
     let mut act = token_actions(gram, parser);
     let dgoto = goto_actions(gram, nstates, gotos, &mut act);
     let (nentries, order) = sort_actions(&mut act);
-    
+
     let packed = pack_table(parser.nstates, nentries, &order, &act);
 
     let mut items: Vec<TokenStream> = Vec::new();
@@ -352,16 +291,31 @@ fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccPars
     items.push(make_table_i16(Ident::new("YYDGOTO", span), &dgoto));
 
     // was output_base
-    items.push(make_table_i16(Ident::new("YYSINDEX", span), &packed.base[.. nstates]));
-    items.push(make_table_i16(Ident::new("YYRINDEX", span), &packed.base[nstates .. nstates * 2]));
-    items.push(make_table_i16(Ident::new("YYGINDEX", span), &packed.base[nstates * 2 .. act.nvectors]));
+    items.push(make_table_i16(
+        Ident::new("YYSINDEX", span),
+        &packed.base[..nstates],
+    ));
+    items.push(make_table_i16(
+        Ident::new("YYRINDEX", span),
+        &packed.base[nstates..nstates * 2],
+    ));
+    items.push(make_table_i16(
+        Ident::new("YYGINDEX", span),
+        &packed.base[nstates * 2..act.nvectors],
+    ));
 
     // was output_table
     // todo, emit const YYTABLESIZE = m_high
-    items.push(make_table_i16(Ident::new("YYTABLE", span), &packed.table[.. packed.high + 1]));
+    items.push(make_table_i16(
+        Ident::new("YYTABLE", span),
+        &packed.table[..packed.high + 1],
+    ));
 
     // was output_check
-    items.push(make_table_i16(Ident::new("YYCHECK", span), &packed.check[.. packed.high + 1]));
+    items.push(make_table_i16(
+        Ident::new("YYCHECK", span),
+        &packed.check[..packed.high + 1],
+    ));
 
     items
 }
@@ -392,9 +346,10 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                     if p.action_code == ActionCode::Shift {
                         shiftcount += 1;
                         actionrow[p.symbol as usize] = p.number;
-                        // debug!("        shift {}", p.number);
-                    }
-                    else if p.action_code == ActionCode::Reduce && p.number != parser.default_reductions[i] {
+                    // debug!("        shift {}", p.number);
+                    } else if p.action_code == ActionCode::Reduce
+                        && p.number != parser.default_reductions[i]
+                    {
                         reducecount += 1;
                         actionrow[(p.symbol as usize) + gram.ntokens] = p.number;
                         // debug!("        reduce {}", p.number);
@@ -402,7 +357,10 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 }
             }
 
-            debug!("        shiftcount={} reducecount={}", shiftcount, reducecount);
+            debug!(
+                "        shiftcount={} reducecount={}",
+                shiftcount, reducecount
+            );
 
             tally[i] = shiftcount as i16;
             tally[nstates + i] = reducecount as i16;
@@ -420,7 +378,10 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
                         s.push(actionrow[j]);
-                        debug!("        shift for token {} {}, pushing r={} s={}", j, gram.name[j], gram.value[j], actionrow[j]);
+                        debug!(
+                            "        shift for token {} {}, pushing r={} s={}",
+                            j, gram.name[j], gram.value[j], actionrow[j]
+                        );
                     }
                 }
                 froms[i] = r;
@@ -439,15 +400,20 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
                         s.push(actionrow[gram.ntokens + j] - 2);
-                        debug!("        reduce for token {} {}, pushing r={} s={}", j, gram.name[j], gram.value[j], actionrow[gram.ntokens + j] - 2);
+                        debug!(
+                            "        reduce for token {} {}, pushing r={} s={}",
+                            j,
+                            gram.name[j],
+                            gram.value[j],
+                            actionrow[gram.ntokens + j] - 2
+                        );
                     }
                 }
                 froms[nstates + i] = r;
                 tos[nstates + i] = s;
                 width[nstates + i] = max - min + 1;
             }
-        }
-        else {
+        } else {
             debug!("    state={} has no actions", i);
         }
     }
@@ -457,7 +423,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
         tally: tally,
         width: width,
         froms: froms,
-        tos: tos
+        tos: tos,
     }
 }
 
@@ -466,8 +432,8 @@ fn default_goto(
     gotos: &GotoMap,
     symbol: usize,
     nstates: usize,
-    state_count: &mut Vec<i16>) -> usize
-{
+    state_count: &mut Vec<i16>,
+) -> usize {
     let m = gotos.goto_map[symbol - gram.ntokens] as usize;
     let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
     if m == n {
@@ -497,16 +463,19 @@ fn default_goto(
 }
 
 fn save_column(
-    gram: &Grammar, 
+    gram: &Grammar,
     nstates: usize,
     gotos: &GotoMap,
-    symbol: usize, 
+    symbol: usize,
     default_state: usize,
-    act: &mut ActionsTable)
-{
+    act: &mut ActionsTable,
+) {
     let m = gotos.goto_map[symbol - gram.ntokens] as usize;
     let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
-    debug!("save_column: symbol={} default_state={} m={} n={}", symbol, default_state, m, n);
+    debug!(
+        "save_column: symbol={} default_state={} m={} n={}",
+        symbol, default_state, m, n
+    );
 
     let mut count: usize = 0;
     for i in m..n {
@@ -519,7 +488,6 @@ fn save_column(
         debug!("    none");
         return;
     }
-
 
     let mut spf: Vec<i16> = Vec::with_capacity(count);
     let mut spt: Vec<i16> = Vec::with_capacity(count);
@@ -536,17 +504,31 @@ fn save_column(
     act.tos[symno] = spt;
     act.tally[symno] = count as i16;
     act.width[symno] = spf_width;
-    debug!("    tally[{}]={} width[{}]={}", symno, act.tally[symno], symno, act.width[symno]);
+    debug!(
+        "    tally[{}]={} width[{}]={}",
+        symno, act.tally[symno], symno, act.width[symno]
+    );
 }
 
 // build the "dgoto" table
-fn goto_actions(gram: &Grammar, nstates: usize, gotos: &GotoMap, act: &mut ActionsTable) -> Vec<i16> {
+fn goto_actions(
+    gram: &Grammar,
+    nstates: usize,
+    gotos: &GotoMap,
+    act: &mut ActionsTable,
+) -> Vec<i16> {
     debug!("goto_actions");
 
-    let mut state_count: Vec<i16> = repeat(0).take(nstates).collect();         // temporary data, used in default_goto()
-    let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars);    // the table that we are building
+    let mut state_count: Vec<i16> = repeat(0).take(nstates).collect(); // temporary data, used in default_goto()
+    let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars); // the table that we are building
 
-    let k = default_goto(gram, gotos, gram.start_symbol + 1, nstates, &mut state_count);
+    let k = default_goto(
+        gram,
+        gotos,
+        gram.start_symbol + 1,
+        nstates,
+        &mut state_count,
+    );
     dgoto_table.push(k as i16);
     save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
 
@@ -578,14 +560,22 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
                 debug!("    j-- to {}, because width < w", j);
             }
 
-            while j >= 0 && (act.width[order[j as usize]] == w) && (act.tally[order[j as usize]] < t) {
+            while j >= 0
+                && (act.width[order[j as usize]] == w)
+                && (act.tally[order[j as usize]] < t)
+            {
                 j -= 1;
                 debug!("    j-- to {}, because tally < t", j);
             }
 
             let mut k = nentries - 1;
             while k > j {
-                debug!("        order[{}] = order[{}] = {} (shifting)", (k + 1) as usize, k as usize, order[k as usize]);
+                debug!(
+                    "        order[{}] = order[{}] = {} (shifting)",
+                    (k + 1) as usize,
+                    k as usize,
+                    order[k as usize]
+                );
                 order[(k + 1) as usize] = order[k as usize];
                 k -= 1;
             }
@@ -620,8 +610,7 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
 // Matching_vector is poorly designed.  The test could easily be made
 // faster.  Also, it depends on the vectors being in a specific
 // order.
-fn matching_vector(pack: &PackState, vector: usize) -> Option<usize>
-{
+fn matching_vector(pack: &PackState, vector: usize) -> Option<usize> {
     let i = pack.order[vector];
     if i >= 2 * pack.nstates {
         debug!("    matching_vector: vector={} no match", vector);
@@ -736,19 +725,24 @@ fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
 
 struct PackState<'a> {
     base: Vec<i16>,
-    pos: Vec<i16>, 
-    table: Vec<i16>,        // table and check always have same len
-    check: Vec<i16>,        // table is 0-filled, check is -1-filled
+    pos: Vec<i16>,
+    table: Vec<i16>, // table and check always have same len
+    check: Vec<i16>, // table is 0-filled, check is -1-filled
     lowzero: usize,
     high: usize,
 
     // read-only references to stuff
     order: &'a [usize],
     nstates: usize,
-    act: &'a ActionsTable
+    act: &'a ActionsTable,
 }
 
-fn pack_table<'a>(nstates: usize, nentries: usize, order: &'a [usize], act: &'a ActionsTable) -> PackState<'a> {
+fn pack_table<'a>(
+    nstates: usize,
+    nentries: usize,
+    order: &'a [usize],
+    act: &'a ActionsTable,
+) -> PackState<'a> {
     debug!("pack_table: nentries={}", nentries);
 
     let initial_maxtable = 1000;
@@ -762,14 +756,14 @@ fn pack_table<'a>(nstates: usize, nentries: usize, order: &'a [usize], act: &'a 
         high: 0,
         order: order,
         nstates: nstates,
-        act: act
+        act: act,
     };
 
     for i in 0..nentries {
         // debug!("i={}", i);
         let place: isize = match matching_vector(&mut pack, i) {
             Some(state) => pack.base[state] as isize,
-            None => pack_vector(&mut pack, i)
+            None => pack_vector(&mut pack, i),
         };
 
         // debug!("    place={}", place);

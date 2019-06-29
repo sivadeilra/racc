@@ -11,7 +11,6 @@ extern crate log;
 extern crate core;
 extern crate racc;
 
-use racc_runtime::{FinishParseResult, ParserState};
 
 struct AppContext {
     x: usize,
@@ -39,29 +38,35 @@ racc::racc_grammar! {
     DO;
 
     Expr : NUM=x { println!("NUM={:?}", x); x }
-        | Expr=arg1 PLUS Expr=arg3 {
-            let a = arg1.unwrap();
-            let b = arg3.unwrap();
-            println!("reduce by addition: {:?} + {:?}", a, b);
-            Some(a + b)
+        | Expr=a PLUS Expr=b {
+            Some(a.unwrap() + b.unwrap())
         }
-        | Expr=arg1 MINUS Expr=arg3 {
-            let a = arg1.unwrap();
-            let b = arg3.unwrap();
-            println!("reduce by sub: {:?} + {:?}", a, b);
-            Some(a - b)
+        | Expr=a MINUS Expr=b {
+            Some(a.unwrap() - b.unwrap())
         }
-        | ParenExpr=a { println!("reduce by parens: {:?}", a); a }
-        | IfExpr=a { println!("reduce by if(): {:?}", a); a }
-        | WhileExpr=a { println!("reduce by while(): {:?}", a); a }
-        ;
-
-    ParenExpr : LPAREN Expr=a RPAREN { println!("grouping, val={:?}", a); a };
-
-    IfExpr : IF ParenExpr=a THEN Expr { None }
-        | IF ParenExpr=a THEN Expr ELSE Expr { None };
-
-    WhileExpr : WHILE ParenExpr=a DO Expr { println!("reduce by while: {:?}", a); None };
+        | LPAREN Expr=inner RPAREN { inner }
+        | IF Expr=predicate THEN Expr=true_value {
+            if let Some(p) = predicate {
+                if p > 0 {
+                    true_value
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+            if let Some(p) = predicate {
+                if p > 0 {
+                    true_value
+                } else {
+                    false_value
+                }
+            } else {
+                false_value
+            }
+        };
 
 }
 
@@ -76,20 +81,20 @@ fn main() {
         (NUM, Some(24)),
     ];
 
-    let mut parser = ParserState::new(get_parser_tables());
+    let mut parser = new_parser();
 
     let mut ctx = AppContext { x: 0 };
 
     for &(tok, lval) in toks.iter() {
-        parser.push_token(&mut ctx, tok, lval);
+        parser.push_token(&mut ctx, tok, lval).unwrap();
     }
 
     match parser.finish(&mut ctx) {
-        FinishParseResult::Accepted(final_value) => {
-            println!("Accepted: {:?}", final_value);
+        Ok(final_value) => {
+            println!("Ok: {:?}", final_value);
         }
-        FinishParseResult::SyntaxError => {
-            println!("SyntaxError");
+        Err(e) => {
+            println!("Error: {:?}", e);
         }
     }
 }
