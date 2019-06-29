@@ -243,21 +243,7 @@
 //#![allow(unused_imports)]
 #![recursion_limit = "256"]
 
-extern crate log;
-
-// extern crate rustc;
-// extern crate syntax;
-
-/*
-use syntax::ast;
-use syntax::ext::base::{ExtCtxt, MacResult, MacEager};
-use syntax::codemap;
-use crate::syntax::parse::token::Token;
-use crate::syntax::ptr::P;
-use crate::syntax::print::pprust;
-use crate::syntax::util::small_vector::SmallVector;
-use rustc::plugin::Registry;
-*/
+#![warn(rust_2018_idioms)]
 
 mod closure;
 mod grammar;
@@ -269,26 +255,9 @@ mod reader;
 mod util;
 mod warshall;
 
-/*
-
-#[plugin_registrar]
-pub fn plugin_registrar(reg: &mut Registry) {
-    info!("yacc plugin_registrar");
-    reg.register_macro("grammar", expand_grammar);
-}
-
-
-*/
-
 extern crate proc_macro;
-extern crate proc_macro2;
-
-extern crate syn;
 
 use proc_macro2::Span;
-use syn::export::quote::ToTokens;
-use syn::parse_quote;
-use syn::ItemMod;
 use syn::{parse_macro_input, Ident};
 
 #[proc_macro]

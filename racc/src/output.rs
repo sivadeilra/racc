@@ -99,7 +99,7 @@ pub fn output_parser_to_ast(
                         None => {
                             // The rule has no binding for this value.  Pop it from the stack and discard it.
                             quote! {
-                                drop(value_stack.pop());
+                                value_stack.pop();
                             }
                         }
                     })
@@ -115,7 +115,7 @@ pub fn output_parser_to_ast(
                 let mut t = TokenStream::new();
                 for _ in 0..num_rhs {
                     t.extend(quote! {
-                        drop(value_stack.pop());
+                        value_stack.pop();
                     });
                 }
                 t
@@ -610,7 +610,7 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
 // Matching_vector is poorly designed.  The test could easily be made
 // faster.  Also, it depends on the vectors being in a specific
 // order.
-fn matching_vector(pack: &PackState, vector: usize) -> Option<usize> {
+fn matching_vector(pack: &PackState<'_>, vector: usize) -> Option<usize> {
     let i = pack.order[vector];
     if i >= 2 * pack.nstates {
         debug!("    matching_vector: vector={} no match", vector);
@@ -645,7 +645,7 @@ fn matching_vector(pack: &PackState, vector: usize) -> Option<usize> {
     return None;
 }
 
-fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
+fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> isize {
     // debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
     let act = pack.act;
     let i = pack.order[vector];
@@ -748,10 +748,10 @@ fn pack_table<'a>(
     let initial_maxtable = 1000;
 
     let mut pack = PackState {
-        base: repeat(0).take(act.nvectors).collect(),
-        pos: repeat(0).take(nentries).collect(),
-        table: repeat(0).take(initial_maxtable).collect(),
-        check: repeat(-1).take(initial_maxtable).collect(),
+        base: vec![0; act.nvectors],
+        pos: vec![0; nentries],
+        table: vec![0; initial_maxtable],
+        check: vec![-1; initial_maxtable],
         lowzero: 0,
         high: 0,
         order: order,
@@ -760,13 +760,11 @@ fn pack_table<'a>(
     };
 
     for i in 0..nentries {
-        // debug!("i={}", i);
         let place: isize = match matching_vector(&mut pack, i) {
             Some(state) => pack.base[state] as isize,
             None => pack_vector(&mut pack, i),
         };
 
-        // debug!("    place={}", place);
         pack.pos[i] = place as i16;
         pack.base[order[i]] = place as i16;
     }

@@ -1,4 +1,3 @@
-
 //#![feature(plugin, core, std_misc, fixed_size_array, rt)]
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
@@ -7,10 +6,9 @@
 
 //#![plugin(racc)]
 
-extern crate log;
 extern crate core;
+extern crate log;
 extern crate racc;
-
 
 struct AppContext {
     x: usize,

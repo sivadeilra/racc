@@ -614,7 +614,7 @@ pub struct Grammar2 {
 }
 
 impl Parse for Grammar2 {
-    fn parse(input: ParseStream) -> syn::Result<Grammar2> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Grammar2> {
         let mut reader: ReaderState = ReaderState::new();
 
         use syn::parse_quote;

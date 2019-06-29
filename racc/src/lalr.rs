@@ -514,7 +514,7 @@ fn digraph(relation: &Vec<Vec<i16>>, F: &mut Bitmat) {
     }
 }
 
-fn traverse(ds: &mut DigraphState, i: usize) {
+fn traverse(ds: &mut DigraphState<'_>, i: usize) {
     ds.top += 1;
     ds.vertices[ds.top] = i as i16;
     let height = ds.top;

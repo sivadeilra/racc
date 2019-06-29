@@ -3,7 +3,6 @@ use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use log::debug;
 use log::warn;
-use std::iter::repeat;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum ActionCode {
@@ -37,9 +36,9 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
         .collect();
 
     let final_state = find_final_state(gram, lr0, lalr);
-    remove_conflicts(lr0, final_state, &mut parser);
+    remove_conflicts(final_state, &mut parser);
     unused_rules(gram, &parser);
-    let defred = default_reductions(lr0, &parser);
+    let defred = default_reductions(&parser);
 
     YaccParser {
         nstates: nstates,
@@ -69,14 +68,12 @@ fn get_shifts(
     let mut actions: Vec<ParserAction> = Vec::new();
     if lalr.shift_table[stateno] != -1 {
         let sp = &lr0.shifts[lalr.shift_table[stateno] as usize];
-        let to_state2 = &sp.shifts;
-        for i in (0..sp.shifts.len()).rev() {
-            let k = to_state2[i] as usize;
-            let symbol = lr0.states[k].accessing_symbol;
+        for &k in sp.shifts.iter() {
+            let symbol = lr0.states[k as usize].accessing_symbol;
             if gram.is_token(symbol) {
                 actions.push(ParserAction {
                     symbol: symbol as i16,
-                    number: k as i16,
+                    number: k,
                     prec: gram.prec[symbol],
                     action_code: ActionCode::Shift,
                     assoc: gram.assoc[symbol],
@@ -85,9 +82,6 @@ fn get_shifts(
             }
         }
     }
-
-    // For compatibility with C implementation, which used a singly-linked list
-    actions.reverse();
     actions
 }
 
@@ -103,44 +97,41 @@ fn add_reductions(
         let ruleno = lalr.laruleno[i] as usize;
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
-                add_reduce(gram, actions, ruleno, j);
+                add_reduce(gram, actions, ruleno, j as i16);
             }
         }
     }
 }
 
-fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, symbol: usize) {
-    let symbol16 = symbol as i16;
+fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, symbol: i16) {
     let mut next: usize = 0;
-    while next < actions.len() && actions[next].symbol < symbol16 {
+    while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
     }
 
     while next < actions.len()
-        && actions[next].symbol == symbol16
+        && actions[next].symbol == symbol
         && actions[next].action_code == ActionCode::Shift
     {
         next += 1;
     }
 
     while next < actions.len()
-        && actions[next].symbol == symbol16
+        && actions[next].symbol == symbol
         && actions[next].action_code == ActionCode::Reduce
         && (actions[next].number as usize) < ruleno
     {
         next += 1;
     }
 
-    let temp = ParserAction {
-        symbol: symbol16,
+    actions.insert(next, ParserAction {
+        symbol: symbol,
         number: ruleno as i16,
         prec: gram.rprec[ruleno],
         action_code: ActionCode::Reduce,
         assoc: gram.rassoc[ruleno],
         suppressed: 0,
-    };
-
-    actions.insert(next, temp);
+    });
 }
 
 fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize {
@@ -158,7 +149,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize
 }
 
 fn unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
-    let mut rules_used: Vec<bool> = repeat(false).take(gram.nrules).collect();
+    let mut rules_used = vec![false; gram.nrules];
 
     for pi in parser.iter() {
         for p in pi.iter() {
@@ -180,63 +171,62 @@ fn unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
     }
 }
 
-fn remove_conflicts(lr0: &LR0Output, final_state: usize, parser: &mut [Vec<ParserAction>]) {
-    let nstates = lr0.nstates();
-    assert_eq!(parser.len(), nstates);
+fn remove_conflicts(final_state: usize, parser: &mut [Vec<ParserAction>]) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    let mut srconflicts: Vec<i16> = vec![0; nstates];
-    let mut rrconflicts: Vec<i16> = vec![0; nstates];
-    for (i, pvec) in parser[0..nstates].iter_mut().enumerate() {
-        let mut srcount: usize = 0;
-        let mut rrcount: usize = 0;
-        if !pvec.is_empty() {
-            let mut symbol: i16 = pvec[0].symbol;
-            let mut pref: usize = 0; // index into pvec
-            for p in 1..pvec.len() {
-                // p is index into pvec
-                if pvec[p].symbol != symbol {
-                    pref = p;
-                    symbol = pvec[p].symbol;
-                } else if i == final_state && symbol == 0 {
-                    srcount += 1;
-                    pvec[p].suppressed = 1;
-                } else if pvec[pref].action_code == ActionCode::Shift {
-                    if pvec[pref].prec > 0 && pvec[p].prec > 0 {
-                        if pvec[pref].prec < pvec[p].prec {
-                            pvec[pref].suppressed = 2;
-                            pref = p;
-                        } else if pvec[pref].prec > pvec[p].prec {
-                            pvec[p].suppressed = 2;
-                        } else if pvec[pref].assoc == LEFT {
-                            pvec[pref].suppressed = 2;
-                            pref = p;
-                        } else if pvec[pref].assoc == RIGHT {
-                            pvec[p].suppressed = 2;
-                        } else {
-                            pvec[pref].suppressed = 2;
-                            pvec[p].suppressed = 2;
-                        }
-                    } else {
-                        srcount += 1;
-                        pvec[p].suppressed = 1;
-                    }
-                } else {
-                    rrcount += 1;
-                    pvec[p].suppressed = 1;
-                }
-            }
-        }
-
+    for (i, pvec) in parser.iter_mut().enumerate() {
+        let is_final_state = i == final_state;
+        let (srcount, rrcount) = remove_conflicts_for_state(pvec, is_final_state);
         srtotal += srcount;
         rrtotal += rrcount;
-        srconflicts[i] = srcount as i16;
-        rrconflicts[i] = rrcount as i16;
     }
-
     if srtotal + rrtotal > 0 {
         total_conflicts(srtotal, rrtotal);
     }
+}
+
+// Returns (shift_reduce_conflict_count, reduce_reduce_conflict_count)
+fn remove_conflicts_for_state(pvec: &mut [ParserAction], is_final_state: bool) -> (usize, usize) {
+    let mut srcount: usize = 0;
+    let mut rrcount: usize = 0;
+    if !pvec.is_empty() {
+        let mut symbol: i16 = pvec[0].symbol;
+        let mut pref: usize = 0; // index into pvec
+        for p in 1..pvec.len() {
+            // p is index into pvec
+            if pvec[p].symbol != symbol {
+                pref = p;
+                symbol = pvec[p].symbol;
+            } else if is_final_state && symbol == 0 {
+                srcount += 1;
+                pvec[p].suppressed = 1;
+            } else if pvec[pref].action_code == ActionCode::Shift {
+                if pvec[pref].prec > 0 && pvec[p].prec > 0 {
+                    if pvec[pref].prec < pvec[p].prec {
+                        pvec[pref].suppressed = 2;
+                        pref = p;
+                    } else if pvec[pref].prec > pvec[p].prec {
+                        pvec[p].suppressed = 2;
+                    } else if pvec[pref].assoc == LEFT {
+                        pvec[pref].suppressed = 2;
+                        pref = p;
+                    } else if pvec[pref].assoc == RIGHT {
+                        pvec[p].suppressed = 2;
+                    } else {
+                        pvec[pref].suppressed = 2;
+                        pvec[p].suppressed = 2;
+                    }
+                } else {
+                    srcount += 1;
+                    pvec[p].suppressed = 1;
+                }
+            } else {
+                rrcount += 1;
+                pvec[p].suppressed = 1;
+            }
+        }
+    }
+    (srcount, rrcount)
 }
 
 fn total_conflicts(srtotal: usize, rrtotal: usize) {
@@ -249,16 +239,16 @@ fn total_conflicts(srtotal: usize, rrtotal: usize) {
     }
 }
 
-fn sole_reduction(stateno: usize, parser: &[Vec<ParserAction>]) -> usize {
-    debug!("sole_reduction: state={}", stateno);
+// Computese the default reduction for a single state.
+fn sole_reduction(parser: &[ParserAction]) -> i16 {
     let mut count: usize = 0;
-    let mut ruleno: usize = 0;
-    for p in parser[stateno].iter() {
+    let mut ruleno: i16 = 0;
+    for p in parser.iter() {
         if p.action_code == ActionCode::Shift && p.suppressed == 0 {
             debug!("    found unsuppressed shift, returning 0");
             return 0;
         } else if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-            if ruleno > 0 && (p.number as usize) != ruleno {
+            if ruleno > 0 && p.number != ruleno {
                 debug!(
                     "    found unsuppressed reduce for rule {}, returning 0",
                     ruleno
@@ -270,7 +260,7 @@ fn sole_reduction(stateno: usize, parser: &[Vec<ParserAction>]) -> usize {
                 count += 1;
                 debug!("    count --> {}", count);
             }
-            ruleno = p.number as usize;
+            ruleno = p.number;
             debug!("    selecting rule {}", ruleno);
         }
     }
@@ -280,16 +270,15 @@ fn sole_reduction(stateno: usize, parser: &[Vec<ParserAction>]) -> usize {
         return 0;
     }
     debug!("    selected default reduction {}", ruleno);
-    return ruleno;
+    ruleno
 }
 
-fn default_reductions(lr0: &LR0Output, parser: &[Vec<ParserAction>]) -> Vec<i16> {
+/// Computes the default reduction for each state.
+fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<i16> {
     debug!("default_reductions");
-    let mut defred: Vec<i16> = Vec::with_capacity(lr0.nstates());
-    for i in 0..lr0.nstates() {
-        let r = sole_reduction(i, parser);
+    parser.iter().enumerate().map(|(i, actions)| {
+        let r = sole_reduction(actions);
         debug!("    state {} has default reduction {}", i, r);
-        defred.push(r as i16);
-    }
-    defred
+        r
+    }).collect()
 }

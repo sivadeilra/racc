@@ -94,7 +94,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         kernel_base
     };
 
-    let mut lr0: LR0State = LR0State {
+    let mut lr0 = LR0State {
         gram: gram,
         state_set: (0..gram.nitems).map(|_| Vec::new()).collect(),
         kernel_base: kernel_base,
@@ -182,7 +182,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
 // Gets the state for a particular symbol.  If no appropriate state exists,
 // then a new state will be created.
-fn get_state(lr0: &mut LR0State, symbol: usize) -> usize {
+fn get_state(lr0: &mut LR0State<'_>, symbol: usize) -> usize {
     let isp = lr0.kernel_base[symbol] as usize;
     let iend = lr0.kernel_end[symbol] as usize;
     let n = iend - isp;
@@ -303,7 +303,7 @@ fn print_core(gram: &Grammar, state: usize, core: &Core) {
 // fills shift_symbol with shifts
 fn new_item_sets(
     gram: &Grammar,
-    lr0: &mut LR0State,
+    lr0: &mut LR0State<'_>,
     item_set: &[i16],
     shift_symbol: &mut Vec<i16>,
 ) {
