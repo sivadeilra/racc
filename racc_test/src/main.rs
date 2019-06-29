@@ -29,7 +29,9 @@ racc::racc_grammar! {
     WHILE;
     DO;
 
-    Expr : NUM=x { println!("NUM={:?}", x); x }
+    Expr : NUM=x {
+        println!("NUM={:?}", x); x
+    }
         | Expr=a PLUS Expr=b {
             Some(a.unwrap() + b.unwrap())
         }
@@ -63,6 +65,8 @@ racc::racc_grammar! {
 }
 
 fn main() {
+    env_logger::init();
+
     let toks = vec![
         (LPAREN, None),
         (NUM, Some(42)),

@@ -257,7 +257,9 @@ use syn::{parse_macro_input, Ident};
 
 // Type aliases
 type Symbol = i16;
+type Rule = i16;
 type State = i16;
+type Item = i16;
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
