@@ -2,7 +2,6 @@ use crate::grammar::Grammar;
 use crate::lr0::LR0Output;
 use crate::util::Bitmat;
 use log::debug;
-use std::iter::repeat;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
@@ -33,11 +32,14 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
     let laruleno = initialize_LA(lr0, LA_len, &reduction_table);
     let gotos = set_goto_map(gram, lr0);
 
-    let mut F = initialize_F(gram, lr0, &gotos, &shift_table);
+    let nullable = crate::lr0::set_nullable(gram);
+
+    let mut F = initialize_F(gram, lr0, &nullable, &gotos, &shift_table);
 
     let (includes, lookback) = build_relations(
         gram,
         lr0,
+        &nullable,
         &shift_table,
         &gotos,
         &lookaheads,
@@ -60,7 +62,7 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
 }
 
 fn set_shift_table(lr0: &LR0Output) -> Vec<i16> {
-    let mut shift_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
+    let mut shift_table: Vec<i16> = vec![-1; lr0.states.len()];
     for i in 0..lr0.shifts.len() {
         let state = lr0.shifts[i].state;
         assert!(shift_table[state] == -1);
@@ -74,9 +76,9 @@ fn set_shift_table(lr0: &LR0Output) -> Vec<i16> {
 // The value of each element is either -1, for states that
 // do not have any reductions, or an index into LR0Output.reductions.
 fn set_reduction_table(lr0: &LR0Output) -> Vec<i16> {
-    let mut reduction_table: Vec<i16> = repeat(-1).take(lr0.states.len()).collect();
-    for i in 0..lr0.reductions.len() {
-        let state = lr0.reductions[i].state;
+    let mut reduction_table: Vec<i16> = vec![-1; lr0.states.len()];
+    for (i, reduction) in lr0.reductions.iter().enumerate() {
+        let state = reduction.state;
         assert!(reduction_table[state] == -1);
         reduction_table[state] = i as i16;
     }
@@ -87,8 +89,8 @@ fn set_reduction_table(lr0: &LR0Output) -> Vec<i16> {
 fn set_max_rhs(gram: &Grammar) -> usize {
     let mut length: usize = 0;
     let mut max: usize = 0;
-    for itemp in 0..gram.nitems {
-        if gram.ritem[itemp] >= 0 {
+    for &item in gram.ritem.iter() {
+        if item >= 0 {
             length += 1;
         } else {
             if length > max {
@@ -123,25 +125,21 @@ fn create_lookaheads(lr0: &LR0Output, reduction_table: &[i16]) -> Vec<i16> {
 
 #[allow(non_snake_case)]
 fn initialize_LA(lr0: &LR0Output, LA_len: usize, reduction_table: &[i16]) -> Vec<i16> {
-    let mut laruleno: Vec<i16> = repeat(0).take(LA_len).collect();
-    let mut k: usize = 0;
+    let mut laruleno: Vec<i16> = Vec::with_capacity(LA_len);
     for i in 0..lr0.states.len() {
         let rp = reduction_table[i];
         if rp != -1 {
             let r = &lr0.reductions[rp as usize];
-            for j in 0..r.rules.len() {
-                laruleno[k] = r.rules[j];
-                k += 1;
-            }
+            laruleno.extend(&r.rules);
         }
     }
-    assert!(k == LA_len);
+    assert!(laruleno.len() == LA_len);
     laruleno
 }
 
 fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
-    let mut goto_map: Vec<i16> = repeat(0).take(gram.nvars + 1).collect();
+    let mut goto_map: Vec<i16> = vec![0; gram.nvars + 1];
     let mut ngotos: usize = 0;
     for sp in lr0.shifts.iter() {
         for i in (0..sp.shifts.len()).rev() {
@@ -154,7 +152,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
             assert!(ngotos < 0x7fff);
             ngotos += 1;
-            goto_map[symbol - gram.ntokens] += 1;
+            goto_map[symbol as usize - gram.ntokens] += 1;
         }
     }
     let ngotos = ngotos;
@@ -177,19 +175,18 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     temp_map.push(ngotos as i16);
     // at this point, temp_map and goto_map have identical length and contents
 
-    let mut from_state: Vec<i16> = repeat(0).take(ngotos).collect();
-    let mut to_state: Vec<i16> = repeat(0).take(ngotos).collect();
+    let mut from_state: Vec<i16> = vec![0; ngotos];
+    let mut to_state: Vec<i16> = vec![0; ngotos];
 
     for sp in lr0.shifts.iter() {
-        for i in (0..sp.shifts.len()).rev() {
-            let state2 = sp.shifts[i];
+        for &state2 in sp.shifts.iter().rev() {
             let symbol = lr0.states[state2 as usize].accessing_symbol;
-            if gram.is_token(symbol as usize) {
+            if gram.is_token(symbol) {
                 break;
             }
 
-            let k = temp_map[symbol - gram.ntokens] as usize;
-            temp_map[symbol - gram.ntokens] += 1;
+            let k = temp_map[symbol as usize - gram.ntokens] as usize;
+            temp_map[symbol as usize - gram.ntokens] += 1;
             from_state[k] = sp.state as i16;
             to_state[k] = state2;
         }
@@ -220,7 +217,8 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 }
 
 // returns an index into goto_map
-fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: usize) -> usize {
+fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: i16) -> usize {
+    let symbol = symbol as usize;
     let var = symbol - gram.ntokens;
     let init_low = gotos.goto_map[var] as usize;
     let init_high = gotos.goto_map[var + 1] as usize;
@@ -243,12 +241,12 @@ fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: usize) -> usi
 }
 
 #[allow(non_snake_case)]
-fn initialize_F(gram: &Grammar, lr0: &LR0Output, gotos: &GotoMap, shift_table: &[i16]) -> Bitmat {
+fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &GotoMap, shift_table: &[i16]) -> Bitmat {
     debug!("initialize_F");
 
     let ngotos = gotos.ngotos;
     let mut F = Bitmat::new(ngotos, gram.ntokens);
-    let mut reads: Vec<Vec<i16>> = repeat(Vec::new()).take(ngotos).collect();
+    let mut reads: Vec<Vec<i16>> = vec![vec![]; ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);
 
     for i in 0..ngotos {
@@ -256,22 +254,21 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, gotos: &GotoMap, shift_table: &
         let sp = shift_table[stateno];
 
         if sp != -1 {
-            let sp = &lr0.shifts[sp as usize];
-            let k = sp.shifts.len();
+            let shifts = &lr0.shifts[sp as usize].shifts;
 
             let mut j: usize = 0;
-            while j < k {
-                let symbol = lr0.states[sp.shifts[j] as usize].accessing_symbol;
+            while j < shifts.len() {
+                let symbol = lr0.states[shifts[j] as usize].accessing_symbol;
                 if gram.is_var(symbol) {
                     break;
                 }
-                F.set(i, symbol);
+                F.set(i, symbol as usize);
                 j += 1;
             }
 
-            while j < k {
-                let symbol = lr0.states[sp.shifts[j] as usize].accessing_symbol;
-                if lr0.nullable[symbol] {
+            while j < shifts.len() {
+                let symbol = lr0.states[shifts[j] as usize].accessing_symbol;
+                if nullable[symbol as usize] {
                     let e = map_goto(gram, gotos, stateno, symbol);
                     edge.push(e as i16);
                 }
@@ -294,30 +291,30 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, gotos: &GotoMap, shift_table: &
     F
 }
 
-#[allow(non_snake_case)]
 fn build_relations(
     gram: &Grammar,
     lr0: &LR0Output,
+    nullable: &[bool],
     shift_table: &[i16],
     gotos: &GotoMap,
     lookaheads: &[i16],
     laruleno: &[i16],
-    LA_len: usize,
+    la_len: usize,
 ) -> (Vec<Vec<i16>>, /*lookback:*/ Vec<Vec<i16>>) {
     debug!("build_relations");
 
     let ngotos = gotos.ngotos;
-    let mut includes: Vec<Vec<i16>> = repeat(Vec::new()).take(ngotos).collect();
+    let mut includes: Vec<Vec<i16>> = vec![Vec::new(); ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1); // temporary, reused in loops
     let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1); // temporary, reused in loops
-    let mut lookback: Vec<Vec<i16>> = repeat(Vec::new()).take(LA_len).collect();
+    let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); la_len];
 
     for i in 0..ngotos {
         assert!(edge.len() == 0);
         assert!(states.len() == 0);
 
         let state1 = gotos.from_state[i] as usize;
-        let symbol1 = lr0.states[gotos.to_state[i] as usize].accessing_symbol;
+        let symbol1 = lr0.states[gotos.to_state[i] as usize].accessing_symbol as usize;
 
         let mut rulep: usize = lr0.derives[symbol1] as usize;
         while lr0.derives_rules[rulep] >= 0 {
@@ -326,7 +323,7 @@ fn build_relations(
             let mut stateno: usize = state1;
             let mut rp: usize = gram.rrhs[lr0.derives_rules[rulep] as usize] as usize;
             while gram.ritem[rp] >= 0 {
-                let symbol2 = gram.ritem[rp] as usize;
+                let symbol2 = gram.ritem[rp];
                 for shift in lr0.shifts[shift_table[stateno] as usize].shifts.iter() {
                     stateno = *shift as usize;
                     if lr0.states[stateno].accessing_symbol == symbol2 {
@@ -352,11 +349,11 @@ fn build_relations(
             while !done_flag {
                 done_flag = true;
                 rp -= 1;
-                if gram.ritem[rp] >= 0 && gram.is_var(gram.ritem[rp] as usize) {
+                if gram.ritem[rp] >= 0 && gram.is_var(gram.ritem[rp]) {
                     length -= 1;
                     stateno = states[length] as usize;
-                    edge.push(map_goto(gram, gotos, stateno, gram.ritem[rp] as usize) as i16);
-                    if lr0.nullable[gram.ritem[rp] as usize] && length > 0 {
+                    edge.push(map_goto(gram, gotos, stateno, gram.ritem[rp]) as i16);
+                    if nullable[gram.ritem[rp] as usize] && length > 0 {
                         done_flag = false;
                     }
                 }
@@ -374,7 +371,7 @@ fn build_relations(
         edge.clear(); // prepare for next use
     }
 
-    (transpose(&includes, ngotos), lookback)
+    (transpose(&includes), lookback)
 }
 
 // Adds an entry to the 'lookback' table.
@@ -400,11 +397,9 @@ fn add_lookback_edge(
 }
 
 #[allow(non_snake_case)]
-fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>> {
-    assert!(r2.len() == n);
-
-    let mut nedges: Vec<i16> = repeat(0).take(n).collect();
-    for i in 0..n {
+fn transpose(r2: &[Vec<i16>]) -> Vec<Vec<i16>> {
+    let mut nedges: Vec<i16> = vec![0; r2.len()];
+    for i in 0..r2.len() {
         let sp = &r2[i];
         if sp.len() > 0 {
             let mut j: usize = 0;
@@ -416,20 +411,20 @@ fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>> {
         }
     }
 
-    let mut new_R: Vec<Vec<i16>> = repeat(Vec::new()).take(n).collect();
+    let mut new_R: Vec<Vec<i16>> = vec![Vec::new(); r2.len()];
 
-    for i in 0..n {
+    for i in 0..r2.len() {
         let k = nedges[i];
         if k > 0 {
-            let mut sp: Vec<i16> = repeat(0).take((k as usize) + 1).collect();
+            let mut sp: Vec<i16> = vec![0; (k as usize) + 1];
             sp[k as usize] = -1;
             new_R[i] = sp;
         }
     }
     drop(nedges);
 
-    let mut temp_R: Vec<i16> = repeat(0).take(n).collect(); // contains output columns
-    for i in 0..n {
+    let mut temp_R: Vec<i16> = vec![0; r2.len()]; // contains output columns
+    for i in 0..r2.len() {
         // i is old-row
         let sp = &r2[i];
         let mut j: usize = 0; // j is old-col
@@ -446,11 +441,11 @@ fn transpose(r2: &Vec<Vec<i16>>, n: usize) -> Vec<Vec<i16>> {
         }
     }
 
-    return new_R;
+    new_R
 }
 
 #[allow(non_snake_case)]
-fn compute_FOLLOWS(includes: &Vec<Vec<i16>>, F: &mut Bitmat) {
+fn compute_FOLLOWS(includes: &[Vec<i16>], F: &mut Bitmat) {
     digraph(includes, F);
 }
 
@@ -459,7 +454,7 @@ fn compute_lookaheads(
     gram: &Grammar,
     lr0: &LR0Output,
     lookaheads: &[i16],
-    lookback: &Vec<Vec<i16>>,
+    lookback: &[Vec<i16>],
     F: &Bitmat,
 ) -> Bitmat {
     let n = lookaheads[lr0.nstates()] as usize;
@@ -491,17 +486,17 @@ struct DigraphState<'a> {
     index: Vec<i16>,
     vertices: Vec<i16>,
     top: usize,
-    R: &'a Vec<Vec<i16>>,
+    R: &'a [Vec<i16>],
     F: &'a mut Bitmat,
 }
 
 #[allow(non_snake_case)]
-fn digraph(relation: &Vec<Vec<i16>>, F: &mut Bitmat) {
+fn digraph(relation: &[Vec<i16>], F: &mut Bitmat) {
     let ngotos = F.rows;
     let mut ds = DigraphState {
         infinity: ngotos + 2,
-        index: repeat(0).take(ngotos + 1).collect(),
-        vertices: repeat(0).take(ngotos + 1).collect(),
+        index: vec![0; ngotos + 1],
+        vertices: vec![0;  ngotos + 1],
         top: 0,
         R: relation,
         F: F,

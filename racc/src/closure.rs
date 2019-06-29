@@ -12,9 +12,9 @@ fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
         let mut sp = derives[gram.start_symbol + row] as usize;
         let mut rule = derives_rules[sp];
         while rule > 0 {
-            let symbol = gram.ritem[gram.rrhs[rule as usize] as usize] as usize;
+            let symbol = gram.ritem[gram.rrhs[rule as usize] as usize];
             if gram.is_var(symbol) {
-                eff.set(row, symbol - gram.start_symbol);
+                eff.set(row, symbol as usize - gram.start_symbol);
             }
             sp += 1;
             rule = derives_rules[sp];
@@ -130,7 +130,7 @@ pub fn closure(
     for &ni in nucleus.iter() {
         assert!(ni >= 0);
         let symbol = gram.ritem[ni as usize];
-        if symbol >= 0 && gram.is_var(symbol as usize) {
+        if symbol >= 0 && gram.is_var(symbol) {
             let dsp: usize = ((symbol as usize) - gram.ntokens) * first_derives.rowsize;
             for i in 0..rulesetsize {
                 rule_set.data[i] |= first_derives.data[dsp + i];

@@ -6,8 +6,8 @@ use log::warn;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum ActionCode {
-    Shift = 1,
-    Reduce = 2,
+    Shift,
+    Reduce,
 }
 
 pub const LEFT: u8 = 1;
@@ -23,10 +23,14 @@ pub struct ParserAction {
 }
 
 pub struct YaccParser {
-    pub nstates: usize,
     pub actions: Vec<Vec<ParserAction>>,
     pub default_reductions: Vec<i16>,
     pub final_state: usize,
+}
+impl YaccParser{
+    pub fn nstates(&self) -> usize {
+        self.actions.len()
+    }
 }
 
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
@@ -36,12 +40,12 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
         .collect();
 
     let final_state = find_final_state(gram, lr0, lalr);
-    remove_conflicts(final_state, &mut parser);
-    unused_rules(gram, &parser);
-    let defred = default_reductions(&parser);
+    remove_conflicts(final_state, parser.as_mut_slice());
+    report_unused_rules(gram, &parser);
+
+    let defred =  default_reductions(&parser);
 
     YaccParser {
-        nstates: nstates,
         actions: parser,
         default_reductions: defred,
         final_state: final_state,
@@ -72,11 +76,11 @@ fn get_shifts(
             let symbol = lr0.states[k as usize].accessing_symbol;
             if gram.is_token(symbol) {
                 actions.push(ParserAction {
-                    symbol: symbol as i16,
+                    symbol: symbol,
                     number: k,
-                    prec: gram.prec[symbol],
+                    prec: gram.prec[symbol as usize],
                     action_code: ActionCode::Shift,
-                    assoc: gram.assoc[symbol],
+                    assoc: gram.assoc[symbol as usize],
                     suppressed: 0,
                 });
             }
@@ -136,41 +140,37 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
 
 fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize {
     let p = &lr0.shifts[lalr.shift_table[0] as usize];
-    let to_state2 = &p.shifts;
-    let goal = gram.ritem[1] as usize;
+    let goal = gram.ritem[1];
     let mut final_state: usize = 0;
-    for i in (0..to_state2.len()).rev() {
-        final_state = to_state2[i] as usize;
+    for &ts in p.shifts.iter().rev() {
+        final_state = ts as usize;
         if lr0.states[final_state].accessing_symbol == goal {
-            break;
+            return ts as usize;
         }
     }
+    // Is reaching here an error?
     final_state
 }
 
-fn unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
+fn report_unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
     let mut rules_used = vec![false; gram.nrules];
 
     for pi in parser.iter() {
-        for p in pi.iter() {
-            if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-                rules_used[p.number as usize] = true;
+        for action in pi.iter() {
+            if action.action_code == ActionCode::Reduce && action.suppressed == 0 {
+                rules_used[action.number as usize] = true;
             }
         }
     }
 
-    let mut nunused: usize = 0;
-    for i in 3..gram.nrules {
-        if !rules_used[i] {
-            nunused += 1;
-        }
-    }
-
-    if nunused != 0 {
-        warn!("{} rule(s) were never reduced", nunused);
+    let num_unused = rules_used[3..].iter().filter(|&&used| !used).count();
+    if num_unused != 0 {
+        warn!("{} rule(s) were never reduced", num_unused);
     }
 }
 
+/// Modifies ParserAction::suppressed. That field could potentially be moved to a
+/// separate vector, which this function would produce.
 fn remove_conflicts(final_state: usize, parser: &mut [Vec<ParserAction>]) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
@@ -185,7 +185,9 @@ fn remove_conflicts(final_state: usize, parser: &mut [Vec<ParserAction>]) {
     }
 }
 
-// Returns (shift_reduce_conflict_count, reduce_reduce_conflict_count)
+/// Modifies ParserAction::suppressed. That field could potentially be moved to a
+/// separate vector, which this function would produce.
+/// Returns (shift_reduce_conflict_count, reduce_reduce_conflict_count)
 fn remove_conflicts_for_state(pvec: &mut [ParserAction], is_final_state: bool) -> (usize, usize) {
     let mut srcount: usize = 0;
     let mut rrcount: usize = 0;
@@ -274,7 +276,7 @@ fn sole_reduction(parser: &[ParserAction]) -> i16 {
 }
 
 /// Computes the default reduction for each state.
-fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<i16> {
+pub fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<i16> {
     debug!("default_reductions");
     parser.iter().enumerate().map(|(i, actions)| {
         let r = sole_reduction(actions);

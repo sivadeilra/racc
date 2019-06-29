@@ -26,10 +26,9 @@
 // produce several new tables.
 
 use crate::grammar::Grammar;
-use crate::grammar::{PREDEFINED_ITEMS, PREDEFINED_RULES, TOKEN, UNDEFINED};
+use crate::grammar::{TOKEN, UNDEFINED};
 
 use std::collections::HashMap;
-use std::iter::repeat;
 use std::mem::replace;
 use std::rc::Rc;
 
@@ -40,6 +39,9 @@ use proc_macro2::Span;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{Block, Ident, Token, Type};
+
+const PREDEFINED_RULES: usize = 3;
+const PREDEFINED_ITEMS: usize = 4;
 
 const NO_SYMBOL: usize = !0;
 const NO_ITEM: usize = !0;
@@ -53,24 +55,22 @@ enum SymClass {
 }
 
 struct Symbol {
-    name: Rc<String>,
+    name: Ident,
     tag: Option<Rc<String>>,
     // value: i16,
     prec: i16,
     class: SymClass,
     assoc: u8,
-    span: Span, // code span which defined this name
 }
 
-fn make_symbol(name: &str, span: Span) -> Symbol {
+fn make_symbol(name: Ident) -> Symbol {
     Symbol {
-        name: Rc::new(name.to_string()),
+        name: name,
         tag: None,
         // value: UNDEFINED,
         prec: 0,
         class: SymClass::Unknown,
-        assoc: TOKEN,
-        span: span,
+        assoc: TOKEN
     }
 }
 
@@ -108,40 +108,40 @@ struct ReaderState {
 impl ReaderState {
     pub fn new() -> ReaderState {
         ReaderState {
-            pitem: repeat(NO_ITEM).take(PREDEFINED_ITEMS).collect(),
-            plhs: repeat(NO_ITEM).take(PREDEFINED_RULES).collect(),
-            rule_blocks: repeat(None).take(PREDEFINED_RULES).collect(),
-            rhs_binding: repeat(None).take(PREDEFINED_ITEMS).collect(),
+            pitem: vec![NO_ITEM; PREDEFINED_ITEMS],
+            plhs: vec![NO_ITEM; PREDEFINED_RULES],
+            rule_blocks: vec![None; PREDEFINED_RULES],
+            rhs_binding: vec![None; PREDEFINED_ITEMS],
             symbols: Vec::new(),
             symbol_table: HashMap::new(),
             gensym: 1,
             last_was_action: false,
             nitems: PREDEFINED_ITEMS,
             nrules: PREDEFINED_RULES,
-            rprec: repeat(0).take(PREDEFINED_RULES).collect(),
-            rassoc: repeat(TOKEN).take(PREDEFINED_RULES).collect(),
+            rprec: vec![0; PREDEFINED_RULES],
+            rassoc: vec![TOKEN; PREDEFINED_RULES],
         }
     }
 
     // Looks up a symbol in the symbol table, and returns the symbol index
     // (the index within ReaderState.symbols) of that symbol.  If the symbol
     // is not already in the symbol table, then this method adds the symbol.
-    pub fn lookup(&mut self, name: &str, span: Span) -> usize {
-        if let Some(ii) = self.symbol_table.get(name) {
+    pub fn lookup(&mut self, name: &Ident) -> usize {
+        if let Some(ii) = self.symbol_table.get(&name.to_string()) {
             // debug!("found {}_{} already in table", name, *ii);
             return *ii;
         }
 
         let index = self.symbols.len();
-        let s = make_symbol(name, span);
+        let s = make_symbol(name.clone());
         self.symbols.push(s);
         self.symbol_table.insert(name.to_string(), index);
         // debug!("added {}_{} to table", name, index);
         return index;
     }
 
-    pub fn lookup_ref_mut<'a>(&'a mut self, name: &str, span: Span) -> (usize, &'a mut Symbol) {
-        let index = self.lookup(name, span);
+    pub fn lookup_ref_mut<'a>(&'a mut self, name: &Ident) -> (usize, &'a mut Symbol) {
+        let index = self.lookup(name);
         (index, &mut self.symbols[index])
     }
 
@@ -215,12 +215,13 @@ impl ReaderState {
     pub fn insert_empty_rule(&mut self, span: Span) {
         self.gensym += 1;
         let symname = format!("$${}", self.gensym);
+        let symname_ident = Ident::new(&symname, span);
 
         debug!("insert_empty_rule: added symbol {}", symname);
 
         let tag: Option<Rc<String>> = self.symbols[self.plhs[self.nrules]].tag.clone();
         let sym_index = {
-            let (sym_index, sym) = self.lookup_ref_mut(&symname, span);
+            let (sym_index, sym) = self.lookup_ref_mut(&symname_ident);
             sym.tag = tag;
             sym.class = SymClass::NonTerminal;
             sym_index
@@ -300,10 +301,10 @@ impl ReaderState {
 
         debug!("ntokens={} nvars={} nsyms={}", ntokens, nvars, nsyms);
 
-        let mut gram_name: Vec<String> = repeat(String::new()).take(nsyms).collect();
-        let mut gram_value: Vec<i16> = repeat(0).take(nsyms).collect();
-        let mut gram_prec: Vec<i16> = repeat(0).take(nsyms).collect();
-        let mut gram_assoc: Vec<u8> = repeat(0).take(nsyms).collect();
+        let mut gram_name: Vec<Option<Ident>> = vec![None; nsyms];
+        let mut gram_value: Vec<i16> = vec![0; nsyms];
+        let mut gram_prec: Vec<i16> = vec![0; nsyms];
+        let mut gram_assoc: Vec<u8> = vec![0; nsyms];
         let mut gram_rprec = replace(&mut self.rprec, Vec::new());
         let mut gram_rassoc = replace(&mut self.rassoc, Vec::new());
 
@@ -313,7 +314,7 @@ impl ReaderState {
         // unpacked view.  In u = v[p], p is a packed symbol index (a number in the nsyms space),
         // while u is the unpacked symbol.
         let v = {
-            let mut v: Vec<usize> = repeat(NO_SYMBOL).take(nsyms).collect(); // symbol indices, which point into reader.symbols[]
+            let mut v: Vec<usize> = vec![NO_SYMBOL; nsyms]; // symbol indices, which point into reader.symbols[]
             v[0] = NO_SYMBOL; // $end
             v[start_symbol] = NO_SYMBOL; // $accept
 
@@ -347,7 +348,7 @@ impl ReaderState {
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
         // symbol is always at packed index 1.
-        let mut map_to_packed: Vec<i16> = repeat(-1).take(nsyms).collect();
+        let mut map_to_packed: Vec<i16> = vec![-1; nsyms];
         map_to_packed[0] = 1; // The 'error' symbol
 
         for i in 1..ntokens {
@@ -365,7 +366,7 @@ impl ReaderState {
 
         // symbols_value replaces the bucket::value field.  that is, for (i, j),
         // self.symbols[i].value = j ==> symbols_value[i] = j
-        let mut symbols_value: Vec<i16> = repeat(UNDEFINED).take(self.symbols.len()).collect();
+        let mut symbols_value: Vec<i16> = vec![UNDEFINED; self.symbols.len()];
 
         symbols_value[goal_symbol] = 0;
         let mut k: usize = 1;
@@ -414,7 +415,7 @@ impl ReaderState {
         }
 
         // Propagate $end token
-        gram_name[0] = "$end".to_string();
+        gram_name[0] = Some(Ident::new("__end", Span::call_site()));
         gram_value[0] = 0;
         gram_prec[0] = 0;
         gram_assoc[0] = TOKEN;
@@ -422,7 +423,7 @@ impl ReaderState {
         // Propagate token symbols
         for i in 1..ntokens {
             let from = &self.symbols[v[i]];
-            gram_name[i] = from.name.to_string();
+            gram_name[i] = Some(from.name.clone());
             gram_value[i] = symbols_value[v[i]];
             gram_prec[i] = from.prec;
             gram_assoc[i] = from.assoc;
@@ -430,7 +431,7 @@ impl ReaderState {
 
         // Set up the start (accept) symbol
         assert!(start_symbol == ntokens);
-        gram_name[start_symbol] = "$accept".to_string();
+        gram_name[start_symbol] = Some(Ident::new("__accept", Span::call_site()));
         gram_value[start_symbol] = -1;
         gram_prec[start_symbol] = 0;
         gram_assoc[start_symbol] = TOKEN;
@@ -440,7 +441,7 @@ impl ReaderState {
             let k = map_to_packed[v[i]] as usize;
             assert!(k != NO_SYMBOL);
             let from = &self.symbols[v[i]];
-            gram_name[k] = from.name.to_string();
+            gram_name[k] = Some(from.name.clone());
             gram_value[k] = symbols_value[v[i]];
             gram_prec[k] = from.prec;
             gram_assoc[k] = from.assoc;
@@ -452,7 +453,7 @@ impl ReaderState {
                 "    {:3} {} {:20} value {:3} prec {:2} assoc {:2}",
                 i,
                 if i < ntokens { "token" } else { "var  " },
-                gram_name[i],
+                gram_name[i].as_ref().unwrap(),
                 gram_value[i],
                 gram_prec[i],
                 gram_assoc[i]
@@ -481,33 +482,34 @@ impl ReaderState {
         //      -1 ->
         //      $accept -> start_symbol
 
-        let mut ritem: Vec<i16> = repeat(0).take(nitems).collect();
+        // Build  rlhs
+        let mut rlhs: Vec<i16> = vec![0; nrules];
+        rlhs[0] = 0;
+        rlhs[1] = 0;
+        rlhs[2] = start_symbol as i16;
+        for i in PREDEFINED_RULES..nrules {
+            rlhs[i] = map_to_packed[self.plhs[i]] as i16;
+        }
+
+        let mut ritem: Vec<i16> = vec![0; nitems];
         ritem[0] = -1;
         ritem[1] = map_to_packed[goal_symbol];
         ritem[2] = 0;
         ritem[3] = -2;
 
-        let mut rlhs: Vec<i16> = repeat(0).take(nrules).collect();
-        rlhs[0] = 0;
-        rlhs[1] = 0;
-        rlhs[2] = start_symbol as i16;
-
-        let mut rrhs: Vec<i16> = repeat(0).take(nrules + 1).collect();
+        let mut rrhs: Vec<i16> = vec![0; nrules + 1];
         rrhs[0] = 0;
         rrhs[1] = 0;
         rrhs[2] = 1;
 
-        let plhs = &self.plhs;
+        let mut j = PREDEFINED_ITEMS; // index of next item to process
         let pitem = &self.pitem;
         let symbols = &self.symbols;
-
-        let mut j = PREDEFINED_ITEMS; // index of next item to process
         for i in PREDEFINED_RULES..nrules {
-            rlhs[i] = map_to_packed[plhs[i]] as i16;
             rrhs[i] = j as i16;
             let mut assoc = TOKEN;
             let mut prec2 = 0u8;
-            while self.pitem[j] != NO_ITEM {
+            while pitem[j] != NO_ITEM {
                 ritem[j] = map_to_packed[pitem[j]];
                 if symbols[pitem[j]].class == SymClass::Terminal {
                     prec2 = symbols[pitem[j]].prec as u8;
@@ -537,14 +539,13 @@ impl ReaderState {
             nvars: nvars,
             start_symbol: start_symbol,
 
-            name: gram_name,
+            name: gram_name.into_iter().map(|opt| opt.unwrap()).collect(),
             pname: Vec::new(),
             value: gram_value,
 
             prec: gram_prec,
             assoc: gram_assoc,
 
-            nitems: nitems,
             nrules: nrules,
 
             ritem: ritem,
@@ -556,14 +557,12 @@ impl ReaderState {
     }
 
     pub fn print_grammar(gram: &Grammar) {
-        assert!(gram.ritem.len() == gram.nitems);
-
         debug!(
             "symbols: ntokens={} nvars={} nsyms={}",
             gram.ntokens, gram.nvars, gram.nsyms
         );
         for i in 0..gram.nsyms {
-            if gram.is_var(i) {
+            if gram.is_var(i as i16) {
                 debug!("    {:3}  var    {}", i, gram.name[i]);
             } else {
                 debug!("    {:3}  token  {}", i, gram.name[i]);
@@ -624,7 +623,7 @@ impl Parse for Grammar2 {
 
         // Add the well-known "error" symbol to the table.
         {
-            let (_, s) = reader.lookup_ref_mut("error", Span::call_site());
+            let (_, s) = reader.lookup_ref_mut(&Ident::new("error", Span::call_site()));
             s.class = SymClass::Terminal;
         }
 
@@ -648,7 +647,7 @@ impl Parse for Grammar2 {
                 let id = input.parse::<Ident>()?;
                 let name_def_str = id.to_string();
                 let name_def_span = id.span();
-                let lhs = reader.lookup(&name_def_str, name_def_span);
+                let lhs = reader.lookup(&id);
                 // println!("- id: {}", name_def_str);
 
                 let la = input.lookahead1();
@@ -690,9 +689,8 @@ impl Parse for Grammar2 {
                         let la = input.lookahead1();
                         if la.peek(Ident) {
                             let rhs_ident = input.parse::<Ident>()?;
-                            let rhs_name = rhs_ident.to_string();
                             // debug!("rule: found token/symbol ref '{}'", rhs_name);
-                            let rhs = reader.lookup(&rhs_name, rhs_ident.span());
+                            let rhs = reader.lookup(&rhs_ident);
 
                             // see if the symbol is followed by "= binding".
                             let mut rbind: Option<Ident> = None;
@@ -806,7 +804,7 @@ impl Parse for Grammar2 {
             let sym = &reader.symbols[i];
             if sym.class == SymClass::Unknown {
                 return Err(syn::Error::new(
-                    sym.span,
+                    sym.name.span(),
                     "symbol was used but never defined",
                 ));
             }

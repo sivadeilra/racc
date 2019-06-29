@@ -6,11 +6,9 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::cmp;
 use std::iter::repeat;
-use syn::punctuated::Punctuated;
-use syn::{Block, Generics, Ident, Type};
+use syn::{Block, Ident, Type};
 
-const I16_MAX: i16 = 0x7fff;
-const I16_MIN: i16 = -0x8000;
+use std::i16;
 
 struct ActionsTable {
     nvectors: usize,
@@ -18,15 +16,6 @@ struct ActionsTable {
     width: Vec<i16>,
     froms: Vec<Vec<i16>>,
     tos: Vec<Vec<i16>>,
-}
-
-fn no_generics() -> Generics {
-    Generics {
-        lt_token: None,
-        params: Punctuated::new(),
-        gt_token: None,
-        where_clause: None,
-    }
 }
 
 // Given a constructed parser (a description of a state machine which parses
@@ -62,7 +51,7 @@ pub fn output_parser_to_ast(
     for t in 1..gram.ntokens {
         // todo: use the original Ident from parsing, for better error reporting
         let tokvalue = gram.value[t] as u32;
-        let tok_ident = Ident::new(&gram.name[t], Span::call_site()); // TODO: use original Ident from parser i nput
+        let tok_ident = &gram.name[t];
         items.extend(quote!(const #tok_ident: u32 = #tokvalue;));
     }
     // println!("tokens consts done");
@@ -204,20 +193,20 @@ fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
     // The values used at runtime are not symbol indices.  They are token values, which come from gram.value[token].value.
     // This is ugly and inefficient.
 
-    let mut max_value: i16 = I16_MIN;
+    let mut max_value: i16 = i16::MIN;
     for i in 0..gram.ntokens {
         max_value = cmp::max(max_value, gram.value[i]);
     }
 
     assert!(max_value >= 0);
-    assert!(max_value < I16_MAX);
+    assert!(max_value < i16::MAX);
     let length = (max_value + 1) as usize;
 
-    let mut toknames: Vec<String> = repeat(String::new()).take(length).collect();
+    let mut toknames: Vec<String> = vec![String::new(); length];
 
     // Now put the names into proper places.
-    for i in 0..gram.ntokens {
-        toknames[gram.value[i] as usize] = gram.name[i].clone();
+    for (value, name) in gram.value[0..gram.ntokens].iter().zip(gram.name[0..gram.ntokens].iter()) {
+        toknames[*value as usize] = name.to_string();
     }
 
     make_table_string(Ident::new("YYNAME", span), &toknames)
@@ -247,6 +236,7 @@ fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
     make_table_i16_as_u16(name, values)
 }
 
+#[allow(dead_code)]
 fn make_table_i16_real(name: Ident, values: &[i16]) -> TokenStream {
     let values_len = values.len();
     quote! {
@@ -278,13 +268,13 @@ fn output_actions(
     gotos: &GotoMap,
     parser: &YaccParser,
 ) -> Vec<TokenStream> {
-    let nstates = parser.nstates;
+    let nstates = parser.nstates();
 
     let mut act = token_actions(gram, parser);
     let dgoto = goto_actions(gram, nstates, gotos, &mut act);
     let (nentries, order) = sort_actions(&mut act);
 
-    let packed = pack_table(parser.nstates, nentries, &order, &act);
+    let packed = pack_table(parser.nstates(), nentries, &order, &act);
 
     let mut items: Vec<TokenStream> = Vec::new();
     // debug!("emitting tables");
@@ -323,7 +313,7 @@ fn output_actions(
 fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     debug!("token_actions()");
 
-    let nstates = parser.nstates;
+    let nstates = parser.nstates();
     let nvectors = 2 * nstates + gram.nvars;
     let mut tally: Vec<i16> = vec![0; nvectors];
     let mut width: Vec<i16> = vec![0; nvectors];
@@ -331,8 +321,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     let mut tos: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
     let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens];
 
-    for i in 0..nstates {
-        let actions = &parser.actions[i];
+    for (i, actions) in parser.actions.iter().enumerate() {
         if actions.len() != 0 {
             debug!("    state={}", i);
             for ii in actionrow.iter_mut() {
@@ -370,7 +359,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
             if shiftcount > 0 {
                 let mut r: Vec<i16> = Vec::with_capacity(shiftcount);
                 let mut s: Vec<i16> = Vec::with_capacity(shiftcount);
-                let mut min = I16_MAX;
+                let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
                     if actionrow[j] != 0 {
@@ -392,7 +381,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
             if reducecount > 0 {
                 let mut r: Vec<i16> = Vec::with_capacity(reducecount);
                 let mut s: Vec<i16> = Vec::with_capacity(reducecount);
-                let mut min = I16_MAX;
+                let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
                     if actionrow[gram.ntokens + j] != 0 {
@@ -427,12 +416,12 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     }
 }
 
+// state_count.len() == nstates
 fn default_goto(
     gram: &Grammar,
     gotos: &GotoMap,
     symbol: usize,
-    nstates: usize,
-    state_count: &mut Vec<i16>,
+    state_count: &mut [i16],
 ) -> usize {
     let m = gotos.goto_map[symbol - gram.ntokens] as usize;
     let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
@@ -440,19 +429,19 @@ fn default_goto(
         return 0;
     }
 
-    for i in 0..nstates {
-        state_count[i] = 0;
+    for c in state_count.iter_mut() {
+        *c = 0;
     }
 
-    for i in m..n {
-        state_count[gotos.to_state[i] as usize] += 1;
+    for &state in gotos.to_state[m..n].iter()  {
+        state_count[state as usize] += 1;
     }
 
     let mut max = 0;
     let mut default_state = 0;
-    for i in 0..nstates {
-        if state_count[i] > max {
-            max = state_count[i];
+    for (i, &c) in state_count.iter().enumerate() {
+        if c > max {
+            max = c;
             default_state = i;
         }
     }
@@ -519,21 +508,20 @@ fn goto_actions(
 ) -> Vec<i16> {
     debug!("goto_actions");
 
-    let mut state_count: Vec<i16> = repeat(0).take(nstates).collect(); // temporary data, used in default_goto()
+    let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
     let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars); // the table that we are building
 
     let k = default_goto(
         gram,
         gotos,
         gram.start_symbol + 1,
-        nstates,
         &mut state_count,
     );
     dgoto_table.push(k as i16);
     save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
 
     for i in (gram.start_symbol + 2)..gram.nsyms {
-        let k = default_goto(gram, gotos, i, nstates, &mut state_count);
+        let k = default_goto(gram, gotos, i, &mut state_count);
         dgoto_table.push(k as i16);
         save_column(gram, nstates, gotos, i, k, act);
     }

@@ -237,10 +237,6 @@
 //!
 //! Feel free to send me any feedback on RACC to `arlie.davis@gmail.com`.
 
-//#![crate_type = "dylib"]
-#![allow(dead_code)]
-//#![allow(non_upper_case_globals)]
-//#![allow(unused_imports)]
 #![recursion_limit = "256"]
 
 #![warn(rust_2018_idioms)]
@@ -259,6 +255,10 @@ extern crate proc_macro;
 
 use proc_macro2::Span;
 use syn::{parse_macro_input, Ident};
+
+// Type aliases
+type Symbol = i16;
+type State = i16;
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {

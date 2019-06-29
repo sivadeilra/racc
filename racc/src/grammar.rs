@@ -1,30 +1,9 @@
 /* keyword codes */
 
 pub const TOKEN: u8 = 0;
-/*
-pub const LEFT: u8 =1;
-pub const RIGHT: u8 =2;
-pub const NONASSOC: u8 =3;
-pub const MARK: u8 =4;
-pub const TEXT: u8 =5;
-pub const TYPE: u8 =6;
-pub const START: u8 =7;
-pub const UNION: u8 =8;
-pub const IDENT: u8 =9;
-pub const EXPECT: u8 =10;
-pub const EXPECT_RR: u8 =11;
-pub const CLASS: u8 =12;
-pub const NAMESPACE: u8 =13;
-pub const LANGUAGE: u8 =14;
-pub const LOCATION: u8 =15;
-pub const VISIBILITY: u8 =16;
-*/
 
 // the undefined value
 pub const UNDEFINED: i16 = -1;
-
-pub const PREDEFINED_RULES: usize = 3;
-pub const PREDEFINED_ITEMS: usize = 4;
 
 // Defines a grammar.  A grammar has these elements:
 //
@@ -44,8 +23,12 @@ pub struct Grammar {
     pub nvars: usize,
     pub start_symbol: usize,
 
-    pub name: Vec<String>,
+    /// len = nsyms
+    pub name: Vec<syn::Ident>,
+
     pub pname: Vec<String>,
+
+    /// len = nsyms
     pub value: Vec<i16>,
 
     // these two are managed differently
@@ -53,10 +36,11 @@ pub struct Grammar {
     pub assoc: Vec<u8>,
 
     // the rules which describe the grammar
-    pub nitems: usize,
     pub nrules: usize,
 
+    // len = nitems
     pub ritem: Vec<i16>,
+
     pub rlhs: Vec<i16>,
     pub rrhs: Vec<i16>,
     pub rprec: Vec<i16>,
@@ -64,12 +48,16 @@ pub struct Grammar {
 }
 
 impl Grammar {
-    pub fn is_var(&self, s: usize) -> bool {
-        s >= self.start_symbol
+    pub fn is_var(&self, s: i16) -> bool {
+        (s as usize) >= self.start_symbol
     }
 
-    pub fn is_token(&self, s: usize) -> bool {
-        s < self.start_symbol
+    pub fn is_token(&self, s: i16) -> bool {
+        (s as usize) < self.start_symbol
+    }
+
+    pub  fn  nitems(&self)  -> usize {
+        self.ritem.len()
     }
 
     pub fn rule_to_str(&self, r: usize) -> String {
