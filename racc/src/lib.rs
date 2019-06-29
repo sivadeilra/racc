@@ -237,22 +237,13 @@
 //!
 //! Feel free to send me any feedback on RACC to `arlie.davis@gmail.com`.
 
-#![crate_type = "dylib"]
-/*
-#![feature(plugin_registrar)]
-#![feature(quote)]
-#![feature(plugin)]
-#![feature(rustc_private)]
-#![feature(collections)]
-#![feature(vec_push_all)]
-*/
+//#![crate_type = "dylib"]
 #![allow(dead_code)]
-#![allow(non_upper_case_globals)]
-// #![allow(unstable)]
-#![allow(unused_imports)]
+//#![allow(non_upper_case_globals)]
+//#![allow(unused_imports)]
+#![recursion_limit="256"]
 
-// #[plugin]
-// #[macro_use]
+
 extern crate log;
 
 // extern crate rustc;
@@ -276,11 +267,8 @@ mod lr0;
 mod reader;
 mod util;
 mod warshall;
-//mod output;
+mod output;
 mod mkpar;
-
-/// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
-mod runtime;
 
 /*
 
@@ -290,13 +278,27 @@ pub fn plugin_registrar(reg: &mut Registry) {
     reg.register_macro("grammar", expand_grammar);
 }
 
-fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -> Box<MacResult+'static> {
-    info!("expand_grammar");
 
-    let mut gen_items: Vec<P<ast::Item>> = Vec::new();
+*/
 
-    let mut parser = cx.new_parser_from_tts(tts);
+extern crate proc_macro;
+extern crate proc_macro2;
 
+extern crate syn;
+
+use syn::ItemMod;
+use syn::parse_quote;
+use syn::{parse_macro_input, Ident};
+use proc_macro2::{Span};
+use syn::export::quote::ToTokens;
+
+#[proc_macro]
+pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    // println!("hello, world, from racc_grammar");
+
+    let g = parse_macro_input!(tokens as reader::Grammar2);
+
+/*
     // First, we read a special list of tokens:
     //
     //      <context-type> <context-param> ;
@@ -311,47 +313,31 @@ fn expand_grammar(cx: &mut ExtCtxt, sp: codemap::Span, tts: &[ast::TokenTree]) -
     // The type of the symbol values (on values.stack)
     let symbol_value_ty = parser.parse_ty();
     parser.expect(&Token::Semi);
+    */
+
+    let context_param_ident = Ident::new("context", Span::call_site());
+
 
     // Read the tokens and rules.
 
-    let (gram, action_blocks, rhs_binding) = reader::read_grammar(sp, &mut parser);
+    let gram = &g.grammar;
 
     let lr0 = lr0::compute_lr0(&gram);
     let lalr_out = lalr::run_lalr(&gram, &lr0);
     let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
 
-    let yacc_items = output::output_parser_to_ast(cx, sp, &gram, &lalr_out.gotos, &yaccparser, action_blocks, rhs_binding, context_type_ident, context_param_ident, symbol_value_ty);
-    for it in yacc_items.into_iter() {
-        gen_items.push(it);
-    }
+    let parser_tokens = output::output_parser_to_ast(
+        &gram,
+        &lalr_out.gotos,
+        &yaccparser,
+        &g.rule_blocks,
+        &g.rhs_bindings,
+        g.app_context_ty,
+        context_param_ident,
+        g.value_ty);
 
-    debug!("final items:");
-    for it in gen_items.iter() {
-        debug!("{}", pprust::item_to_string(&**it));
-    }
-
-    Box::new(
-        MacEager {
-            items: Some(SmallVector::many(gen_items)),
-            ..Default::default()
-        }
-    )
-}
-
-*/
-
-extern crate proc_macro;
-extern crate proc_macro2;
-
-extern crate syn;
-
-//use proc_macro2::TokenStream;
-use syn::{parse_macro_input, Result};
-
-#[proc_macro]
-pub fn racc(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    //let tokens = proc_macro2::TokenStream::from(tokens);
-    let g = parse_macro_input!(tokens as reader::Grammar2);
-
-    proc_macro::TokenStream::new()
+    // println!("almost done!");
+    // println!("{:?}", parser_tokens);
+    // return parser_tokens.into();
+    return parser_tokens.into();
 }

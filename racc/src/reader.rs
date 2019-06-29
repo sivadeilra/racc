@@ -34,13 +34,12 @@ use std::mem::replace;
 use std::rc::Rc;
 
 use log::debug;
-use log::info;
 use log::warn;
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::{Span};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{Expr, ExprBlock, Ident, Token};
+use syn::{Block, Ident, Token, Type};
 
 const NO_SYMBOL: usize = !0;
 const NO_ITEM: usize = !0;
@@ -608,13 +607,21 @@ impl ReaderState {
 
 pub struct Grammar2 {
     pub grammar: Grammar,
-    pub rule_blocks: Vec<Option<syn::Block>>,
+    pub app_context_ty: Type,
+    pub value_ty: Type,
+    pub rule_blocks: Vec<Option<Block>>,
     pub rhs_bindings: Vec<Option<Ident>>,
 }
 
 impl Parse for Grammar2 {
     fn parse(input: ParseStream) -> syn::Result<Grammar2> {
+
         let mut reader: ReaderState = ReaderState::new();
+
+        use syn::parse_quote;
+
+        let app_context_ty: Type = parse_quote!{ AppContext };
+        let value_ty: Type = parse_quote!{ Option<i16> };
 
         // Add the well-known "error" symbol to the table.
         {
@@ -628,6 +635,8 @@ impl Parse for Grammar2 {
 
         // debug!("parsing token definitions");
         while !input.is_empty() {
+            // println!("racc: parsing rule");
+
             // debug!("token: {:?}", la);
             let la = input.lookahead1();
             if la.peek(Ident) {
@@ -638,10 +647,10 @@ impl Parse for Grammar2 {
                 //      = (defines a token with a specific value)
                 //      ; (defines a token with an automatically-assigned value)
                 let id = input.parse::<Ident>()?;
-
                 let name_def_str = id.to_string();
                 let name_def_span = id.span();
                 let lhs = reader.lookup(&name_def_str, name_def_span);
+                // println!("- id: {}", name_def_str);
 
                 let la = input.lookahead1();
                 if la.peek(syn::token::Colon) {
@@ -722,9 +731,14 @@ impl Parse for Grammar2 {
                         }
                     }
                 } else if la.peek(syn::token::Eq) || la.peek(syn::token::Semi) {
+                    // println!("found Eq or Semi");
                     // = or ; defines a token
                     let has_value = la.peek(syn::token::Eq);
-                    input.parse::<syn::token::Eq>()?;
+                    if la.peek(syn::token::Eq) {
+                        input.parse::<syn::token::Eq>()?;
+                    } else {
+                        input.parse::<syn::token::Semi>()?;
+                    }
 
                     match reader.symbols[lhs].class {
                         SymClass::Terminal => {
@@ -805,10 +819,14 @@ impl Parse for Grammar2 {
 
         // -> (Grammar, Vec<Option<Expr>>, Vec<Option<syn::Ident>>)
 
+        // println!("finished parsing grammar");        
+
         Ok(Grammar2 {
             grammar: gram,
             rule_blocks: reader.rule_blocks,
             rhs_bindings: reader.rhs_binding,
+            app_context_ty,
+            value_ty,
         })
     }
 }

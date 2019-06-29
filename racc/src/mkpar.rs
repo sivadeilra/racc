@@ -183,8 +183,8 @@ fn unused_rules(gram: &Grammar, parser: &Vec<Vec<ParserAction>>) {
 fn remove_conflicts(lr0: &LR0Output, final_state: usize, parser: &mut Vec<Vec<ParserAction>>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    let mut srconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
-    let mut rrconflicts: Vec<i16> = repeat(0).take(lr0.nstates()).collect();
+    let mut srconflicts: Vec<i16> = vec![0; lr0.nstates()];
+    let mut rrconflicts: Vec<i16> = vec![0; lr0.nstates()];
     for i in 0..lr0.nstates() {
         let pvec = &mut parser[i];
         let mut srcount: usize = 0;

@@ -1,19 +1,25 @@
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+use syn::ItemStatic;
+use syn::ItemConst;
+use syn::LitInt;
+
 use std::cmp;
+use syn::{Arm, Item,  Type, Stmt, Pat, Block, WhereClause, Generics};
+use syn::token::{Where};
+use syn::punctuated::Punctuated;
+use proc_macro2::{Span, TokenStream};
+use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
+use syn::{Expr, ExprBlock, Ident, Token};
+
 use std::iter::repeat;
-
-use syntax::ast;
-use syntax::ast::{Arm, Block, Expr, Generics, Item, Mutability, Pat, Stmt, UnsignedIntLit, Ty, TyU16, Ty_, WhereClause, MutMutable};
-use syntax::ext::build::{AstBuilder};
-use syntax::ext::base::{ExtCtxt};
-use syntax::ext::quote::rt::ExtParseUtils;
-use syntax::parse::token::{intern_and_get_ident};
-use syntax::ptr::P;
-use syntax::codemap::{Span};
-use syntax::owned_slice::OwnedSlice;
-
-use grammar::Grammar;
-use mkpar::{ActionCode, YaccParser};
-use lalr::GotoMap;
+use crate::grammar::Grammar;
+use crate::mkpar::{ActionCode, YaccParser};
+use crate::lalr::GotoMap;
+use quote::quote;
+use log::debug;
 
 const I16_MAX: i16 = 0x7fff;
 const I16_MIN: i16 = -0x8000;
@@ -28,64 +34,71 @@ struct ActionsTable {
 
 fn no_generics() -> Generics {
      Generics {
-        lifetimes: vec![],
-        ty_params: OwnedSlice::empty(),
-        where_clause: no_where()
+        lt_token: None,
+        params: Punctuated::new(),
+        gt_token: None,
+        where_clause: None
     }
 }
 
+/*
 fn no_where() -> WhereClause {
     WhereClause {
-        id: ast::DUMMY_NODE_ID,
-        predicates: vec![],
+        where_token: syn::token::Where(),
+        predicates: Punctuated::new()
     }
 }
+*/
+
+use syn::export::quote::ToTokens;
 
 // Given a constructed parser (a description of a state machine which parses
 // a given grammar), produces a Rust AST which implements the parser.
 pub fn output_parser_to_ast(
-    cx: &ExtCtxt,
-    grammar_span: Span,
     gram: &Grammar,
     gotos: &GotoMap,
     parser: &YaccParser,
-    blocks: Vec<Option<P<Block>>>,
-    rhs_binding: Vec<Option<ast::Ident>>,
-    context_ty: P<Ty>,                      // Ident to use for the context type, passed to the reduce() method
-    context_param_ident: ast::Ident,        // Ident to use for the context arg, passed to the reduce() method
-    symbol_value_ty: P<Ty>                  // type to use for value_stack
-    ) -> Vec<P<Item>> {
+    blocks: &[Option<Block>],
+    rhs_binding: &[Option<Ident>],
+    context_ty: Type,                      // Ident to use for the context type, passed to the reduce() method
+    context_param_ident: Ident,            // Ident to use for the context arg, passed to the reduce() method
+    symbol_value_ty: Type,                 // type to use for value_stack
+    ) -> TokenStream {
 
     assert!(blocks.len() == gram.nrules);
 
+    let grammar_span = Span::call_site();
     let sp = grammar_span;
 
-    let mut items: Vec<P<Item>> = Vec::new();
+    let mut items: TokenStream = TokenStream::new();
 
-    items.push({
-        let v: Vec<i16> = parser.default_reductions.iter().map(|s| if *s != 0 { *s - 2 } else { 0 }).collect();
-        make_table_i16(cx, grammar_span, "YYDEFRED", &v)
+    //  Generate YYDEFRED table.
+    let yydefred: Vec<i16> = parser.default_reductions.iter().map(|s| if *s != 0 { *s - 2 } else { 0 }).collect();
+    items.extend({
+        make_table_i16(Ident::new("YYDEFRED", sp), &yydefred)
     });
 
-    for i in output_actions(cx, grammar_span, gram, gotos, parser).into_iter() {
-        items.push(i);
-    }
+    items.extend(output_actions(grammar_span, gram, gotos, parser));
+    // println!("output_actions done");
 
     for t in 1..gram.ntokens {
         // todo: use the original Ident from parsing, for better error reporting
-        let tokvalue = gram.value[t];
-        let tok_ident = cx.ident_of(&gram.name[t]);
-        let ty_u32 = quote_ty!(cx, u32);
-        items.push(cx.item_const(sp, tok_ident, ty_u32, expr_u32(cx, sp, tokvalue as u32)));
+        let tokvalue = gram.value[t] as u32;
+        let tok_ident = Ident::new(&gram.name[t], Span::call_site()); // TODO: use original Ident from parser i nput
+        items.extend(quote!(const #tok_ident: u32 = #tokvalue;));
     }
+    // println!("tokens consts done");
 
     // Generate YYFINAL constant.
-    items.push(cx.item_const(sp, cx.ident_of("YYFINAL"), quote_ty!(cx, usize), cx.expr_usize(sp, parser.final_state)));
+    let yyfinal = parser.final_state;
+    items.extend(quote!{
+        const YYFINAL: usize = #yyfinal;
+    });
 
     // Build up actions
-    let mut action_arms: Vec<Arm> = Vec::new();
+    let mut action_arms: TokenStream = TokenStream::new();
     let mut rule_iter: usize = 0;
-    for block in blocks.into_iter() {
+    for block in blocks.iter() {
         let rule = rule_iter;
         rule_iter += 1;
 
@@ -93,162 +106,135 @@ pub fn output_parser_to_ast(
             continue;
         }
 
-        let pat: P<Pat> = cx.pat_lit(sp, cx.expr_usize(sp, rule - 2));
-
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
-        let mut stmts: Vec<P<Stmt>> = Vec::new();
+        let mut stmts: TokenStream = TokenStream::new();
 
-        stmts.push(cx.parse_stmt(format!("debug!(\"{}\");", gram.rule_to_str(rule))));
+        // stmts.push(parse_stmt(format!("debug!(\"{}\");", gram.rule_to_str(rule))));
 
-        let final_expr = match block {
+        let final_expr: Option<Expr> = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right to left.
                 let rhs_index = gram.rrhs[rule] as usize;
                 let rhs = gram.get_rhs_items(rule);
                 for i in (0..rhs.len()).rev() {
-                    match rhs_binding[rhs_index + i] {
-                        Some(rbind) => {
-                            stmts.push(cx.stmt_let_typed(sp, false, rbind, 
-                                symbol_value_ty.clone(),
-                                cx.parse_expr(format!("value_stack.pop().unwrap()"))));
+                    match &rhs_binding[rhs_index + i] {
+                        Some(ref rbind) => {
+                            // println!("rhs binding: {:?}", rbind);
+                            stmts.extend(quote!{
+                                let #rbind = value_stack.pop().unwrap();
+                            });
+                            // println!(".");
                         }
                         None => {
+                            // println!("rhs binding: <none>");
                             // The rule has no binding for this value.  Pop it from the stack and discard it.
-                            stmts.push(cx.parse_stmt(format!("drop(value_stack.pop())")));
+                            stmts.extend(quote!{
+                                drop(value_stack.pop());
+                                });
                         }
                     }
                 }
-                Some(cx.expr_block(block))
+                // println!("passing through block");
+                let rr = Some(Expr::Block(ExprBlock { block: block.clone(), attrs:vec![], label: None }));
+                rr
             }
             None => {
                 // This reduction does not have any code to execute.  Still, we need to
                 // remove items from the value stack.
+                // println!("no action");
                 for _ in gram.get_rhs_items(rule).iter() {
-                    stmts.push(cx.parse_stmt("drop(value_stack.pop());".to_string()));
+                    stmts.extend(quote!{
+                        drop(value_stack.pop());
+                    });
                 }
                 None
             }
         };
 
-        action_arms.push(cx.arm(sp, vec![ pat ], cx.expr_block(cx.block(sp, stmts, final_expr))));
-    }
-    action_arms.push(cx.arm_unreachable(sp));
-
-    // let ty_vec_symbol_value: P<Ty> = cx.ty(sp, ast::TyVec(symbol_value_ty.clone()));       // Vec<SymbolValue>
-    let ty_vec_symbol_value: P<Ty> = ty_vec_of(cx, sp, symbol_value_ty.clone());
-    let ty_mutptr_vec_symbol_value: P<Ty> = cx.ty_rptr(sp, ty_vec_symbol_value.clone(), None, MutMutable);     // &mut Vec<SymbolValue>
-
-    // Generate the reduce() function.
-    let reduce_fn = cx.item_fn(
-        sp,
-        cx.ident_of("reduce"),
-        vec![ // inputs
-            // Arg::new_self(sp, Mutability::MutImmutable, cx.ident_of("self")),
-            cx.arg(sp, cx.ident_of("value_stack"), ty_mutptr_vec_symbol_value),
-            cx.arg(sp, cx.ident_of("reduction"), quote_ty!(cx, usize)),
-            cx.arg(sp, context_param_ident, cx.ty_rptr(sp, context_ty.clone(), None, Mutability::MutMutable))
-        ],
-        symbol_value_ty.clone(), // output type
-        
-        cx.block_expr(
-            cx.expr_match(sp,
-                cx.expr_ident(sp, cx.ident_of("reduction")), action_arms)
-        ));
-    items.push(reduce_fn);
-
-    // ParserTables<SymbolValue, AppContext>
-    let ty_parser_tables = cx.ty_path(ast::Path {
-        span: sp,
-        global: false,
-        segments: vec![
-            ast::PathSegment {
-                identifier: cx.ident_of("ParserTables"),
-                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
-                    lifetimes: vec![],
-                    types: OwnedSlice::from_vec(vec![ symbol_value_ty.clone(), context_ty.clone() ]),
-                    bindings: OwnedSlice::empty()
-                })
-            }
-        ]});
-
-/*
-    // ParserState<SymbolValue, AppContext>
-    let ty_parser_state = cx.ty_path(ast::Path {
-        span: sp,
-        global: false,
-        segments: vec![
-            ast::PathSegment {
-                identifier: cx.ident_of("ParserState"),
-                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
-                    lifetimes: vec![],
-                    types: OwnedSlice::from_vec(vec![ symbol_value_ty.clone(), context_ty.clone() ]),
-                    bindings: OwnedSlice::empty()
-                })
-            }
-        ]});
-*/
-
-    // Generate the get_parser_tables() function.
-    items.push(cx.item_fn(
-        sp,
-        cx.ident_of("get_parser_tables"),
-        vec![], // inputs
-        ty_parser_tables,
-        cx.block_expr(
-            cx.expr_struct(
-                sp,
-                /*path: */ cx.path_ident(sp, cx.ident_of("ParserTables")),
-                /*fields:*/ {
-                    let mut fields: Vec<ast::Field> = (vec![
-                        ("yyrindex", "YYRINDEX"),
-                        ("yygindex", "YYGINDEX"),
-                        ("yysindex", "YYSINDEX"),
-                        ("yytable", "YYTABLE"),
-                        ("yydefred", "YYDEFRED"),
-                        ("yylen", "YYLEN"),
-                        ("yylhs", "YYLHS"),
-                        ("yycheck", "YYCHECK"),
-                        ("yydgoto", "YYDGOTO"),
-                        ("yyname", "YYNAME"),       // for debugging
-                        ("yyrules", "YYRULES")      // for debugging
-                    ]).into_iter().map(|(field, sitem)|
-                            cx.field_imm(sp, cx.ident_of(field), cx.expr_addr_of(sp, cx.expr_ident(sp, cx.ident_of(sitem))))
-                        ).collect();
-                    fields.push(cx.field_imm(sp, cx.ident_of("yyfinal"), cx.expr_ident(sp, cx.ident_of("YYFINAL"))));
-                    fields.push(cx.field_imm(sp, cx.ident_of("reduce"), cx.expr_ident(sp, cx.ident_of("reduce"))));
-                    fields
+        let pat_value = rule - 2;
+        let rule_str = gram.rule_to_str(rule);
+        action_arms.extend(
+            quote!{
+                #pat_value => {
+                    log::debug!("{}", #rule_str);
+                    #stmts;
+                    #final_expr
                 }
-            )
-        )
-        ));
+            }
+        );
+    }
 
-    items.push(output_rule_data(cx, sp, gram));
+    items.extend(
+        quote!{
+            fn reduce(
+                // Arg::new_self(sp, Mutability::MutImmutable, ident_of("self")),
+                value_stack: &mut Vec<#symbol_value_ty>,
+                reduction: usize,
+                #context_param_ident: &mut #context_ty) -> #symbol_value_ty {
+                match reduction {
+                    #action_arms
+                    _ => unreachable!()
+                }
+            }
+        });
+    // println!("fn reduce is ok");
+    items.extend(
+        quote!{
+            fn get_parser_tables() -> racc_runtime::ParserTables<#symbol_value_ty, #context_ty> {
+                racc_runtime::ParserTables {
+                        yyrindex: &YYRINDEX,
+                        yygindex: &YYGINDEX,
+                        yysindex: &YYSINDEX,
+                        yytable: &YYTABLE,
+                        yydefred: &YYDEFRED,
+                        yylen: &YYLEN,
+                        yylhs: &YYLHS,
+                        yycheck: &YYCHECK,
+                        yydgoto: &YYDGOTO,
+                        yyname: &YYNAME,       // for debugging
+                        yyrules: &YYRULES,      // for debugging
+                        yyfinal: YYFINAL,
+                        reduce: reduce
+                    }
+                }
+            }
+        );
+    // println!("fn get_parser_tables is ok");
+
+    items.extend(output_rule_data(gram));
+    // println!("output_rule_data is ok");
 
     // Emit the YYLEN table.
-    items.push({
+    items.extend({
         let yylen: Vec<i16> = (2..gram.nrules).map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1).collect();
-        make_table_i16(cx, sp, "YYLEN", &yylen)
+        make_table_i16(Ident::new("YYLEN", sp), &yylen)
     });
+    // println!("YYLEN is ok");
 
     // emit some tables just for debugging
-    items.push(make_symbol_names_table(cx, sp, gram));
-    items.push(make_rule_text_table(cx, sp, gram));
+    items.extend(make_symbol_names_table(sp, gram));
+    // println!("make_symbol_names_table is ok");
+
+    items.extend(make_rule_text_table(sp, gram));
+    // println!("make_rule_text_table is ok");
+
+    // println!("{}", items);
 
     items
 }
 
 // Generates the YYLHS table.
-fn output_rule_data(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
+fn output_rule_data(gram: &Grammar) -> TokenStream {
     let mut data: Vec<i16> = Vec::new();
     data.push(gram.value[gram.start_symbol]);
     for i in 3..gram.nrules {
         data.push(gram.value[gram.rlhs[i] as usize]);
     }
-    make_table_i16(cx, span, "YYLHS", &data)
+    make_table_i16(Ident::new("YYLHS", Span::call_site()), &data)
 }
 
-fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
+fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
     // The values used at runtime are not symbol indices.  They are token values, which come from gram.value[token].value.
     // This is ugly and inefficient.
 
@@ -268,30 +254,30 @@ fn make_symbol_names_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> 
         toknames[gram.value[i] as usize] = gram.name[i].clone();
     }
 
-    make_table_string(cx, span, "YYNAME", &toknames)
+    make_table_string(Ident::new("YYNAME", span), &toknames)
 }
 
-fn make_table_string(cx: &ExtCtxt, span: Span, name: &str, strings: &Vec<String>) -> P<Item> {
-    cx.item_static(span, 
-        cx.ident_of(name), 
-        cx.ty(span, Ty_::TyFixedLengthVec(quote_ty!(cx, &'static str), cx.expr_usize(span, strings.len()))),
-        Mutability::MutImmutable,
-        cx.expr_vec(span, (0..strings.len()).map(|i| {
-            let iname = intern_and_get_ident(&strings[i]);
-            cx.expr_str(span, iname)
-        }
-        ).collect()))
+fn make_table_string(name: Ident, strings: &[String]) -> TokenStream {
+    let strings_len = strings.len();
+    let strings: Vec<syn::LitStr> = strings.iter().map(|s|  syn::LitStr::new(s,  name.span())).collect();
+    quote!{
+        static #name: [&str; #strings_len] = [
+            #( #strings ),*
+        ];
+    }
+
 }
 
-fn make_rule_text_table(cx: &ExtCtxt, span: Span, gram: &Grammar) -> P<Item> {
+fn make_rule_text_table(span: Span, gram: &Grammar) -> TokenStream {
     let rules: Vec<String> = (2..gram.nrules).map(|rule| gram.rule_to_str(rule)).collect();
-    make_table_string(cx, span, "YYRULES", &rules)
+    make_table_string(Ident::new("YYRULES", span), &rules)
 }
 
+/*
 #[allow(dead_code)]
-fn make_table_usize(cx: &ExtCtxt, span: Span, name: &str, values: &[usize]) -> P<Item> {
-    let values_expr = cx.expr_vec(span, values.iter().map(|value| cx.expr_usize(span, *value)).collect());
-    let ty_usize = quote_ty!(cx, usize);
+fn make_table_usize(name: Ident, values: &[usize]) -> Item {
+    let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_usize(span, *value)).collect());
+    let ty_usize = quote!(usize);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_usize, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
@@ -299,49 +285,61 @@ fn make_table_usize(cx: &ExtCtxt, span: Span, name: &str, values: &[usize]) -> P
     // debug!("item: {}", pprust::item_to_string(&*table_item));
     table_item
 }
+*/
 
-fn make_table_i16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
-    make_table_i16_as_u16(cx, span, name, values)
+fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
+    make_table_i16_as_u16(name, values)
 }
 
-fn make_table_i16_real(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
+fn make_table_i16_real(name: Ident, values: &[i16]) -> TokenStream {
+    let values_len = values.len();
+    quote!{
+        static #name: [i16; #values_len] = [
+            #(
+                #values
+            ),*
+        ];
+    }
+
+/*
     let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_i16(cx, span, *value)).collect());
-    let ty_i16 = quote_ty!(cx, i16);
+    let ty_i16 = quote!(i16);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_i16, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     // debug!("built table item for '{}': values {}", name, values);
     // debug!("item: {}", pprust::item_to_string(&*table_item));
     table_item
-}
-
-fn expr_i16(cx: &ExtCtxt, span: Span, i: i16) -> P<ast::Expr> {
-    cx.expr_lit(span, ast::LitInt(
-        i as u64,
-        ast::LitIntType::SignedIntLit(ast::TyI16, ast::Sign::new(i as isize))))
-}
-
-fn expr_u16(cx: &ExtCtxt, span: Span, u: u16) -> P<ast::Expr> {
-    cx.expr_lit(span, ast::LitInt(
-        u as u64,
-        UnsignedIntLit(TyU16)))
+    */
 }
 
 // yuck
-fn make_table_i16_as_u16(cx: &ExtCtxt, span: Span, name: &str, values: &[i16]) -> P<Item> {
+fn make_table_i16_as_u16(name: Ident, values: &[i16]) -> TokenStream {
+    let u_values: Vec<u16> = values.iter().map(|&value| value as u16).collect();
+
+    let values_len = u_values.len();
+    quote!{
+        static #name: [u16; #values_len] = [
+            #(
+                #u_values
+            ),*
+        ];
+    }
+
+/*
     let values_expr = cx.expr_vec(span, values.iter().map(|value| expr_u16(cx, span, *value as u16)).collect());
-    let ty_u16 = quote_ty!(cx, u16);
+    let ty_u16 = quote!(u16);
     let table_ident = cx.ident_of(name);
     let table_ty = cx.ty(span, Ty_::TyFixedLengthVec(ty_u16, cx.expr_usize(span, values.len())));
     let table_item = cx.item_static(span, table_ident, table_ty, Mutability::MutImmutable, values_expr);
     table_item
+    */
 }
 
-fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<P<Item>> {
+fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> Vec<TokenStream> {
     // debug!("output_actions");
 
     let nstates = parser.nstates;
-    let mut items: Vec<P<Item>> = Vec::new();
 
     let mut act = token_actions(gram, parser);
     let dgoto = goto_actions(gram, nstates, gotos, &mut act);
@@ -349,20 +347,21 @@ fn output_actions(cx: &ExtCtxt, span: Span, gram: &Grammar, gotos: &GotoMap, par
     
     let packed = pack_table(parser.nstates, nentries, &order, &act);
 
+    let mut items: Vec<TokenStream> = Vec::new();
     // debug!("emitting tables");
-    items.push(make_table_i16(cx, span, "YYDGOTO", &dgoto));
+    items.push(make_table_i16(Ident::new("YYDGOTO", span), &dgoto));
 
     // was output_base
-    items.push(make_table_i16(cx, span, "YYSINDEX", &packed.base[.. nstates]));
-    items.push(make_table_i16(cx, span, "YYRINDEX", &packed.base[nstates .. nstates * 2]));
-    items.push(make_table_i16(cx, span, "YYGINDEX", &packed.base[nstates * 2 .. act.nvectors]));
+    items.push(make_table_i16(Ident::new("YYSINDEX", span), &packed.base[.. nstates]));
+    items.push(make_table_i16(Ident::new("YYRINDEX", span), &packed.base[nstates .. nstates * 2]));
+    items.push(make_table_i16(Ident::new("YYGINDEX", span), &packed.base[nstates * 2 .. act.nvectors]));
 
     // was output_table
     // todo, emit const YYTABLESIZE = m_high
-    items.push(make_table_i16(cx, span, "YYTABLE", &packed.table[.. packed.high + 1]));
+    items.push(make_table_i16(Ident::new("YYTABLE", span), &packed.table[.. packed.high + 1]));
 
     // was output_check
-    items.push(make_table_i16(cx, span, "YYCHECK", &packed.check[.. packed.high + 1]));
+    items.push(make_table_i16(Ident::new("YYCHECK", span), &packed.check[.. packed.high + 1]));
 
     items
 }
@@ -372,11 +371,11 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 
     let nstates = parser.nstates;
     let nvectors = 2 * nstates + gram.nvars;
-    let mut tally: Vec<i16> = repeat(0).take(nvectors).collect();
-    let mut width: Vec<i16> = repeat(0).take(nvectors).collect();
+    let mut tally: Vec<i16> = vec![0; nvectors];
+    let mut width: Vec<i16> = vec![0; nvectors];
     let mut froms: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
     let mut tos: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
-    let mut actionrow: Vec<i16> = repeat(0).take(2 * gram.ntokens).collect();
+    let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens];
 
     for i in 0..nstates {
         let actions = &parser.actions[i];
@@ -671,9 +670,9 @@ fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
 
     let mut j: isize = (pack.lowzero as isize) - (from[0] as isize);
     // debug!("j={}", j);
-    for k in (1..t) {
-        if (pack.lowzero as isize) - (from[k] as isize) > j {
-            j = (pack.lowzero as isize) - (from[k] as isize);
+    for &f in from[1..t].iter() {
+        if (pack.lowzero as isize) - (f as isize) > j {
+            j = (pack.lowzero as isize) - (f as isize);
             // debug!("j={}", j);
         }
     }
@@ -686,8 +685,8 @@ fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
         }
 
         let mut ok = true;
-        for k in (0..t) {
-            let loc = (j + (from[k] as isize)) as usize;
+        for &f in &from[0..t] {
+            let loc = (j + (f as isize)) as usize;
 
             // make sure we can read/write table[loc] and table[check]
             if loc > pack.table.len() {
@@ -707,7 +706,7 @@ fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
             j += 1;
             continue;
         }
-        for k in (0..vector) {
+        for k in 0..vector {
             if pack.pos[k] as isize == j {
                 ok = false;
                 break;
@@ -718,7 +717,7 @@ fn pack_vector(pack: &mut PackState, vector: usize) -> isize {
             continue;
         }
 
-        for k in (0..t) {
+        for k in 0..t {
             let loc = (j + (from[k] as isize)) as usize;
             pack.table[loc] = to[k];
             pack.check[loc] = from[k];
@@ -766,7 +765,7 @@ fn pack_table<'a>(nstates: usize, nentries: usize, order: &'a [usize], act: &'a 
         act: act
     };
 
-    for i in (0..nentries) {
+    for i in 0..nentries {
         // debug!("i={}", i);
         let place: isize = match matching_vector(&mut pack, i) {
             Some(state) => pack.base[state] as isize,
@@ -780,27 +779,3 @@ fn pack_table<'a>(nstates: usize, nentries: usize, order: &'a [usize], act: &'a 
 
     pack
 }
-
-fn expr_u32(cx: &ExtCtxt, span: Span, u: u32) -> P<Expr> {
-    cx.expr_lit(span, ast::LitInt(u as u64, ast::UnsignedIntLit(ast::TyU32)))
-}
-
-
-// Construct a ty for Vec<T>
-fn ty_vec_of(cx: &ExtCtxt, sp: Span, ty: P<Ty>) -> P<Ty> {
-    let path = ast::Path {
-        span: sp,
-        global: false,
-        segments: vec![
-            ast::PathSegment {
-                identifier: cx.ident_of("Vec"),
-                parameters: ast::AngleBracketedParameters(ast::AngleBracketedParameterData {
-                    lifetimes: vec![],
-                    types: OwnedSlice::from_vec(vec![ ty ]),
-                    bindings: OwnedSlice::empty()
-                })
-            }
-        ]};
-    cx.ty_path(path)
-}
-

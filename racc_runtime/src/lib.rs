@@ -1,3 +1,5 @@
+/// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
+
 use log::debug;
 use std::fmt::Debug;
 
