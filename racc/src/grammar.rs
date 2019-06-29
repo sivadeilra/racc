@@ -56,7 +56,7 @@ impl Grammar {
         (s as usize) < self.start_symbol
     }
 
-    pub  fn  nitems(&self)  -> usize {
+    pub fn nitems(&self) -> usize {
         self.ritem.len()
     }
 

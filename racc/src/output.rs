@@ -205,7 +205,10 @@ fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
     let mut toknames: Vec<String> = vec![String::new(); length];
 
     // Now put the names into proper places.
-    for (value, name) in gram.value[0..gram.ntokens].iter().zip(gram.name[0..gram.ntokens].iter()) {
+    for (value, name) in gram.value[0..gram.ntokens]
+        .iter()
+        .zip(gram.name[0..gram.ntokens].iter())
+    {
         toknames[*value as usize] = name.to_string();
     }
 
@@ -417,12 +420,7 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 }
 
 // state_count.len() == nstates
-fn default_goto(
-    gram: &Grammar,
-    gotos: &GotoMap,
-    symbol: usize,
-    state_count: &mut [i16],
-) -> usize {
+fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: usize, state_count: &mut [i16]) -> usize {
     let m = gotos.goto_map[symbol - gram.ntokens] as usize;
     let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
     if m == n {
@@ -433,7 +431,7 @@ fn default_goto(
         *c = 0;
     }
 
-    for &state in gotos.to_state[m..n].iter()  {
+    for &state in gotos.to_state[m..n].iter() {
         state_count[state as usize] += 1;
     }
 
@@ -511,12 +509,7 @@ fn goto_actions(
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
     let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars); // the table that we are building
 
-    let k = default_goto(
-        gram,
-        gotos,
-        gram.start_symbol + 1,
-        &mut state_count,
-    );
+    let k = default_goto(gram, gotos, gram.start_symbol + 1, &mut state_count);
     dgoto_table.push(k as i16);
     save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
 

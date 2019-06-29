@@ -241,7 +241,13 @@ fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: i16) -> usize
 }
 
 #[allow(non_snake_case)]
-fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &GotoMap, shift_table: &[i16]) -> Bitmat {
+fn initialize_F(
+    gram: &Grammar,
+    lr0: &LR0Output,
+    nullable: &[bool],
+    gotos: &GotoMap,
+    shift_table: &[i16],
+) -> Bitmat {
     debug!("initialize_F");
 
     let ngotos = gotos.ngotos;
@@ -496,7 +502,7 @@ fn digraph(relation: &[Vec<i16>], F: &mut Bitmat) {
     let mut ds = DigraphState {
         infinity: ngotos + 2,
         index: vec![0; ngotos + 1],
-        vertices: vec![0;  ngotos + 1],
+        vertices: vec![0; ngotos + 1],
         top: 0,
         R: relation,
         F: F,

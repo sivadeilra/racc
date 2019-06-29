@@ -238,7 +238,6 @@
 //! Feel free to send me any feedback on RACC to `arlie.davis@gmail.com`.
 
 #![recursion_limit = "256"]
-
 #![warn(rust_2018_idioms)]
 
 mod closure;

@@ -180,7 +180,13 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
 // Gets the state for a particular symbol.  If no appropriate state exists,
 // then a new state will be created.
-fn get_state(gram: &Grammar, kernels: &KernelTable, state_set: &mut [Vec<usize>], states: &mut Vec<Core>, symbol: i16) -> i16 {
+fn get_state(
+    gram: &Grammar,
+    kernels: &KernelTable,
+    state_set: &mut [Vec<usize>],
+    states: &mut Vec<Core>,
+    symbol: i16,
+) -> i16 {
     let symbol_items: &[i16] = &kernels.items_for_symbol(symbol);
     let key = symbol_items[0] as usize; // key is an item index, in [0..nitems).
 

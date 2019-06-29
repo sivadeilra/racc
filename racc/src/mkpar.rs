@@ -27,7 +27,7 @@ pub struct YaccParser {
     pub default_reductions: Vec<i16>,
     pub final_state: usize,
 }
-impl YaccParser{
+impl YaccParser {
     pub fn nstates(&self) -> usize {
         self.actions.len()
     }
@@ -43,7 +43,7 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
     remove_conflicts(final_state, parser.as_mut_slice());
     report_unused_rules(gram, &parser);
 
-    let defred =  default_reductions(&parser);
+    let defred = default_reductions(&parser);
 
     YaccParser {
         actions: parser,
@@ -128,14 +128,17 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
         next += 1;
     }
 
-    actions.insert(next, ParserAction {
-        symbol: symbol,
-        number: ruleno as i16,
-        prec: gram.rprec[ruleno],
-        action_code: ActionCode::Reduce,
-        assoc: gram.rassoc[ruleno],
-        suppressed: 0,
-    });
+    actions.insert(
+        next,
+        ParserAction {
+            symbol: symbol,
+            number: ruleno as i16,
+            prec: gram.rprec[ruleno],
+            action_code: ActionCode::Reduce,
+            assoc: gram.rassoc[ruleno],
+            suppressed: 0,
+        },
+    );
 }
 
 fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize {
@@ -278,9 +281,13 @@ fn sole_reduction(parser: &[ParserAction]) -> i16 {
 /// Computes the default reduction for each state.
 pub fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<i16> {
     debug!("default_reductions");
-    parser.iter().enumerate().map(|(i, actions)| {
-        let r = sole_reduction(actions);
-        debug!("    state {} has default reduction {}", i, r);
-        r
-    }).collect()
+    parser
+        .iter()
+        .enumerate()
+        .map(|(i, actions)| {
+            let r = sole_reduction(actions);
+            debug!("    state {} has default reduction {}", i, r);
+            r
+        })
+        .collect()
 }

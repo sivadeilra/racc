@@ -1,10 +1,4 @@
-//#![feature(plugin, core, std_misc, fixed_size_array, rt)]
 #![allow(non_upper_case_globals)]
-#![allow(dead_code)]
-#![allow(non_camel_case_types)]
-#![allow(unused_variables)]
-
-//#![plugin(racc)]
 
 extern crate core;
 extern crate log;
@@ -67,8 +61,6 @@ racc::racc_grammar! {
         };
 
 }
-
-const EOF: u32 = 0;
 
 fn main() {
     let toks = vec![
