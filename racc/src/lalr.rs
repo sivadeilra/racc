@@ -6,7 +6,6 @@ use log::debug;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
-    pub shift_table: Vec<i16>,
     pub LA: Bitmat,
     pub gotos: GotoMap,
 }
@@ -20,40 +19,21 @@ pub struct GotoMap {
 
 #[allow(non_snake_case)]
 pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
-    let shift_table = set_shift_table(lr0);
     let gotos = set_goto_map(gram, lr0);
-
     let nullable = crate::lr0::set_nullable(gram);
-
-    let mut F = initialize_F(gram, lr0, &nullable, &gotos, &shift_table);
-
+    let mut F = initialize_F(gram, lr0, &nullable, &gotos);
     let (includes, lookback) = build_relations(
         gram,
         lr0,
         &nullable,
-        &shift_table,
         &gotos,
     );
-
     compute_FOLLOWS(&includes, &mut F);
-
     let LA = compute_lookaheads(gram, lr0, &lookback, &F);
-
     LALROutput {
-        shift_table: shift_table,
-        LA: LA,
-        gotos: gotos,
+        LA,
+        gotos,
     }
-}
-
-fn set_shift_table(lr0: &LR0Output) -> Vec<i16> {
-    let mut shift_table: Vec<i16> = vec![-1; lr0.states.len()];
-    for i in 0..lr0.shifts.len() {
-        let state = lr0.shifts[i].state;
-        assert!(shift_table[state] == -1);
-        shift_table[state] = i as i16;
-    }
-    shift_table
 }
 
 // Finds the longest rhs
@@ -77,20 +57,23 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
     let mut goto_map: Vec<i16> = vec![0; gram.nvars + 1];
     let mut ngotos: usize = 0;
-    for sp in lr0.shifts.iter() {
-        for i in (0..sp.shifts.len()).rev() {
-            let state = sp.shifts[i] as usize;
+
+    for shifts in lr0.shifts.iter_values() {
+        for i in (0..shifts.len()).rev() {
+            let state = shifts[i] as usize;
             let symbol = lr0.states[state].accessing_symbol;
 
             if gram.is_token(symbol) {
                 break;
             }
-
             assert!(ngotos < 0x7fff);
             ngotos += 1;
             goto_map[symbol as usize - gram.ntokens] += 1;
         }
     }
+
+
+
     let ngotos = ngotos;
 
     // Next, we essentially "integrate" (in the numerical sense) goto_map.
@@ -114,8 +97,8 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     let mut from_state: Vec<i16> = vec![0; ngotos];
     let mut to_state: Vec<i16> = vec![0; ngotos];
 
-    for sp in lr0.shifts.iter() {
-        for &state2 in sp.shifts.iter().rev() {
+    for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
+        for &state2 in sp_shifts.iter().rev() {
             let symbol = lr0.states[state2 as usize].accessing_symbol;
             if gram.is_token(symbol) {
                 break;
@@ -123,7 +106,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
             let k = temp_map[symbol as usize - gram.ntokens] as usize;
             temp_map[symbol as usize - gram.ntokens] += 1;
-            from_state[k] = sp.state as i16;
+            from_state[k] = sp_state as State;
             to_state[k] = state2;
         }
     }
@@ -182,7 +165,6 @@ fn initialize_F(
     lr0: &LR0Output,
     nullable: &[bool],
     gotos: &GotoMap,
-    shift_table: &[i16],
 ) -> Bitmat {
     debug!("initialize_F");
 
@@ -193,11 +175,9 @@ fn initialize_F(
 
     for i in 0..ngotos {
         let stateno = gotos.to_state[i] as usize;
-        let sp = shift_table[stateno];
+        let shifts = lr0.shifts.values(stateno);
 
-        if sp != -1 {
-            let shifts = &lr0.shifts[sp as usize].shifts;
-
+        if !shifts.is_empty() {
             let mut j: usize = 0;
             while j < shifts.len() {
                 let symbol = lr0.states[shifts[j] as usize].accessing_symbol;
@@ -237,7 +217,6 @@ fn build_relations(
     gram: &Grammar,
     lr0: &LR0Output,
     nullable: &[bool],
-    shift_table: &[i16],
     gotos: &GotoMap,
 ) -> (Vec<Vec<i16>>, /*lookback:*/ Vec<Vec<i16>>) {
     debug!("build_relations");
@@ -246,7 +225,7 @@ fn build_relations(
     let mut includes: Vec<Vec<i16>> = vec![Vec::new(); ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1); // temporary, reused in loops
     let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1); // temporary, reused in loops
-    let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); lr0.reductions.rules.len()];
+    let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); lr0.reductions.num_values()];
 
     for i in 0..ngotos {
         assert!(edge.len() == 0);
@@ -263,8 +242,8 @@ fn build_relations(
             let mut rp: usize = gram.rrhs[lr0.derives_rules[rulep] as usize] as usize;
             while gram.ritem[rp] >= 0 {
                 let symbol2 = gram.ritem[rp];
-                for shift in lr0.shifts[shift_table[stateno] as usize].shifts.iter() {
-                    stateno = *shift as usize;
+                for &shift in lr0.shifts.values(stateno) {
+                    stateno = shift as usize;
                     if lr0.states[stateno].accessing_symbol == symbol2 {
                         break;
                     }
@@ -320,8 +299,8 @@ fn add_lookback_edge(
     reductions: &Reductions,
     lookback: &mut Vec<Vec<i16>>,
 ) {
-    let range = reductions.state_rules_range(stateno);
-    let state_rules = reductions.state_rules(stateno);
+    let range = reductions.values_range(stateno as usize);
+    let state_rules = reductions.values(stateno as usize);
     for (i, &r) in range.clone().zip(state_rules) {
         if r == ruleno {
             lookback[i].insert(0, gotono as i16);
@@ -391,7 +370,7 @@ fn compute_lookaheads(
     lookback: &[Vec<i16>],
     F: &Bitmat,
 ) -> Bitmat {
-    let num_rules = lr0.reductions.rules.len();
+    let num_rules = lr0.reductions.num_values();
     let mut LA = Bitmat::new(num_rules, gram.ntokens);
 
     assert!(F.cols == LA.cols);

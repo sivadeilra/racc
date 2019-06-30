@@ -41,7 +41,7 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
         .map(|state| parse_actions(gram, lr0, lalr, state as State))
         .collect();
 
-    let final_state = find_final_state(gram, lr0, lalr);
+    let final_state = find_final_state(gram, lr0);
     remove_conflicts(final_state, parser.as_mut_slice());
     report_unused_rules(gram, &parser);
 
@@ -60,7 +60,7 @@ fn parse_actions(
     lalr: &LALROutput,
     stateno: State,
 ) -> Vec<ParserAction> {
-    let mut actions = get_shifts(gram, lr0, lalr, stateno);
+    let mut actions = get_shifts(gram, lr0, stateno);
     add_reductions(gram, &lr0.reductions, lalr, stateno, &mut actions);
     actions
 }
@@ -68,24 +68,20 @@ fn parse_actions(
 fn get_shifts(
     gram: &Grammar,
     lr0: &LR0Output,
-    lalr: &LALROutput,
     stateno: State,
 ) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
-    if lalr.shift_table[stateno as usize] != -1 {
-        let sp = &lr0.shifts[lalr.shift_table[stateno as usize] as usize];
-        for &k in sp.shifts.iter() {
-            let symbol = lr0.states[k as usize].accessing_symbol;
-            if gram.is_token(symbol) {
-                actions.push(ParserAction {
-                    symbol: symbol,
-                    number: k,
-                    prec: gram.prec[symbol as usize],
-                    action_code: ActionCode::Shift,
-                    assoc: gram.assoc[symbol as usize],
-                    suppressed: 0,
-                });
-            }
+    for &k in lr0.shifts.values(stateno as usize) {
+        let symbol = lr0.states[k as usize].accessing_symbol;
+        if gram.is_token(symbol) {
+            actions.push(ParserAction {
+                symbol: symbol,
+                number: k,
+                prec: gram.prec[symbol as usize],
+                action_code: ActionCode::Shift,
+                assoc: gram.assoc[symbol as usize],
+                suppressed: 0,
+            });
         }
     }
     actions
@@ -98,12 +94,12 @@ fn add_reductions(
     stateno: State,
     actions: &mut Vec<ParserAction>,
 ) {
-    let range = reductions.state_rules_range(stateno);
-    for i in range {
-        let ruleno = reductions.rules[i] as usize;
+    let range = reductions.values_range(stateno as usize);
+    let state_rules = reductions.values(stateno as usize);
+    for (i, &rule) in range.zip(state_rules) {
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
-                add_reduce(gram, actions, ruleno, j as i16);
+                add_reduce(gram, actions, rule as usize, j as i16);
             }
         }
     }
@@ -143,11 +139,10 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
     );
 }
 
-fn find_final_state(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> usize {
-    let p = &lr0.shifts[lalr.shift_table[0] as usize];
+fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> usize {
     let goal = gram.ritem[1];
     let mut final_state: usize = 0;
-    for &ts in p.shifts.iter().rev() {
+    for &ts in lr0.shifts.values(0).iter().rev() {
         final_state = ts as usize;
         if lr0.states[final_state].accessing_symbol == goal {
             return ts as usize;

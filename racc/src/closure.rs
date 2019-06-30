@@ -1,3 +1,4 @@
+use crate::Item;
 use crate::grammar::Grammar;
 use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
@@ -107,7 +108,7 @@ pub fn set_first_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
 // item_set will be empty on call to closure(), and closure() writes its output into item_set.
 pub fn closure(
     gram: &Grammar,
-    nucleus: &[i16],
+    nucleus: &[Item],
     first_derives: &Bitmat,
     nrules: usize,
     rule_set: &mut Bitv32, // bit vector, size=nrules; temporary data, written and read by this fn

@@ -4,7 +4,7 @@ use crate::grammar::Grammar;
 use crate::util::Bitv32;
 use crate::{Rule, Symbol, State};
 use log::debug;
-use core::ops::Range;
+use crate::util::{RampTable, RampTableBuilder};
 
 /// the structure of the LR(0) state machine
 pub struct Core {
@@ -12,45 +12,21 @@ pub struct Core {
     pub items: Vec<i16>,
 }
 
-/// The structure used to record shifts
-pub struct Shifts {
-    pub state: usize,
-    pub shifts: Vec<i16>,
-}
-
 pub struct LR0Output {
     pub states: Vec<Core>,
-    pub shifts: Vec<Shifts>,
+
+    /// Contains (state -> [state]) mappings for shifts
+    pub shifts: RampTable<State>,
+
     pub reductions: Reductions,
     pub nullable: Vec<bool>,
     pub derives: Vec<i16>,
     pub derives_rules: Vec<i16>,
 }
 
-#[derive(Debug)]
-pub struct Reductions {
-    /// index is a state number
-    /// item is an offset into rules
-    /// len = nstates + 1
-    /// equivalent to 'lookaheads'
-    pub bases: Vec<usize>,
-
-    /// index is arbitrary
-    /// item is a rule index
-    /// len = number of reductions (nrules?)
-    /// equivalent to 'LA'
-    pub rules: Vec<Rule>
-}
-impl Reductions {
-    pub fn state_rules(&self, state: State) -> &[Rule] {
-        &self.rules[self.state_rules_range(state)]
-    }
-    pub fn state_rules_range(&self, state: State) -> Range<usize> {
-        let start = self.bases[state as usize];
-        let end = self.bases[state as usize + 1];
-        start..end
-    }
-}
+// num_keys = number of states
+// items = rules
+pub type Reductions = RampTable<Rule>;
 
 impl LR0Output {
     pub fn nstates(&self) -> usize {
@@ -135,11 +111,8 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut this_state: usize = 0;
 
     // State which becomes the output
-    let mut reductions = Reductions {
-        bases: Vec::new(),
-        rules: Vec::new()
-    };
-    let mut shifts: Vec<Shifts> = Vec::new();
+    let mut reductions = RampTableBuilder::<Rule>::new();
+    let mut shifts_new = RampTableBuilder::<State>::new();
 
     while this_state < states.len() {
         assert!(item_set.len() == 0);
@@ -159,8 +132,8 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         );
 
         // The output of save_reductions() is stored in reductions.
-        reductions.bases.push(reductions.rules.len());
-        save_reductions(gram, &item_set, &mut reductions.rules);
+        reductions.start_key();
+        save_reductions(gram, &item_set, &mut reductions);
 
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
@@ -169,19 +142,14 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
+        shifts_new.start_key();
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
-            let mut shift_set: Vec<i16> = Vec::new();
             for &symbol in shift_symbol.iter() {
                 let symbol_items = kernels.items_for_symbol(symbol);
                 let shift_state = find_or_create_state(gram, symbol_items, &mut state_set, &mut states, symbol);
-                shift_set.push(shift_state);
+                shifts_new.push_value(shift_state);
             }
-            debug!("    shifts: {:?}", shift_set);
-            shifts.push(Shifts {
-                state: this_state,
-                shifts: shift_set,
-            });
         }
 
         item_set.clear();
@@ -191,14 +159,11 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         this_state += 1;
     }
 
-    // Finish the reductions table.    
-    reductions.bases.push(reductions.rules.len());
-
     // Return results
     LR0Output {
         states,
-        reductions,
-        shifts,
+        reductions: reductions.finish(),
+        shifts: shifts_new.finish(),
         nullable: set_nullable(gram),
         derives,
         derives_rules,
@@ -351,11 +316,11 @@ fn new_item_sets(
 /// We discover this by testing the sign of the next symbol in the item; if it is
 /// negative, then we have reached the end of the symbols on the rhs of a rule.  See
 /// the code in reader::pack_grammar(), where this information is set up.
-fn save_reductions(gram: &Grammar, item_set: &[i16], rules: &mut Vec<Rule>) {
+fn save_reductions(gram: &Grammar, item_set: &[i16], rules: &mut RampTableBuilder<Rule>) {
     for &i in item_set {
         let item = gram.ritem[i as usize];
         if item < 0 {
-            rules.push(-item);
+            rules.push_value(-item);
         }
     }
 }
