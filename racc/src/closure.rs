@@ -1,3 +1,4 @@
+use crate::lr0::DerivesTable;
 use crate::grammar::Grammar;
 use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
@@ -6,19 +7,19 @@ use log::debug;
 
 /// Computes the "epsilon-free firsts" (EFF) relation.
 /// The EFF is a bit matrix [nvars, nvars].
-fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
+fn set_eff(gram: &Grammar, d: &DerivesTable) -> Bitmat {
     let nvars = gram.nvars;
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
-        let mut sp = derives[gram.start_symbol + row] as usize;
-        let mut rule = derives_rules[sp];
+        let mut sp = d.derives[gram.start_symbol + row] as usize;
+        let mut rule = d.derives_rules[sp];
         while rule > 0 {
             let symbol = gram.ritem[gram.rrhs[rule as usize] as usize];
             if gram.is_var(symbol) {
                 eff.set(row, symbol as usize - gram.start_symbol);
             }
             sp += 1;
-            rule = derives_rules[sp];
+            rule = d.derives_rules[sp];
         }
     }
 
@@ -37,9 +38,9 @@ fn set_eff(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
 ///
 /// This implementation processes bits in groups of 32, for the sake of efficiency.
 /// It is not clear whether this complexity is still justifiable, but it is preserved.
-pub fn set_first_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16]) -> Bitmat {
+pub fn set_first_derives(gram: &Grammar, d: &DerivesTable) -> Bitmat {
     // Compute EFF, which is a [nvars, nvars] bit matrix
-    let eff = set_eff(gram, derives, derives_rules);
+    let eff = set_eff(gram, d);
 
     let mut first_derives = Bitmat::new(gram.nvars, gram.nrules);
 
@@ -83,9 +84,9 @@ pub fn set_first_derives(gram: &Grammar, derives: &[i16], derives_rules: &[i16])
     assert!(eff.rows == gram.nvars);
     assert!(eff.cols == gram.nvars);
     for (i, j) in eff.iter_ones() {
-        let mut rp = derives[gram.start_symbol + j] as usize;
-        while derives_rules[rp] >= 0 {
-            first_derives.set(i, derives_rules[rp] as usize);
+        let mut rp = d.derives[gram.start_symbol + j] as usize;
+        while d.derives_rules[rp] >= 0 {
+            first_derives.set(i, d.derives_rules[rp] as usize);
             rp += 1;
         }
     }
