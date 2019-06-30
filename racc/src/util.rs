@@ -291,6 +291,13 @@ impl<T> RampTableBuilder<T> {
         }
     }
 
+    pub fn with_capacity(keys: usize, values: usize) -> Self {
+        Self {
+            index: Vec::with_capacity(keys + 1),
+            table: Vec::new()
+        }
+    }
+
     pub fn start_key(&mut self) {
         self.index.push(self.table.len());
     }

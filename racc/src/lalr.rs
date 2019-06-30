@@ -219,12 +219,13 @@ fn build_relations(
         let state1 = gotos.from_state[i] as usize;
         let symbol1 = lr0.states[gotos.to_state[i] as usize].accessing_symbol as usize;
 
-        let mut rulep: usize = lr0.derives.derives[symbol1] as usize;
-        while lr0.derives.derives_rules[rulep] >= 0 {
+        // let mut rulep: usize = lr0.derives.derives[symbol1] as usize;
+        // while lr0.derives.derives_rules[rulep] >= 0 {
+        for &rule in lr0.derives.values(symbol1) {
             assert!(states.len() == 0);
             states.push(state1 as i16);
             let mut stateno: usize = state1;
-            let mut rp: usize = gram.rrhs[lr0.derives.derives_rules[rulep] as usize] as usize;
+            let mut rp: usize = gram.rrhs[rule as usize] as usize;
             while gram.ritem[rp] >= 0 {
                 let symbol2 = gram.ritem[rp];
                 for &shift in lr0.shifts.values(stateno) {
@@ -238,13 +239,7 @@ fn build_relations(
                 rp += 1;
             }
 
-            add_lookback_edge(
-                stateno as State,
-                lr0.derives.derives_rules[rulep],
-                i,
-                &lr0.reductions,
-                &mut lookback,
-            );
+            add_lookback_edge(stateno as State, rule, i, &lr0.reductions, &mut lookback);
 
             let mut length = states.len() - 1;
             let mut done_flag = false;
@@ -261,7 +256,6 @@ fn build_relations(
                 }
             }
             states.clear(); // prepare for next use
-            rulep += 1;
         }
 
         if edge.len() != 0 {

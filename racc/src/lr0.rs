@@ -88,7 +88,9 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         items: vec![0; kernel_items_count],
     };
 
-    let mut states = initialize_states(gram, &derives);
+    let mut states: Vec<Core> = Vec::new();
+    states.push(initialize_states(gram, &derives));
+
     // Contains the set of states that are relevant for each item.  Each entry in this
     // table corresponds to an item, so state_set.len() = nitems.  The contents of each
     // entry is a list of state indices (into LR0Output.states).
@@ -212,39 +214,13 @@ fn find_or_create_state(
 // other states, by examining a state, the next variables that could be
 // encountered in those states, and finding the transitive closure over same.
 // Initializes the state table.
-fn initialize_states(gram: &Grammar, d: &DerivesTable) -> Vec<Core> {
+fn initialize_states(gram: &Grammar, derives: &DerivesTable) -> Core {
     debug!("initialize_states");
-
-    let start_derives: usize = d.derives[gram.start_symbol] as usize;
-
-    // measure the number of items in the initial state, so we can
-    // allocate a vector of the exact size.
-    let mut core_nitems: usize = 0;
-    while d.derives_rules[start_derives + core_nitems] >= 0 {
-        core_nitems += 1;
-    }
-
-    // create the initial state
-    let mut states: Vec<Core> = Vec::new();
-    states.push(Core {
-        items: {
-            let mut items = Vec::with_capacity(core_nitems);
-            for i in 0.. {
-                let item = d.derives_rules[start_derives + i];
-                if item < 0 {
-                    break;
-                }
-                items.push(gram.rrhs[item as usize]);
-            }
-            items
-        },
+    let start_derives = derives.values(gram.start_symbol);
+    Core {
+        items: start_derives.iter().map(|&item| gram.rrhs[item as usize]).collect::<Vec<Item>>(),
         accessing_symbol: 0,
-    });
-
-    debug!("initial state:");
-    print_core(gram, 0, &states[0]);
-
-    states
+    }
 }
 
 fn print_core(gram: &Grammar, state: State, core: &Core) {
@@ -317,7 +293,7 @@ fn new_item_sets(
 /// We discover this by testing the sign of the next symbol in the item; if it is
 /// negative, then we have reached the end of the symbols on the rhs of a rule.  See
 /// the code in reader::pack_grammar(), where this information is set up.
-fn save_reductions(gram: &Grammar, item_set: &[i16], rules: &mut RampTableBuilder<Rule>) {
+fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTableBuilder<Rule>) {
     for &i in item_set {
         let item = gram.ritem[i as usize];
         if item < 0 {
@@ -326,45 +302,37 @@ fn save_reductions(gram: &Grammar, item_set: &[i16], rules: &mut RampTableBuilde
     }
 }
 
-pub struct DerivesTable {
-    // index is a Symbol.
-    // value is an index into  derives_rules
-    pub derives: Vec<i16>,
-    pub derives_rules: Vec<Rule>    
-}
+// maps from Symbol -> [Rule]
+pub type DerivesTable = RampTable<Rule>;
 
 // Computes the "derives" and "derives_rules" arrays.
 fn set_derives(gram: &Grammar) -> DerivesTable {
     // note: 'derives' appears to waste its token space; consider adjusting indices
     // so that only var indices are used
-    let mut d = DerivesTable {
-        derives: vec![0; gram.nsyms],
-        derives_rules: Vec::with_capacity(gram.nvars + gram.nrules)
-    };
-
+    let mut d = RampTableBuilder::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
+    for _ in 0..gram.start_symbol {
+        d.start_key();
+    }
     for lhs in gram.start_symbol..gram.nsyms {
-        d.derives[lhs] = d.derives_rules.len() as i16;
+        d.start_key();
         for r in 0..gram.nrules {
             if gram.rlhs[r] as usize == lhs {
-                d.derives_rules.push(r as Rule);
+                d.push_value(r as Rule);
             }
         }
-        d.derives_rules.push(-1);
     }
 
-    print_derives(gram, &d);
-    d
+    let derives = d.finish();
+    print_derives(gram, &derives);
+    derives
 }
 
-fn print_derives(gram: &Grammar, d: &DerivesTable) {
+fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     debug!("DERIVES:");
     for lhs in gram.start_symbol..gram.nsyms {
         debug!("    {} derives rules: ", gram.name[lhs]);
-        let mut sp = d.derives[lhs] as usize;
-        while d.derives_rules[sp] >= 0 {
-            let r = d.derives_rules[sp] as usize;
-            debug!("        {}", &gram.rule_to_str(r));
-            sp += 1;
+        for &rule in derives.values(lhs) {
+            debug!("        {}", &gram.rule_to_str(rule));
         }
     }
 }
@@ -372,9 +340,8 @@ fn print_derives(gram: &Grammar, d: &DerivesTable) {
 pub fn set_nullable(gram: &Grammar) -> Vec<bool> {
     let mut nullable: Vec<bool> = vec![false; gram.nsyms];
 
-    let mut done_flag = false;
-    while !done_flag {
-        done_flag = true;
+    loop {
+        let mut done = true;
         let mut i = 1;
         while i < gram.ritem.len() {
             let mut empty = true;
@@ -390,13 +357,16 @@ pub fn set_nullable(gram: &Grammar) -> Vec<bool> {
                 i += 1;
             }
             if empty {
-                j = gram.rlhs[(-j) as usize];
-                if !nullable[j as usize] {
-                    nullable[j as usize] = true;
-                    done_flag = false;
+                let sym = gram.rlhs[(-j) as usize];
+                if !nullable[sym as usize] {
+                    nullable[sym as usize] = true;
+                    done = false;
                 }
             }
             i += 1;
+        }
+        if done {
+            break;
         }
     }
 

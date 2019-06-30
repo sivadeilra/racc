@@ -1,5 +1,7 @@
 /* keyword codes */
 
+use crate::Rule;
+
 pub const TOKEN: u8 = 0;
 
 // the undefined value
@@ -60,10 +62,10 @@ impl Grammar {
         self.ritem.len()
     }
 
-    pub fn rule_to_str(&self, r: usize) -> String {
+    pub fn rule_to_str(&self, r: Rule) -> String {
         let mut s = String::new();
-        s.push_str(&format!("(r{}) {} :", r, self.name[self.rlhs[r] as usize]));
-        for it in self.ritem[self.rrhs[r] as usize..].iter() {
+        s.push_str(&format!("(r{}) {} :", r, self.name[self.rlhs[r as usize] as usize]));
+        for it in self.ritem[self.rrhs[r as usize] as usize..].iter() {
             if *it < 0 {
                 break;
             } // end of this rule

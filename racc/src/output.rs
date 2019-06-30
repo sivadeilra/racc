@@ -1,3 +1,4 @@
+use crate::Rule;
 use crate::grammar::Grammar;
 use crate::lalr::GotoMap;
 use crate::mkpar::{ActionCode, YaccParser};
@@ -112,7 +113,7 @@ pub fn output_parser_to_ast(
         };
 
         let pat_value = rule - 2;
-        let rule_str = gram.rule_to_str(rule);
+        let rule_str = gram.rule_to_str(rule as Rule);
         action_arms.extend(quote! {
             #pat_value => {
                 // log::debug!("reduce: {}", #rule_str);
@@ -230,7 +231,7 @@ fn make_table_string(name: Ident, strings: &[String]) -> TokenStream {
 
 fn make_rule_text_table(span: Span, gram: &Grammar) -> TokenStream {
     let rules: Vec<String> = (2..gram.nrules)
-        .map(|rule| gram.rule_to_str(rule))
+        .map(|rule| gram.rule_to_str(rule as Rule))
         .collect();
     make_table_string(Ident::new("YYRULES", span), &rules)
 }
