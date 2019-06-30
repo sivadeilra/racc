@@ -2,7 +2,7 @@ use crate::closure::closure;
 use crate::closure::set_first_derives;
 use crate::grammar::Grammar;
 use crate::util::Bitv32;
-use crate::util::{RampTable, RampTableBuilder};
+use crate::ramp_table::{RampTable, RampTableBuilder};
 use crate::{Rule, State, Symbol, Item};
 use log::debug;
 

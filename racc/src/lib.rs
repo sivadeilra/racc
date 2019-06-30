@@ -246,6 +246,7 @@ mod lalr;
 mod lr0;
 mod mkpar;
 mod output;
+mod ramp_table;
 mod reader;
 mod util;
 mod warshall;
