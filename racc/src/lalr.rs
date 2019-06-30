@@ -53,8 +53,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     for shifts in lr0.shifts.iter_values() {
         for i in (0..shifts.len()).rev() {
             let state = shifts[i] as usize;
-            let symbol = lr0.states[state].accessing_symbol;
-
+            let symbol = lr0.accessing_symbol[state];
             if gram.is_token(symbol) {
                 break;
             }
@@ -89,7 +88,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
     for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
         for &state2 in sp_shifts.iter().rev() {
-            let symbol = lr0.states[state2 as usize].accessing_symbol;
+            let symbol = lr0.accessing_symbol[state2 as usize];
             if gram.is_token(symbol) {
                 break;
             }
@@ -165,7 +164,7 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &Goto
         if !shifts.is_empty() {
             let mut j: usize = 0;
             while j < shifts.len() {
-                let symbol = lr0.states[shifts[j] as usize].accessing_symbol;
+                let symbol = lr0.accessing_symbol[shifts[j] as usize];
                 if gram.is_var(symbol) {
                     break;
                 }
@@ -174,10 +173,9 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &Goto
             }
 
             while j < shifts.len() {
-                let symbol = lr0.states[shifts[j] as usize].accessing_symbol;
+                let symbol = lr0.accessing_symbol[shifts[j] as usize];
                 if nullable[symbol as usize] {
-                    let e = map_goto(gram, gotos, stateno, symbol);
-                    edge.push(e as i16);
+                    edge.push(map_goto(gram, gotos, stateno, symbol) as i16);
                 }
                 j += 1;
             }
@@ -217,7 +215,7 @@ fn build_relations(
         assert!(states.len() == 0);
 
         let state1 = gotos.from_state[i] as usize;
-        let symbol1 = lr0.states[gotos.to_state[i] as usize].accessing_symbol as usize;
+        let symbol1 = lr0.accessing_symbol[gotos.to_state[i] as usize] as usize;
 
         // let mut rulep: usize = lr0.derives.derives[symbol1] as usize;
         // while lr0.derives.derives_rules[rulep] >= 0 {
@@ -230,7 +228,7 @@ fn build_relations(
                 let symbol2 = gram.ritem[rp];
                 for &shift in lr0.shifts.values(stateno) {
                     stateno = shift as usize;
-                    if lr0.states[stateno].accessing_symbol == symbol2 {
+                    if lr0.accessing_symbol[stateno] == symbol2 {
                         break;
                     }
                 }

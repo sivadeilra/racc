@@ -6,20 +6,24 @@ use crate::ramp_table::{RampTable, RampTableBuilder};
 use crate::{Rule, State, Symbol, Item};
 use log::debug;
 
+pub const INITIAL_STATE_SYMBOL: Symbol = 0;
+
 /// the structure of the LR(0) state machine
-pub struct Core {
-    pub accessing_symbol: Symbol,
-    pub items: Vec<i16>,
+struct Core {
+    items: Vec<Item>,
 }
 
 pub struct LR0Output {
-    pub states: Vec<Core>,
+    pub nstates: usize,
+
+    // index: State
+    // value: Symbol
+    pub accessing_symbol: Vec<Symbol>,
 
     /// Contains (state -> [state]) mappings for shifts
     pub shifts: RampTable<State>,
 
     pub reductions: Reductions,
-    pub nullable: Vec<bool>,
     pub derives: DerivesTable,
 }
 
@@ -29,21 +33,13 @@ pub type Reductions = RampTable<Rule>;
 
 impl LR0Output {
     pub fn nstates(&self) -> usize {
-        self.states.len()
+        self.nstates
     }
 }
 
 struct KernelTable {
     base: Vec<i16>, // values in this array are indexes into the KernelTable::items array
-    end: Vec<i16>,  // values in this array are indexes into the KernelTable::items array
-    items: Vec<i16>,
-}
-impl KernelTable {
-    pub fn items_for_symbol(&self, symbol: i16) -> &[i16] {
-        let start = self.base[symbol as usize] as usize;
-        let end = self.end[symbol as usize] as usize;
-        &self.items[start..end]
-    }
+    items: Vec<Symbol>,
 }
 
 fn sort_shift_symbols(shift_symbol: &mut [i16]) {
@@ -84,12 +80,16 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
             }
             kernel_base
         },
-        end: vec![-1; gram.nsyms],
         items: vec![0; kernel_items_count],
     };
 
+    // values in this array are indexes into the KernelTable::items array
+    let mut kernels_end: Vec<i16> = vec![-1; gram.nsyms];
+
     let mut states: Vec<Core> = Vec::new();
+    let mut accessing_symbol: Vec<Symbol> = Vec::new();
     states.push(initialize_states(gram, &derives));
+    accessing_symbol.push(INITIAL_STATE_SYMBOL);
 
     // Contains the set of states that are relevant for each item.  Each entry in this
     // table corresponds to an item, so state_set.len() = nitems.  The contents of each
@@ -139,7 +139,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
         debug!("    new_item_sets: item_set = {:?}", item_set);
-        new_item_sets(&mut kernels, gram, &item_set, &mut shift_symbol);
+        new_item_sets(&kernels.base, &mut kernels.items, &mut kernels_end, gram, &item_set, &mut shift_symbol);
 
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
@@ -147,9 +147,9 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
             for &symbol in shift_symbol.iter() {
-                let symbol_items = kernels.items_for_symbol(symbol);
+                let symbol_items = &kernels.items[kernels.base[symbol as usize] as usize..kernels_end[symbol as usize] as usize];
                 let shift_state =
-                    find_or_create_state(gram, symbol_items, &mut state_set, &mut states, symbol);
+                    find_or_create_state(gram, symbol_items, &mut state_set, &mut states, &mut accessing_symbol, symbol);
                 shifts.push_value(shift_state);
             }
         }
@@ -161,12 +161,11 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         this_state += 1;
     }
 
-    // Return results
     LR0Output {
-        states,
+        nstates: states.len(),
+        accessing_symbol,
         reductions: reductions.finish(),
         shifts: shifts.finish(),
-        nullable: set_nullable(gram),
         derives,
     }
 }
@@ -178,6 +177,7 @@ fn find_or_create_state(
     symbol_items: &[Item],
     state_set: &mut [Vec<State>],
     states: &mut Vec<Core>,
+    accessing_symbol: &mut Vec<Symbol>,
     symbol: Symbol,
 ) -> State {
     let key_item = symbol_items[0] as usize; // key is an item index, in [0..nitems).
@@ -196,9 +196,9 @@ fn find_or_create_state(
 
     let new_state = states.len() as State;
     states.push(Core {
-        accessing_symbol: symbol,
         items: symbol_items.to_vec(),
     });
+    accessing_symbol.push(symbol);
 
     // Add the new state to the state set for this symbol.
     this_state_set.push(new_state);
@@ -215,19 +215,14 @@ fn find_or_create_state(
 // encountered in those states, and finding the transitive closure over same.
 // Initializes the state table.
 fn initialize_states(gram: &Grammar, derives: &DerivesTable) -> Core {
-    debug!("initialize_states");
-    let start_derives = derives.values(gram.start_symbol);
     Core {
-        items: start_derives.iter().map(|&item| gram.rrhs[item as usize]).collect::<Vec<Item>>(),
-        accessing_symbol: 0,
+        items: derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs[item as usize]).collect::<Vec<Item>>(),
     }
 }
 
 fn print_core(gram: &Grammar, state: State, core: &Core) {
-    debug!(
-        "    s{} : accessing_symbol={}",
-        state, gram.name[core.accessing_symbol as usize]
-    );
+    // debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol as usize]);
+    debug!("    s{}", state);
 
     let mut line = String::new();
     for i in 0..core.items.len() {
@@ -260,30 +255,30 @@ fn print_core(gram: &Grammar, state: State, core: &Core) {
 
 // fills shift_symbol with shifts
 fn new_item_sets(
-    kernels: &mut KernelTable,
+    kernels_base: &[Item],
+    kernels_items: &mut [Symbol],
+    kernels_end: &mut [i16],
     gram: &Grammar,
-    item_set: &[i16],
-    shift_symbol: &mut Vec<i16>,
+    item_set: &[Item],
+    shift_symbol: &mut Vec<Symbol>,
 ) {
     assert!(shift_symbol.len() == 0);
 
     // reset kernel_end
-    for i in kernels.end.iter_mut() {
+    for i in kernels_end.iter_mut() {
         *i = -1;
     }
 
-    for &it in item_set.iter() {
-        let symbol = gram.ritem[it as usize];
+    for &item in item_set.iter() {
+        let symbol = gram.ritem[item as usize];
         if symbol > 0 {
-            let mut ksp = kernels.end[symbol as usize];
+            let mut ksp = kernels_end[symbol as usize];
             if ksp == -1 {
                 shift_symbol.push(symbol);
-                ksp = kernels.base[symbol as usize];
+                ksp = kernels_base[symbol as usize];
             }
-
-            kernels.items[ksp as usize] = (it + 1) as i16;
-            ksp += 1;
-            kernels.end[symbol as usize] = ksp;
+            kernels_items[ksp as usize] = (item + 1) as i16;
+            kernels_end[symbol as usize] = ksp + 1;
         }
     }
 }

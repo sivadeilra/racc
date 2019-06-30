@@ -68,7 +68,7 @@ fn parse_actions(
 fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
     for &k in lr0.shifts.values(stateno as usize) {
-        let symbol = lr0.states[k as usize].accessing_symbol;
+        let symbol = lr0.accessing_symbol[k as usize];
         if gram.is_token(symbol) {
             actions.push(ParserAction {
                 symbol: symbol,
@@ -140,7 +140,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> usize {
     let mut final_state: usize = 0;
     for &ts in lr0.shifts.values(0).iter().rev() {
         final_state = ts as usize;
-        if lr0.states[final_state].accessing_symbol == goal {
+        if lr0.accessing_symbol[final_state] == goal {
             return ts as usize;
         }
     }
