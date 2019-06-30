@@ -8,10 +8,8 @@ use log::debug;
 
 pub const INITIAL_STATE_SYMBOL: Symbol = 0;
 
-/// the structure of the LR(0) state machine
-struct Core {
-    items: Vec<Item>,
-}
+// State -> [Item]
+type CoreTable = RampTable<Item>;
 
 pub struct LR0Output {
     pub nstates: usize,
@@ -86,9 +84,15 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // values in this array are indexes into the KernelTable::items array
     let mut kernels_end: Vec<i16> = vec![-1; gram.nsyms];
 
-    let mut states: Vec<Core> = Vec::new();
+    let mut states = CoreTable::new();
     let mut accessing_symbol: Vec<Symbol> = Vec::new();
-    states.push(initialize_states(gram, &derives));
+
+    // This function creates the initial state, using the DERIVES relation for
+    // the start symbol.  From this initial state, we will discover / create all
+    // other states, by examining a state, the next variables that could be
+    // encountered in those states, and finding the transitive closure over same.
+    // Initializes the state table.
+    states.push_entry(derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs[item as usize]));
     accessing_symbol.push(INITIAL_STATE_SYMBOL);
 
     // Contains the set of states that are relevant for each item.  Each entry in this
@@ -115,17 +119,17 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut reductions = RampTableBuilder::<Rule>::new();
     let mut shifts = RampTableBuilder::<State>::new();
 
-    while this_state < states.len() {
+    while this_state < states.num_keys() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(gram, this_state as State, &states[this_state]);
+        print_core(gram, this_state as State, states.values(this_state as usize));
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
         // debug!("    nucleus items: {}", &lr0.states[this_state].items);
         closure(
             gram,
-            &states[this_state].items,
+            &states.values(this_state as usize),
             &first_derives,
             gram.nrules,
             &mut rule_set,
@@ -161,8 +165,13 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         this_state += 1;
     }
 
+    let nstates = states.num_keys();
+
+    // finish the states table
+    states.index.push(states.table.len());
+
     LR0Output {
-        nstates: states.len(),
+        nstates: nstates,
         accessing_symbol,
         reductions: reductions.finish(),
         shifts: shifts.finish(),
@@ -176,7 +185,7 @@ fn find_or_create_state(
     gram: &Grammar,
     symbol_items: &[Item],
     state_set: &mut [Vec<State>],
-    states: &mut Vec<Core>,
+    states: &mut CoreTable,
     accessing_symbol: &mut Vec<Symbol>,
     symbol: Symbol,
 ) -> State {
@@ -185,48 +194,39 @@ fn find_or_create_state(
 
     // Search for an existing Core that has the same items.
     for &state in this_state_set.iter() {
-        if symbol_items == states[state as usize].items.as_slice() {
+        if symbol_items == states.values(state as usize) {
             return state as i16;
         }
     }
 
     // No match.  Add a new entry to the list.
 
-    assert!(states.len() < 0x7fff);
+    assert!(states.num_keys() < 0x7fff);
 
-    let new_state = states.len() as State;
-    states.push(Core {
-        items: symbol_items.to_vec(),
-    });
+    let new_state = states.num_keys() as State;
+
+    for &symbol_item in symbol_items {
+        states.push_value(symbol_item);
+    }
+    states.finish_key();
     accessing_symbol.push(symbol);
 
     // Add the new state to the state set for this symbol.
     this_state_set.push(new_state);
 
     debug!("    created state s{}:", new_state);
-    print_core(gram, new_state, states.last().as_ref().unwrap());
+    print_core(gram, new_state, symbol_items);
 
     new_state
 }
 
-// This function creates the initial state, using the DERIVES relation for
-// the start symbol.  From this initial state, we will discover / create all
-// other states, by examining a state, the next variables that could be
-// encountered in those states, and finding the transitive closure over same.
-// Initializes the state table.
-fn initialize_states(gram: &Grammar, derives: &DerivesTable) -> Core {
-    Core {
-        items: derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs[item as usize]).collect::<Vec<Item>>(),
-    }
-}
-
-fn print_core(gram: &Grammar, state: State, core: &Core) {
+fn print_core(gram: &Grammar, state: State, items: &[Item]) {
     // debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol as usize]);
     debug!("    s{}", state);
 
     let mut line = String::new();
-    for i in 0..core.items.len() {
-        let rhs = core.items[i] as usize;
+    for i in 0..items.len() {
+        let rhs = items[i] as usize;
         line.push_str(&format!("item {:4} : ", rhs));
 
         // back up to start of this rule

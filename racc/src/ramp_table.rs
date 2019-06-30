@@ -61,6 +61,26 @@ impl<T> RampTable<T> {
     pub fn iter_values(&self) -> impl Iterator<Item = &[T]> {
         self.index.windows(2).map(move |w| &self.table[w[0]..w[1]])
     }
+
+    /// Use like this:
+    ///
+    ///   rt.push_value(...);
+    ///   rt.push_value(...);
+    ///   rt.push_value(...);
+    ///   rt.finish_key();
+    pub fn push_value(&mut self, value: T) {
+        self.table.push(value);
+    }
+
+    pub fn finish_key(&mut self) {
+        let end = self.table.len();
+        self.index.push(end);
+    }
+
+    pub fn push_entry(&mut self, iter: impl Iterator<Item=T>) {
+        self.table.extend(iter);
+        self.finish_key();
+    }
 }
 
 pub struct RampTableBuilder<T> {
