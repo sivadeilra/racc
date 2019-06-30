@@ -2,8 +2,9 @@ use crate::closure::closure;
 use crate::closure::set_first_derives;
 use crate::grammar::Grammar;
 use crate::util::Bitv32;
-use crate::{Rule, Symbol};
+use crate::{Rule, Symbol, State};
 use log::debug;
+use core::ops::Range;
 
 /// the structure of the LR(0) state machine
 pub struct Core {
@@ -17,19 +18,38 @@ pub struct Shifts {
     pub shifts: Vec<i16>,
 }
 
-/// the structure used to store reductions
-pub struct Reductions {
-    pub state: usize,
-    pub rules: Vec<Rule>,
-}
-
 pub struct LR0Output {
     pub states: Vec<Core>,
     pub shifts: Vec<Shifts>,
-    pub reductions: Vec<Reductions>,
+    pub reductions: Reductions,
     pub nullable: Vec<bool>,
     pub derives: Vec<i16>,
     pub derives_rules: Vec<i16>,
+}
+
+#[derive(Debug)]
+pub struct Reductions {
+    /// index is a state number
+    /// item is an offset into rules
+    /// len = nstates + 1
+    /// equivalent to 'lookaheads'
+    pub bases: Vec<usize>,
+
+    /// index is arbitrary
+    /// item is a rule index
+    /// len = number of reductions (nrules?)
+    /// equivalent to 'LA'
+    pub rules: Vec<Rule>
+}
+impl Reductions {
+    pub fn state_rules(&self, state: State) -> &[Rule] {
+        &self.rules[self.state_rules_range(state)]
+    }
+    pub fn state_rules_range(&self, state: State) -> Range<usize> {
+        let start = self.bases[state as usize];
+        let end = self.bases[state as usize + 1];
+        start..end
+    }
 }
 
 impl LR0Output {
@@ -115,7 +135,10 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut this_state: usize = 0;
 
     // State which becomes the output
-    let mut reductions: Vec<Reductions> = Vec::new();
+    let mut reductions = Reductions {
+        bases: Vec::new(),
+        rules: Vec::new()
+    };
     let mut shifts: Vec<Shifts> = Vec::new();
 
     while this_state < states.len() {
@@ -136,10 +159,8 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         );
 
         // The output of save_reductions() is stored in reductions.
-        let state_reductions = save_reductions(gram, &item_set);
-        if !state_reductions.is_empty() {
-            reductions.push(Reductions { state: this_state, rules: state_reductions });
-        }
+        reductions.bases.push(reductions.rules.len());
+        save_reductions(gram, &item_set, &mut reductions.rules);
 
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
@@ -169,6 +190,9 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         debug!("");
         this_state += 1;
     }
+
+    // Finish the reductions table.    
+    reductions.bases.push(reductions.rules.len());
 
     // Return results
     LR0Output {
@@ -327,15 +351,13 @@ fn new_item_sets(
 /// We discover this by testing the sign of the next symbol in the item; if it is
 /// negative, then we have reached the end of the symbols on the rhs of a rule.  See
 /// the code in reader::pack_grammar(), where this information is set up.
-fn save_reductions(gram: &Grammar, item_set: &[i16]) -> Vec<i16> {
-    let mut rules: Vec<i16> = Vec::new();
+fn save_reductions(gram: &Grammar, item_set: &[i16], rules: &mut Vec<Rule>) {
     for &i in item_set {
         let item = gram.ritem[i as usize];
         if item < 0 {
             rules.push(-item);
         }
     }
-    rules
 }
 
 // Computes the "derives" and "derives_rules" arrays.

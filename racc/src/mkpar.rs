@@ -1,3 +1,5 @@
+use crate::State;
+use crate::lr0::Reductions;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
@@ -36,7 +38,7 @@ impl YaccParser {
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let nstates = lr0.nstates();
     let mut parser: Vec<Vec<ParserAction>> = (0..nstates)
-        .map(|state| parse_actions(gram, lr0, lalr, state))
+        .map(|state| parse_actions(gram, lr0, lalr, state as State))
         .collect();
 
     let final_state = find_final_state(gram, lr0, lalr);
@@ -56,10 +58,10 @@ fn parse_actions(
     gram: &Grammar,
     lr0: &LR0Output,
     lalr: &LALROutput,
-    stateno: usize,
+    stateno: State,
 ) -> Vec<ParserAction> {
     let mut actions = get_shifts(gram, lr0, lalr, stateno);
-    add_reductions(gram, lalr, stateno, &mut actions);
+    add_reductions(gram, &lr0.reductions, lalr, stateno, &mut actions);
     actions
 }
 
@@ -67,11 +69,11 @@ fn get_shifts(
     gram: &Grammar,
     lr0: &LR0Output,
     lalr: &LALROutput,
-    stateno: usize,
+    stateno: State,
 ) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
-    if lalr.shift_table[stateno] != -1 {
-        let sp = &lr0.shifts[lalr.shift_table[stateno] as usize];
+    if lalr.shift_table[stateno as usize] != -1 {
+        let sp = &lr0.shifts[lalr.shift_table[stateno as usize] as usize];
         for &k in sp.shifts.iter() {
             let symbol = lr0.states[k as usize].accessing_symbol;
             if gram.is_token(symbol) {
@@ -91,14 +93,14 @@ fn get_shifts(
 
 fn add_reductions(
     gram: &Grammar,
+    reductions: &Reductions,
     lalr: &LALROutput,
-    stateno: usize,
+    stateno: State,
     actions: &mut Vec<ParserAction>,
 ) {
-    let m = lalr.lookaheads[stateno] as usize;
-    let n = lalr.lookaheads[stateno + 1] as usize;
-    for i in m..n {
-        let ruleno = lalr.laruleno[i] as usize;
+    let range = reductions.state_rules_range(stateno);
+    for i in range {
+        let ruleno = reductions.rules[i] as usize;
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
                 add_reduce(gram, actions, ruleno, j as i16);

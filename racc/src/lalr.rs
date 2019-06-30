@@ -1,14 +1,12 @@
+use crate::{State, Rule};
 use crate::grammar::Grammar;
-use crate::lr0::LR0Output;
+use crate::lr0::{LR0Output, Reductions};
 use crate::util::Bitmat;
 use log::debug;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
     pub shift_table: Vec<i16>,
-    pub reduction_table: Vec<i16>,
-    pub lookaheads: Vec<i16>,
-    pub laruleno: Vec<i16>,
     pub LA: Bitmat,
     pub gotos: GotoMap,
 }
@@ -23,13 +21,6 @@ pub struct GotoMap {
 #[allow(non_snake_case)]
 pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
     let shift_table = set_shift_table(lr0);
-    let reduction_table = set_reduction_table(lr0);
-    let lookaheads = create_lookaheads(lr0, &reduction_table);
-
-    // the LA and lookback tables have len() = LA_len
-    let LA_len = lookaheads[lookaheads.len() - 1] as usize;
-
-    let laruleno = initialize_LA(lr0, LA_len, &reduction_table);
     let gotos = set_goto_map(gram, lr0);
 
     let nullable = crate::lr0::set_nullable(gram);
@@ -42,20 +33,14 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
         &nullable,
         &shift_table,
         &gotos,
-        &lookaheads,
-        &laruleno,
-        LA_len,
     );
 
     compute_FOLLOWS(&includes, &mut F);
 
-    let LA = compute_lookaheads(gram, lr0, &lookaheads, &lookback, &F);
+    let LA = compute_lookaheads(gram, lr0, &lookback, &F);
 
     LALROutput {
         shift_table: shift_table,
-        reduction_table: reduction_table,
-        laruleno: laruleno,
-        lookaheads: lookaheads,
         LA: LA,
         gotos: gotos,
     }
@@ -69,20 +54,6 @@ fn set_shift_table(lr0: &LR0Output) -> Vec<i16> {
         shift_table[state] = i as i16;
     }
     shift_table
-}
-
-// Builds a table which maps from states to reductions.
-// The index of each element corresponds to a state index.
-// The value of each element is either -1, for states that
-// do not have any reductions, or an index into LR0Output.reductions.
-fn set_reduction_table(lr0: &LR0Output) -> Vec<i16> {
-    let mut reduction_table: Vec<i16> = vec![-1; lr0.states.len()];
-    for (i, reduction) in lr0.reductions.iter().enumerate() {
-        let state = reduction.state;
-        assert!(reduction_table[state] == -1);
-        reduction_table[state] = i as i16;
-    }
-    reduction_table
 }
 
 // Finds the longest rhs
@@ -100,41 +71,6 @@ fn set_max_rhs(gram: &Grammar) -> usize {
         }
     }
     max
-}
-
-// Creates the 'lookaheads' table.  (This is not the same as the LA table.)
-// The index of each entry in 'lookaheads' corresponds to a state, plus one
-// extra entry at the end which corresponds to nstates.  The value of each
-// entry is the sum of rules for all reductions in the previous states.
-fn create_lookaheads(lr0: &LR0Output, reduction_table: &[i16]) -> Vec<i16> {
-    let mut lookaheads: Vec<i16> = Vec::with_capacity(lr0.states.len() + 1);
-
-    // Count the total number of reductions, and also build the lookaheads table.
-    let mut k = 0;
-    for i in 0..lr0.states.len() {
-        lookaheads.push(k as i16);
-        let rp = reduction_table[i];
-        if rp != -1 {
-            k += lr0.reductions[rp as usize].rules.len();
-        }
-    }
-    lookaheads.push(k as i16);
-    assert!(lookaheads.len() == lr0.states.len() + 1);
-    lookaheads
-}
-
-#[allow(non_snake_case)]
-fn initialize_LA(lr0: &LR0Output, LA_len: usize, reduction_table: &[i16]) -> Vec<i16> {
-    let mut laruleno: Vec<i16> = Vec::with_capacity(LA_len);
-    for i in 0..lr0.states.len() {
-        let rp = reduction_table[i];
-        if rp != -1 {
-            let r = &lr0.reductions[rp as usize];
-            laruleno.extend(&r.rules);
-        }
-    }
-    assert!(laruleno.len() == LA_len);
-    laruleno
 }
 
 fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
@@ -303,9 +239,6 @@ fn build_relations(
     nullable: &[bool],
     shift_table: &[i16],
     gotos: &GotoMap,
-    lookaheads: &[i16],
-    laruleno: &[i16],
-    la_len: usize,
 ) -> (Vec<Vec<i16>>, /*lookback:*/ Vec<Vec<i16>>) {
     debug!("build_relations");
 
@@ -313,7 +246,7 @@ fn build_relations(
     let mut includes: Vec<Vec<i16>> = vec![Vec::new(); ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1); // temporary, reused in loops
     let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1); // temporary, reused in loops
-    let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); la_len];
+    let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); lr0.reductions.rules.len()];
 
     for i in 0..ngotos {
         assert!(edge.len() == 0);
@@ -342,11 +275,10 @@ fn build_relations(
             }
 
             add_lookback_edge(
-                stateno,
-                lr0.derives_rules[rulep] as usize,
+                stateno as State,
+                lr0.derives_rules[rulep],
                 i,
-                laruleno,
-                lookaheads,
+                &lr0.reductions,
                 &mut lookback,
             );
 
@@ -382,24 +314,21 @@ fn build_relations(
 
 // Adds an entry to the 'lookback' table.
 fn add_lookback_edge(
-    stateno: usize,
-    ruleno: usize,
+    stateno: State,
+    ruleno: Rule,
     gotono: usize,
-    laruleno: &[i16],
-    lookaheads: &[i16],
+    reductions: &Reductions,
     lookback: &mut Vec<Vec<i16>>,
 ) {
-    let mut i = lookaheads[stateno] as usize;
-    let k = lookaheads[stateno + 1] as usize;
-    loop {
-        assert!(i < k);
-        if (laruleno[i] as usize) == ruleno {
+    let range = reductions.state_rules_range(stateno);
+    let state_rules = reductions.state_rules(stateno);
+    for (i, &r) in range.clone().zip(state_rules) {
+        if r == ruleno {
             lookback[i].insert(0, gotono as i16);
-            break;
-        } else {
-            i += 1;
+            return;
         }
     }
+    panic!("did not find rule");
 }
 
 #[allow(non_snake_case)]
@@ -459,17 +388,16 @@ fn compute_FOLLOWS(includes: &[Vec<i16>], F: &mut Bitmat) {
 fn compute_lookaheads(
     gram: &Grammar,
     lr0: &LR0Output,
-    lookaheads: &[i16],
     lookback: &[Vec<i16>],
     F: &Bitmat,
 ) -> Bitmat {
-    let n = lookaheads[lr0.nstates()] as usize;
-    let mut LA = Bitmat::new(n, gram.ntokens);
+    let num_rules = lr0.reductions.rules.len();
+    let mut LA = Bitmat::new(num_rules, gram.ntokens);
 
     assert!(F.cols == LA.cols);
     assert!(F.rowsize == LA.rowsize);
 
-    for i in 0..n {
+    for i in 0..num_rules {
         let fp3 = (i + 1) * LA.rowsize;
         for sp in lookback[i].iter() {
             let mut fp1 = i * LA.rowsize;
