@@ -1,7 +1,7 @@
-use crate::Item;
 use crate::grammar::Grammar;
 use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
+use crate::Item;
 use log::debug;
 
 /// Computes the "epsilon-free firsts" (EFF) relation.

@@ -2,9 +2,9 @@ use crate::closure::closure;
 use crate::closure::set_first_derives;
 use crate::grammar::Grammar;
 use crate::util::Bitv32;
-use crate::{Rule, Symbol, State};
-use log::debug;
 use crate::util::{RampTable, RampTableBuilder};
+use crate::{Rule, State, Symbol};
+use log::debug;
 
 /// the structure of the LR(0) state machine
 pub struct Core {
@@ -112,7 +112,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
     // State which becomes the output
     let mut reductions = RampTableBuilder::<Rule>::new();
-    let mut shifts_new = RampTableBuilder::<State>::new();
+    let mut shifts = RampTableBuilder::<State>::new();
 
     while this_state < states.len() {
         assert!(item_set.len() == 0);
@@ -142,13 +142,14 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
-        shifts_new.start_key();
+        shifts.start_key();
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
             for &symbol in shift_symbol.iter() {
                 let symbol_items = kernels.items_for_symbol(symbol);
-                let shift_state = find_or_create_state(gram, symbol_items, &mut state_set, &mut states, symbol);
-                shifts_new.push_value(shift_state);
+                let shift_state =
+                    find_or_create_state(gram, symbol_items, &mut state_set, &mut states, symbol);
+                shifts.push_value(shift_state);
             }
         }
 
@@ -163,7 +164,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     LR0Output {
         states,
         reductions: reductions.finish(),
-        shifts: shifts_new.finish(),
+        shifts: shifts.finish(),
         nullable: set_nullable(gram),
         derives,
         derives_rules,

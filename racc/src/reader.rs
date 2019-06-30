@@ -184,8 +184,7 @@ impl ReaderState {
                     i -= 1;
                 }
                 if self.pitem[i + 1] == NO_ITEM
-                    || self.symbols[self.pitem[i + 1]].tag
-                        != self.symbols[self.lhs[rule]].tag
+                    || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.lhs[rule]].tag
                 {
                     warn!("default_action_warning();")
                 }

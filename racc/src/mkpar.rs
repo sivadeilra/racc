@@ -1,8 +1,8 @@
-use crate::State;
-use crate::lr0::Reductions;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
+use crate::lr0::Reductions;
+use crate::State;
 use log::debug;
 use log::warn;
 
@@ -65,11 +65,7 @@ fn parse_actions(
     actions
 }
 
-fn get_shifts(
-    gram: &Grammar,
-    lr0: &LR0Output,
-    stateno: State,
-) -> Vec<ParserAction> {
+fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
     for &k in lr0.shifts.values(stateno as usize) {
         let symbol = lr0.states[k as usize].accessing_symbol;

@@ -1,7 +1,7 @@
-use crate::{State, Rule};
 use crate::grammar::Grammar;
 use crate::lr0::{LR0Output, Reductions};
 use crate::util::Bitmat;
+use crate::{Rule, State};
 use log::debug;
 
 #[allow(non_snake_case)]
@@ -22,18 +22,10 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
     let gotos = set_goto_map(gram, lr0);
     let nullable = crate::lr0::set_nullable(gram);
     let mut F = initialize_F(gram, lr0, &nullable, &gotos);
-    let (includes, lookback) = build_relations(
-        gram,
-        lr0,
-        &nullable,
-        &gotos,
-    );
+    let (includes, lookback) = build_relations(gram, lr0, &nullable, &gotos);
     compute_FOLLOWS(&includes, &mut F);
     let LA = compute_lookaheads(gram, lr0, &lookback, &F);
-    LALROutput {
-        LA,
-        gotos,
-    }
+    LALROutput { LA, gotos }
 }
 
 // Finds the longest rhs
@@ -71,8 +63,6 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
             goto_map[symbol as usize - gram.ntokens] += 1;
         }
     }
-
-
 
     let ngotos = ngotos;
 
@@ -160,12 +150,7 @@ fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: i16) -> usize
 }
 
 #[allow(non_snake_case)]
-fn initialize_F(
-    gram: &Grammar,
-    lr0: &LR0Output,
-    nullable: &[bool],
-    gotos: &GotoMap,
-) -> Bitmat {
+fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &GotoMap) -> Bitmat {
     debug!("initialize_F");
 
     let ngotos = gotos.ngotos;

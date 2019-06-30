@@ -1,5 +1,5 @@
-use core::ops::Range;
 use core::iter::repeat;
+use core::ops::Range;
 
 pub const BITS_PER_WORD: usize = 32;
 
@@ -226,14 +226,14 @@ impl<T> RampTable<T> {
     pub fn new_empty() -> Self {
         Self {
             index: Vec::new(),
-            table: Vec::new()
+            table: Vec::new(),
         }
     }
 
     pub fn new() -> Self {
         Self {
             index: vec![0],
-            table: Vec::new()
+            table: Vec::new(),
         }
     }
 
@@ -258,33 +258,36 @@ impl<T> RampTable<T> {
     }
 
     pub fn values_range(&self, key: usize) -> Range<usize> {
-        self.index[key] .. self.index[key + 1]
+        self.index[key]..self.index[key + 1]
     }
 
     pub fn all_values(&self) -> &[T] {
         &self.table
     }
 
-    pub fn iter_sets(&self) -> impl Iterator<Item=(usize, &[T])> {
-        self.index.windows(2).map(move |w| &self.table[w[0]..w[1]]).enumerate()
+    pub fn iter_sets(&self) -> impl Iterator<Item = (usize, &[T])> {
+        self.index
+            .windows(2)
+            .map(move |w| &self.table[w[0]..w[1]])
+            .enumerate()
     }
 
     /// Iterates &[T], one for each key in the table.
-    pub fn iter_values(&self) -> impl Iterator<Item=&[T]> {
+    pub fn iter_values(&self) -> impl Iterator<Item = &[T]> {
         self.index.windows(2).map(move |w| &self.table[w[0]..w[1]])
     }
 }
 
 pub struct RampTableBuilder<T> {
     index: Vec<usize>,
-    table: Vec<T>
+    table: Vec<T>,
 }
 
 impl<T> RampTableBuilder<T> {
     pub fn new() -> Self {
         Self {
             index: Vec::new(),
-            table: Vec::new()
+            table: Vec::new(),
         }
     }
 
@@ -301,7 +304,7 @@ impl<T> RampTableBuilder<T> {
         self.index.push(end);
         RampTable {
             index: self.index,
-            table: self.table
+            table: self.table,
         }
     }
 }
