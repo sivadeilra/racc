@@ -550,7 +550,7 @@ impl ReaderState {
             gram.ntokens, gram.nvars, gram.nsyms
         );
         for i in 0..gram.nsyms {
-            if gram.is_var(i as i16) {
+            if gram.is_var(crate::Symbol(i as i16)) {
                 debug!("    {:3}  var    {}", i, gram.name[i]);
             } else {
                 debug!("    {:3}  token  {}", i, gram.name[i]);

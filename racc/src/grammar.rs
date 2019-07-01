@@ -1,5 +1,7 @@
 /* keyword codes */
 
+use crate::Var;
+use crate::Symbol;
 use crate::Rule;
 
 pub const TOKEN: u8 = 0;
@@ -50,12 +52,16 @@ pub struct Grammar {
 }
 
 impl Grammar {
-    pub fn is_var(&self, s: i16) -> bool {
+    pub fn is_var_old(&self, s: i16) -> bool {
         (s as usize) >= self.start_symbol
     }
 
-    pub fn is_token(&self, s: i16) -> bool {
-        (s as usize) < self.start_symbol
+    pub fn is_var(&self, s: Symbol) -> bool {
+        (s.0 as usize) >= self.start_symbol
+    }
+
+    pub fn is_token(&self, s: Symbol) -> bool {
+        (s.0 as usize) < self.start_symbol
     }
 
     pub fn nitems(&self) -> usize {
@@ -82,5 +88,20 @@ impl Grammar {
             end += 1;
         }
         &self.ritem[rhs as usize..end]
+    }
+
+    pub fn symbol_to_var(&self, sym: Symbol) -> Var {
+        let su = sym.0 as usize;
+        assert!(su >= self.start_symbol);
+        Var((su - self.start_symbol) as i16)
+    }
+
+    pub fn symbol_to_var_opt(&self, sym: Symbol) -> Option<Var> {
+        let su = sym.0 as usize;
+        if su >= self.start_symbol {
+            Some(Var((su - self.start_symbol) as i16))
+        } else {
+            None
+        }
     }
 }

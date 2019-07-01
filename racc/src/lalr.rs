@@ -1,3 +1,5 @@
+use crate::Symbol;
+use crate::tvec::TVec;
 use crate::grammar::Grammar;
 use crate::lr0::{LR0Output, Reductions};
 use crate::util::Bitmat;
@@ -52,14 +54,14 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
     for shifts in lr0.shifts.iter_values() {
         for i in (0..shifts.len()).rev() {
-            let state = shifts[i] as usize;
+            let state = shifts[i];
             let symbol = lr0.accessing_symbol[state];
             if gram.is_token(symbol) {
                 break;
             }
             assert!(ngotos < 0x7fff);
             ngotos += 1;
-            goto_map[symbol as usize - gram.ntokens] += 1;
+            goto_map[symbol.0 as usize - gram.ntokens] += 1;
         }
     }
 
@@ -88,13 +90,13 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
     for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
         for &state2 in sp_shifts.iter().rev() {
-            let symbol = lr0.accessing_symbol[state2 as usize];
+            let symbol = lr0.accessing_symbol[state2];
             if gram.is_token(symbol) {
                 break;
             }
 
-            let k = temp_map[symbol as usize - gram.ntokens] as usize;
-            temp_map[symbol as usize - gram.ntokens] += 1;
+            let k = temp_map[symbol.0 as usize - gram.ntokens] as usize;
+            temp_map[symbol.0 as usize - gram.ntokens] += 1;
             from_state[k] = sp_state as State;
             to_state[k] = state2;
         }
@@ -125,18 +127,17 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 }
 
 // returns an index into goto_map
-fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: i16) -> usize {
-    let symbol = symbol as usize;
-    let var = symbol - gram.ntokens;
-    let init_low = gotos.goto_map[var] as usize;
-    let init_high = gotos.goto_map[var + 1] as usize;
+fn map_goto(gram: &Grammar, gotos: &GotoMap, state: State, symbol: Symbol) -> usize {
+    let var = gram.symbol_to_var(symbol);
+    let init_low = gotos.goto_map[var.0 as usize] as usize;
+    let init_high = gotos.goto_map[var.0 as usize + 1] as usize;
     let mut low = init_low;
     let mut high = init_high;
 
     loop {
         assert!(low <= high);
         let middle = (low + high) >> 1;
-        let s = gotos.from_state[middle] as usize;
+        let s = gotos.from_state[middle];
         if s == state {
             return middle;
         }
@@ -149,7 +150,7 @@ fn map_goto(gram: &Grammar, gotos: &GotoMap, state: usize, symbol: i16) -> usize
 }
 
 #[allow(non_snake_case)]
-fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &GotoMap) -> Bitmat {
+fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &TVec<Symbol, bool>, gotos: &GotoMap) -> Bitmat {
     debug!("initialize_F");
 
     let ngotos = gotos.ngotos;
@@ -158,23 +159,23 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &Goto
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);
 
     for i in 0..ngotos {
-        let stateno = gotos.to_state[i] as usize;
-        let shifts = lr0.shifts.values(stateno);
+        let stateno = gotos.to_state[i];
+        let shifts = lr0.shifts.values(stateno as usize);
 
         if !shifts.is_empty() {
             let mut j: usize = 0;
             while j < shifts.len() {
-                let symbol = lr0.accessing_symbol[shifts[j] as usize];
+                let symbol = lr0.accessing_symbol[shifts[j]];
                 if gram.is_var(symbol) {
                     break;
                 }
-                F.set(i, symbol as usize);
+                F.set(i, symbol.0 as usize);
                 j += 1;
             }
 
             while j < shifts.len() {
-                let symbol = lr0.accessing_symbol[shifts[j] as usize];
-                if nullable[symbol as usize] {
+                let symbol = lr0.accessing_symbol[shifts[j]];
+                if nullable[symbol] {
                     edge.push(map_goto(gram, gotos, stateno, symbol) as i16);
                 }
                 j += 1;
@@ -199,7 +200,7 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &[bool], gotos: &Goto
 fn build_relations(
     gram: &Grammar,
     lr0: &LR0Output,
-    nullable: &[bool],
+    nullable: &TVec<Symbol, bool>,
     gotos: &GotoMap,
 ) -> (Vec<Vec<i16>>, /*lookback:*/ Vec<Vec<i16>>) {
     debug!("build_relations");
@@ -214,21 +215,21 @@ fn build_relations(
         assert!(edge.len() == 0);
         assert!(states.len() == 0);
 
-        let state1 = gotos.from_state[i] as usize;
-        let symbol1 = lr0.accessing_symbol[gotos.to_state[i] as usize] as usize;
+        let state1: State = gotos.from_state[i];
+        let symbol1 = lr0.accessing_symbol[gotos.to_state[i]];
 
         // let mut rulep: usize = lr0.derives.derives[symbol1] as usize;
         // while lr0.derives.derives_rules[rulep] >= 0 {
-        for &rule in lr0.derives.values(symbol1) {
+        for &rule in lr0.derives.values(symbol1.0 as usize) {
             assert!(states.len() == 0);
             states.push(state1 as i16);
-            let mut stateno: usize = state1;
+            let mut stateno = state1;
             let mut rp: usize = gram.rrhs[rule as usize] as usize;
             while gram.ritem[rp] >= 0 {
                 let symbol2 = gram.ritem[rp];
-                for &shift in lr0.shifts.values(stateno) {
-                    stateno = shift as usize;
-                    if lr0.accessing_symbol[stateno] == symbol2 {
+                for &shift in lr0.shifts.values(stateno as usize) {
+                    stateno = shift;
+                    if lr0.accessing_symbol[stateno as State] == Symbol(symbol2) {
                         break;
                     }
                 }
@@ -244,11 +245,11 @@ fn build_relations(
             while !done_flag {
                 done_flag = true;
                 rp -= 1;
-                if gram.ritem[rp] >= 0 && gram.is_var(gram.ritem[rp]) {
+                if gram.ritem[rp] >= 0 && gram.is_var_old(gram.ritem[rp]) {
                     length -= 1;
-                    stateno = states[length] as usize;
-                    edge.push(map_goto(gram, gotos, stateno, gram.ritem[rp]) as i16);
-                    if nullable[gram.ritem[rp] as usize] && length > 0 {
+                    stateno = states[length];
+                    edge.push(map_goto(gram, gotos, stateno, Symbol(gram.ritem[rp])) as i16);
+                    if nullable[Symbol(gram.ritem[rp])] && length > 0 {
                         done_flag = false;
                     }
                 }

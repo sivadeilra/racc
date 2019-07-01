@@ -3,10 +3,13 @@ use crate::closure::set_first_derives;
 use crate::grammar::Grammar;
 use crate::util::Bitv32;
 use crate::ramp_table::{RampTable, RampTableBuilder};
-use crate::{Rule, State, Symbol, Item};
+use crate::{Rule, State, Item};
+use crate::tvec::TVec;
 use log::debug;
 
-pub const INITIAL_STATE_SYMBOL: Symbol = 0;
+use crate::aliases::Symbol;
+
+pub const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
 
 // State -> [Item]
 type CoreTable = RampTable<Item>;
@@ -16,7 +19,7 @@ pub struct LR0Output {
 
     // index: State
     // value: Symbol
-    pub accessing_symbol: Vec<Symbol>,
+    pub accessing_symbol: TVec<State, Symbol>,
 
     /// Contains (state -> [state]) mappings for shifts
     pub shifts: RampTable<State>,
@@ -37,15 +40,15 @@ impl LR0Output {
 
 struct KernelTable {
     base: Vec<i16>, // values in this array are indexes into the KernelTable::items array
-    items: Vec<Symbol>,
+    items: Vec<Item>,
 }
 
-fn sort_shift_symbols(shift_symbol: &mut [i16]) {
+fn sort_shift_symbols(shift_symbol: &mut [Symbol]) {
     // this appears to be a bubble-sort of shift_symbol?
     for i in 1..shift_symbol.len() {
         let symbol = shift_symbol[i];
         let mut j = i;
-        while j > 0 && (shift_symbol[j - 1]) > symbol {
+        while j > 0 && shift_symbol[j - 1] > symbol {
             shift_symbol[j] = shift_symbol[j - 1];
             j -= 1;
         }
@@ -85,7 +88,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut kernels_end: Vec<i16> = vec![-1; gram.nsyms];
 
     let mut states = CoreTable::new();
-    let mut accessing_symbol: Vec<Symbol> = Vec::new();
+    let mut accessing_symbol: TVec<State, Symbol> = TVec::new();
 
     // This function creates the initial state, using the DERIVES relation for
     // the start symbol.  From this initial state, we will discover / create all
@@ -107,7 +110,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // the scope of processing each state.
     let mut item_set: Vec<i16> = Vec::with_capacity(gram.nitems());
     let mut rule_set: Bitv32 = Bitv32::from_elem(gram.nrules, false);
-    let mut shift_symbol: Vec<i16> = Vec::new();
+    let mut shift_symbol: Vec<Symbol> = Vec::new();
 
     // this_state represents our position within our work list.  The output.states
     // array represents both our final output, and this_state is the next state
@@ -151,7 +154,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
             for &symbol in shift_symbol.iter() {
-                let symbol_items = &kernels.items[kernels.base[symbol as usize] as usize..kernels_end[symbol as usize] as usize];
+                let symbol_items = &kernels.items[kernels.base[symbol.0 as usize] as usize..kernels_end[symbol.0 as usize] as usize];
                 let shift_state =
                     find_or_create_state(gram, symbol_items, &mut state_set, &mut states, &mut accessing_symbol, symbol);
                 shifts.push_value(shift_state);
@@ -186,7 +189,7 @@ fn find_or_create_state(
     symbol_items: &[Item],
     state_set: &mut [Vec<State>],
     states: &mut CoreTable,
-    accessing_symbol: &mut Vec<Symbol>,
+    accessing_symbol: &mut TVec<State, Symbol>,
     symbol: Symbol,
 ) -> State {
     let key_item = symbol_items[0] as usize; // key is an item index, in [0..nitems).
@@ -256,7 +259,7 @@ fn print_core(gram: &Grammar, state: State, items: &[Item]) {
 // fills shift_symbol with shifts
 fn new_item_sets(
     kernels_base: &[Item],
-    kernels_items: &mut [Symbol],
+    kernels_items: &mut [Item],
     kernels_end: &mut [i16],
     gram: &Grammar,
     item_set: &[Item],
@@ -274,7 +277,7 @@ fn new_item_sets(
         if symbol > 0 {
             let mut ksp = kernels_end[symbol as usize];
             if ksp == -1 {
-                shift_symbol.push(symbol);
+                shift_symbol.push(Symbol(symbol));
                 ksp = kernels_base[symbol as usize];
             }
             kernels_items[ksp as usize] = (item + 1) as i16;
@@ -332,7 +335,7 @@ fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     }
 }
 
-pub fn set_nullable(gram: &Grammar) -> Vec<bool> {
+pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
     let mut nullable: Vec<bool> = vec![false; gram.nsyms];
 
     loop {
@@ -366,12 +369,13 @@ pub fn set_nullable(gram: &Grammar) -> Vec<bool> {
     }
 
     for i in gram.start_symbol..gram.nsyms {
-        if nullable[i] {
+        let sym = i;
+        if nullable[sym] {
             debug!("{} is nullable", gram.name[i]);
         } else {
             debug!("{} is not nullable", gram.name[i]);
         }
     }
 
-    nullable
+    TVec::from_vec(nullable)
 }

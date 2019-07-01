@@ -248,6 +248,7 @@ mod mkpar;
 mod output;
 mod ramp_table;
 mod reader;
+mod tvec;
 mod util;
 mod warshall;
 
@@ -256,8 +257,31 @@ extern crate proc_macro;
 use proc_macro2::Span;
 use syn::{parse_macro_input, Ident};
 
+macro_rules! int_alias {
+    (type $name:ident = $int:ty;) => {
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+        pub struct $name(pub $int);
+
+        impl core::convert::TryFrom<$name> for usize {
+            type Error = core::num::TryFromIntError;
+            fn try_from(i: $name) -> Result<usize, Self::Error> {
+                usize::try_from(i.0)
+            }
+        }
+    }
+}
+
+mod aliases {
+
+
 // Type aliases
-type Symbol = i16;
+int_alias!{type Symbol = i16;}
+int_alias!{type Var = i16;}
+
+}
+
+use aliases::*;
+
 type Rule = i16;
 type State = i16;
 type Item = i16;

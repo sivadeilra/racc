@@ -1,3 +1,4 @@
+use crate::Symbol;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
@@ -27,7 +28,7 @@ pub struct ParserAction {
 pub struct YaccParser {
     pub actions: Vec<Vec<ParserAction>>,
     pub default_reductions: Vec<i16>,
-    pub final_state: usize,
+    pub final_state: State,
 }
 impl YaccParser {
     pub fn nstates(&self) -> usize {
@@ -68,14 +69,14 @@ fn parse_actions(
 fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserAction> {
     let mut actions: Vec<ParserAction> = Vec::new();
     for &k in lr0.shifts.values(stateno as usize) {
-        let symbol = lr0.accessing_symbol[k as usize];
+        let symbol = lr0.accessing_symbol[k as State];
         if gram.is_token(symbol) {
             actions.push(ParserAction {
-                symbol: symbol,
+                symbol: symbol.0,
                 number: k,
-                prec: gram.prec[symbol as usize],
+                prec: gram.prec[symbol.0 as usize],
                 action_code: ActionCode::Shift,
-                assoc: gram.assoc[symbol as usize],
+                assoc: gram.assoc[symbol.0 as usize],
                 suppressed: 0,
             });
         }
@@ -135,13 +136,13 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
     );
 }
 
-fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> usize {
-    let goal = gram.ritem[1];
-    let mut final_state: usize = 0;
+fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> State {
+    let goal = Symbol(gram.ritem[1]);
+    let mut final_state: State = 0;
     for &ts in lr0.shifts.values(0).iter().rev() {
-        final_state = ts as usize;
+        final_state = ts;
         if lr0.accessing_symbol[final_state] == goal {
-            return ts as usize;
+            return ts;
         }
     }
     // Is reaching here an error?
@@ -167,11 +168,11 @@ fn report_unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
 
 /// Modifies ParserAction::suppressed. That field could potentially be moved to a
 /// separate vector, which this function would produce.
-fn remove_conflicts(final_state: usize, parser: &mut [Vec<ParserAction>]) {
+fn remove_conflicts(final_state: State, parser: &mut [Vec<ParserAction>]) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
     for (i, pvec) in parser.iter_mut().enumerate() {
-        let is_final_state = i == final_state;
+        let is_final_state = i as State == final_state;
         let (srcount, rrcount) = remove_conflicts_for_state(pvec, is_final_state);
         srtotal += srcount;
         rrtotal += rrcount;

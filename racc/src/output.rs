@@ -58,7 +58,7 @@ pub fn output_parser_to_ast(
     // println!("tokens consts done");
 
     // Generate YYFINAL constant.
-    let yyfinal = parser.final_state;
+    let yyfinal = parser.final_state as usize;
     items.extend(quote! {
         const YYFINAL: usize = #yyfinal;
     });

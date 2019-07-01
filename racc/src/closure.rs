@@ -1,3 +1,4 @@
+use crate::Symbol;
 use crate::lr0::DerivesTable;
 use crate::grammar::Grammar;
 use crate::util::{word_size, Bitmat, Bitv32};
@@ -12,9 +13,9 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
         for &rule in derives.values(gram.start_symbol + row) {
-            let symbol = gram.ritem[gram.rrhs[rule as usize] as usize];
+            let symbol = Symbol(gram.ritem[gram.rrhs[rule as usize] as usize]);
             if gram.is_var(symbol) {
-                eff.set(row, symbol as usize - gram.start_symbol);
+                eff.set(row, symbol.0 as usize - gram.start_symbol);
             }
         }
     }
@@ -126,7 +127,7 @@ pub fn closure(
     for &ni in nucleus.iter() {
         assert!(ni >= 0);
         let symbol = gram.ritem[ni as usize];
-        if symbol >= 0 && gram.is_var(symbol) {
+        if symbol >= 0 && gram.is_var(Symbol(symbol)) {
             let dsp: usize = ((symbol as usize) - gram.ntokens) * first_derives.rowsize;
             for i in 0..rulesetsize {
                 rule_set.data[i] |= first_derives.data[dsp + i];
