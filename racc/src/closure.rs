@@ -1,4 +1,3 @@
-use crate::Symbol;
 use crate::lr0::DerivesTable;
 use crate::grammar::Grammar;
 use crate::util::{word_size, Bitmat, Bitv32};

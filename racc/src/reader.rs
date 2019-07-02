@@ -25,6 +25,7 @@
 // then all variables.  The plhs and ritem tables are read, and are used to
 // produce several new tables.
 
+use crate::Symbol;
 use crate::SymbolOrRule;
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
@@ -52,7 +53,7 @@ enum SymClass {
     NonTerminal = 2,
 }
 
-struct Symbol {
+struct SymbolDef {
     name: Ident,
     tag: Option<Rc<String>>,
     // value: i16,
@@ -61,8 +62,8 @@ struct Symbol {
     assoc: u8,
 }
 
-fn make_symbol(name: Ident) -> Symbol {
-    Symbol {
+fn make_symbol(name: Ident) -> SymbolDef {
+    SymbolDef {
         name: name,
         tag: None,
         // value: UNDEFINED,
@@ -81,7 +82,7 @@ struct ReaderState {
     lhs: Vec<usize>,
 
     /// Contains all of the symbols, in the order that they are first encountered.
-    symbols: Vec<Symbol>,
+    symbols: Vec<SymbolDef>,
 
     /// A lookup table, which gives you an index into self.symbols
     symbol_table: HashMap<String, usize>,
@@ -152,7 +153,7 @@ impl ReaderState {
         return index;
     }
 
-    pub fn lookup_ref_mut<'a>(&'a mut self, name: &Ident) -> (usize, &'a mut Symbol) {
+    pub fn lookup_ref_mut<'a>(&'a mut self, name: &Ident) -> (usize, &'a mut SymbolDef) {
         let index = self.lookup(name);
         (index, &mut self.symbols[index])
     }
@@ -473,17 +474,17 @@ impl ReaderState {
         //      $accept -> start_symbol
 
         // Build  rlhs
-        let mut rlhs: Vec<crate::Symbol> = vec![crate::Symbol(0), crate::Symbol(0), crate::Symbol(start_symbol as i16)];
+        let mut rlhs: Vec<Symbol> = vec![Symbol(0), Symbol(0), Symbol(start_symbol as i16)];
         rlhs.extend(
             self.lhs[PREDEFINED_RULES..nrules]
                 .iter()
-                .map(|&lhs| crate::Symbol(map_to_packed[lhs] as i16)),
+                .map(|&lhs| Symbol(map_to_packed[lhs] as i16)),
         );
 
-        let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(crate::Symbol(0)); self.nitems()];
+        let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(Symbol(0)); self.nitems()];
         ritem[0] = SymbolOrRule::rule(1);
-        ritem[1] = SymbolOrRule::symbol(crate::Symbol(map_to_packed[goal_symbol]));
-        ritem[2] = SymbolOrRule::symbol(crate::Symbol(0));
+        ritem[1] = SymbolOrRule::symbol(Symbol(map_to_packed[goal_symbol]));
+        ritem[2] = SymbolOrRule::symbol(Symbol(0));
         ritem[3] = SymbolOrRule::rule(2);
 
         let mut rrhs: Vec<i16> = vec![0; nrules + 1];
@@ -503,7 +504,7 @@ impl ReaderState {
                     prec2 = symbols[pitem[j]].prec as u8;
                     assoc = symbols[pitem[j]].assoc;
                 }
-                ritem[j] = SymbolOrRule::symbol(crate::Symbol(map_to_packed[pitem[j]]));
+                ritem[j] = SymbolOrRule::symbol(Symbol(map_to_packed[pitem[j]]));
                 j += 1;
             }
 
@@ -551,7 +552,7 @@ impl ReaderState {
             gram.ntokens, gram.nvars, gram.nsyms
         );
         for i in 0..gram.nsyms {
-            if gram.is_var(crate::Symbol(i as i16)) {
+            if gram.is_var(Symbol(i as i16)) {
                 debug!("    {:3}  var    {}", i, gram.name[i]);
             } else {
                 debug!("    {:3}  token  {}", i, gram.name[i]);
