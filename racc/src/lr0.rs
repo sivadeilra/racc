@@ -317,7 +317,7 @@ fn set_derives(gram: &Grammar) -> DerivesTable {
     for lhs in gram.start_symbol..gram.nsyms {
         d.start_key();
         for r in 0..gram.nrules {
-            if gram.rlhs[r] as usize == lhs {
+            if gram.rlhs[r].0 as usize == lhs {
                 d.push_value(r as Rule);
             }
         }
@@ -359,8 +359,8 @@ pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
             };
             if empty {
                 let sym = gram.rlhs[rule as usize];
-                if !nullable[sym as usize] {
-                    nullable[sym as usize] = true;
+                if !nullable[sym.0 as usize] {
+                    nullable[sym.0 as usize] = true;
                     done = false;
                 }
             }

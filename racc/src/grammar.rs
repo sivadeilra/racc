@@ -46,7 +46,7 @@ pub struct Grammar {
     // len = nitems
     pub ritem: Vec<SymbolOrRule>,
 
-    pub rlhs: Vec<i16>,
+    pub rlhs: Vec<Symbol>,
     pub rrhs: Vec<i16>,
     pub rprec: Vec<i16>,
     pub rassoc: Vec<u8>,
@@ -75,7 +75,7 @@ impl Grammar {
 
     pub fn rule_to_str(&self, r: Rule) -> String {
         let mut s = String::new();
-        s.push_str(&format!("(r{}) {} :", r, self.name[self.rlhs[r as usize] as usize]));
+        s.push_str(&format!("(r{}) {} :", r, self.name(self.rlhs[r as usize])));
         for &it in self.ritem[self.rrhs[r as usize] as usize..].iter() {
             if it.is_rule() {
                 break;

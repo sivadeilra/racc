@@ -473,11 +473,11 @@ impl ReaderState {
         //      $accept -> start_symbol
 
         // Build  rlhs
-        let mut rlhs: Vec<i16> = vec![0, 0, start_symbol as i16];
+        let mut rlhs: Vec<crate::Symbol> = vec![crate::Symbol(0), crate::Symbol(0), crate::Symbol(start_symbol as i16)];
         rlhs.extend(
             self.lhs[PREDEFINED_RULES..nrules]
                 .iter()
-                .map(|&lhs| map_to_packed[lhs] as i16),
+                .map(|&lhs| crate::Symbol(map_to_packed[lhs] as i16)),
         );
 
         let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(crate::Symbol(0)); self.nitems()];
@@ -577,7 +577,7 @@ impl ReaderState {
         for i in 2..gram.nrules {
             line.push_str(&format!(
                 "    [r{:-3} ]   {:-10} : ",
-                i, gram.name[gram.rlhs[i] as usize]
+                i, gram.name[gram.rlhs[i].0 as usize]
             ));
             while gram.ritem[k].is_symbol() {
                 line.push_str(&format!(" {}", gram.name(gram.ritem[k].as_symbol())));

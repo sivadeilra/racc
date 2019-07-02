@@ -185,7 +185,7 @@ fn output_rule_data(gram: &Grammar) -> TokenStream {
     let mut data: Vec<i16> = Vec::new();
     data.push(gram.value[gram.start_symbol]);
     for i in 3..gram.nrules {
-        data.push(gram.value[gram.rlhs[i] as usize]);
+        data.push(gram.value[gram.rlhs[i].0 as usize]);
     }
     make_table_i16(Ident::new("YYLHS", Span::call_site()), &data)
 }

@@ -181,8 +181,8 @@ fn print_first_derives(gram: &Grammar, first_derives: &Bitmat) {
 
 fn rule_to_string(gram: &Grammar, rule: usize) -> String {
     let mut result = String::new();
-    let rlhs = gram.rlhs[rule] as usize;
-    result.push_str(&format!("(r{}) {} : ", rule, gram.name[rlhs]));
+    let rlhs = gram.rlhs[rule];
+    result.push_str(&format!("(r{}) {} : ", rule, gram.name(rlhs)));
 
     for i in gram.rrhs[rule]..gram.rrhs[rule + 1] - 1 {
         let rhs = gram.ritem[i as usize];
