@@ -137,7 +137,7 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
 }
 
 fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> State {
-    let goal = Symbol(gram.ritem[1]);
+    let goal = gram.ritem[1].as_symbol();
     let mut final_state: State = 0;
     for &ts in lr0.shifts.values(0).iter().rev() {
         final_state = ts;

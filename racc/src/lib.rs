@@ -271,12 +271,52 @@ macro_rules! int_alias {
     }
 }
 
-mod aliases {
+// There appears to be a bug in Rust where:
+//
+// crate root contains a type T which is: struct T(i16);
+// mod foo {
+//     pub struct K {
+//         pub t: T
+//     }
+// }
+//
+// and rustc thinks that T is being exposed as public for the entire crate.
+// Use mod aliases to work around this.
 
+mod aliases {
+use super::*;
 
 // Type aliases
 int_alias!{type Symbol = i16;}
 int_alias!{type Var = i16;}
+
+#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct SymbolOrRule(i16);
+
+impl SymbolOrRule {
+    pub fn rule(rule: Rule) -> SymbolOrRule {
+        assert!(rule > 0);
+        Self(-rule)
+    }
+    pub fn symbol(symbol: Symbol) -> SymbolOrRule {
+        assert!(symbol.0 >= 0);
+        Self(symbol.0)
+    }
+    pub fn is_symbol(&self) -> bool {
+        self.0 >= 0
+    }
+    pub fn is_rule(&self) -> bool {
+        self.0 < 0
+    }
+    pub fn as_symbol(&self) -> Symbol {
+        assert!(self.is_symbol());
+        Symbol(self.0)
+    }
+    pub fn as_rule(&self) -> Rule {
+        assert!(self.is_rule());
+        -self.0
+    }
+}
 
 }
 
@@ -285,6 +325,8 @@ use aliases::*;
 type Rule = i16;
 type State = i16;
 type Item = i16;
+
+
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {

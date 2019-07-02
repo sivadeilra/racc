@@ -25,6 +25,7 @@
 // then all variables.  The plhs and ritem tables are read, and are used to
 // produce several new tables.
 
+use crate::SymbolOrRule;
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
 use log::debug;
@@ -479,11 +480,11 @@ impl ReaderState {
                 .map(|&lhs| map_to_packed[lhs] as i16),
         );
 
-        let mut ritem: Vec<i16> = vec![0; self.nitems()];
-        ritem[0] = -1;
-        ritem[1] = map_to_packed[goal_symbol];
-        ritem[2] = 0;
-        ritem[3] = -2;
+        let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(crate::Symbol(0)); self.nitems()];
+        ritem[0] = SymbolOrRule::rule(1);
+        ritem[1] = SymbolOrRule::symbol(crate::Symbol(map_to_packed[goal_symbol]));
+        ritem[2] = SymbolOrRule::symbol(crate::Symbol(0));
+        ritem[3] = SymbolOrRule::rule(2);
 
         let mut rrhs: Vec<i16> = vec![0; nrules + 1];
         rrhs[0] = 0;
@@ -502,7 +503,7 @@ impl ReaderState {
                     prec2 = symbols[pitem[j]].prec as u8;
                     assoc = symbols[pitem[j]].assoc;
                 }
-                ritem[j] = map_to_packed[pitem[j]];
+                ritem[j] = SymbolOrRule::symbol(crate::Symbol(map_to_packed[pitem[j]]));
                 j += 1;
             }
 
@@ -510,7 +511,7 @@ impl ReaderState {
             // This is important; it is used by the code in lr0::save_reductions()
             // in order to realize when we've reached the end of a rule, and so can
             // emit a reduction in a particular state.
-            ritem[j] = -(i as i16);
+            ritem[j] = SymbolOrRule::rule(i as i16);
             j += 1;
             if gram_rprec[i] == UNDEFINED {
                 gram_rprec[i] = prec2 as i16;
@@ -561,10 +562,10 @@ impl ReaderState {
 
         for i in 0..gram.ritem.len() {
             let it = gram.ritem[i];
-            if it < 0 {
-                debug!("    {:3} --> {:3}", i, it);
+            if it.is_rule() {
+                debug!("    {:3} --> r{:3}", i, it.as_rule());
             } else {
-                debug!("    {:3} --> {:3} {}", i, it, gram.name[it as usize]);
+                debug!("    {:3} --> {:3} {}", i, it.as_symbol().0, gram.name[it.as_symbol().0 as usize]);
             }
         }
 
@@ -578,8 +579,8 @@ impl ReaderState {
                 "    [r{:-3} ]   {:-10} : ",
                 i, gram.name[gram.rlhs[i] as usize]
             ));
-            while gram.ritem[k] >= 0 {
-                line.push_str(&format!(" {}", gram.name[gram.ritem[k] as usize]));
+            while gram.ritem[k].is_symbol() {
+                line.push_str(&format!(" {}", gram.name(gram.ritem[k].as_symbol())));
                 k += 1;
             }
             k += 1;

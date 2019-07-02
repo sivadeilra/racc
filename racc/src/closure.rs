@@ -13,7 +13,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
         for &rule in derives.values(gram.start_symbol + row) {
-            let symbol = Symbol(gram.ritem[gram.rrhs[rule as usize] as usize]);
+            let symbol = gram.ritem[gram.rrhs[rule as usize] as usize].as_symbol();
             if gram.is_var(symbol) {
                 eff.set(row, symbol.0 as usize - gram.start_symbol);
             }
@@ -127,8 +127,8 @@ pub fn closure(
     for &ni in nucleus.iter() {
         assert!(ni >= 0);
         let symbol = gram.ritem[ni as usize];
-        if symbol >= 0 && gram.is_var(Symbol(symbol)) {
-            let dsp: usize = ((symbol as usize) - gram.ntokens) * first_derives.rowsize;
+        if symbol.is_symbol() && gram.is_var(symbol.as_symbol()) {
+            let dsp: usize = ((symbol.as_symbol().0 as usize) - gram.ntokens) * first_derives.rowsize;
             for i in 0..rulesetsize {
                 rule_set.data[i] |= first_derives.data[dsp + i];
             }
@@ -186,7 +186,7 @@ fn rule_to_string(gram: &Grammar, rule: usize) -> String {
 
     for i in gram.rrhs[rule]..gram.rrhs[rule + 1] - 1 {
         let rhs = gram.ritem[i as usize];
-        result.push_str(&format!(" {}", gram.name[rhs as usize]));
+        result.push_str(&format!(" {}", gram.name(rhs.as_symbol())));
     }
     result
 }

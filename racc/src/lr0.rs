@@ -66,9 +66,10 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut kernel_items_count: usize = 0;
     let mut symbol_count: Vec<i16> = vec![0; gram.nsyms];
     for &symbol in gram.ritem.iter() {
-        if symbol >= 0 {
+        if symbol.is_symbol() {
+            let symbol = symbol.as_symbol();
             kernel_items_count += 1;
-            symbol_count[symbol as usize] += 1;
+            symbol_count[symbol.0 as usize] += 1;
         }
     }
     let mut kernels = KernelTable {
@@ -234,17 +235,18 @@ fn print_core(gram: &Grammar, state: State, items: &[Item]) {
 
         // back up to start of this rule
         let mut rhs_first = rhs;
-        while rhs_first > 0 && gram.ritem[rhs_first - 1] >= 0 {
+        while rhs_first > 0 && gram.ritem[rhs_first - 1].is_symbol() {
             rhs_first -= 1;
         }
 
         // loop through rhs
         let mut j = rhs_first;
-        while gram.ritem[j] >= 0 {
+        while gram.ritem[j].is_symbol() {
+            let s = gram.ritem[j].as_symbol();
             if j == rhs {
                 line.push_str(" .");
             }
-            line.push_str(&format!(" {}", gram.name[gram.ritem[j] as usize]));
+            line.push_str(&format!(" {}", gram.name(s)));
             j += 1;
         }
         if j == rhs {
@@ -274,14 +276,15 @@ fn new_item_sets(
 
     for &item in item_set.iter() {
         let symbol = gram.ritem[item as usize];
-        if symbol > 0 {
-            let mut ksp = kernels_end[symbol as usize];
+        if symbol.is_symbol() {
+            let symbol = symbol.as_symbol();
+            let mut ksp = kernels_end[symbol.0 as usize];
             if ksp == -1 {
-                shift_symbol.push(Symbol(symbol));
-                ksp = kernels_base[symbol as usize];
+                shift_symbol.push(symbol);
+                ksp = kernels_base[symbol.0 as usize];
             }
             kernels_items[ksp as usize] = (item + 1) as i16;
-            kernels_end[symbol as usize] = ksp + 1;
+            kernels_end[symbol.0 as usize] = ksp + 1;
         }
     }
 }
@@ -294,8 +297,8 @@ fn new_item_sets(
 fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTableBuilder<Rule>) {
     for &i in item_set {
         let item = gram.ritem[i as usize];
-        if item < 0 {
-            rules.push_value(-item);
+        if item.is_rule() {
+            rules.push_value(item.as_rule());
         }
     }
 }
@@ -343,19 +346,19 @@ pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
         let mut i = 1;
         while i < gram.ritem.len() {
             let mut empty = true;
-            let mut j: i16;
-            loop {
-                j = gram.ritem[i];
-                if j < 0 {
-                    break;
+            let rule = loop {
+                let sr = gram.ritem[i];
+                if sr.is_rule() {
+                    break sr.as_rule();
                 }
-                if !nullable[j as usize] {
+                let sym = sr.as_symbol();
+                if !nullable[sym.0 as usize] {
                     empty = false;
                 }
                 i += 1;
-            }
+            };
             if empty {
-                let sym = gram.rlhs[(-j) as usize];
+                let sym = gram.rlhs[rule as usize];
                 if !nullable[sym as usize] {
                     nullable[sym as usize] = true;
                     done = false;

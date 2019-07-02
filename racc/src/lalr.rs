@@ -35,7 +35,7 @@ fn set_max_rhs(gram: &Grammar) -> usize {
     let mut length: usize = 0;
     let mut max: usize = 0;
     for &item in gram.ritem.iter() {
-        if item >= 0 {
+        if item.is_symbol() {
             length += 1;
         } else {
             if length > max {
@@ -225,11 +225,11 @@ fn build_relations(
             states.push(state1 as i16);
             let mut stateno = state1;
             let mut rp: usize = gram.rrhs[rule as usize] as usize;
-            while gram.ritem[rp] >= 0 {
-                let symbol2 = gram.ritem[rp];
+            while gram.ritem[rp].is_symbol() {
+                let symbol2 = gram.ritem[rp].as_symbol();
                 for &shift in lr0.shifts.values(stateno as usize) {
                     stateno = shift;
-                    if lr0.accessing_symbol[stateno as State] == Symbol(symbol2) {
+                    if lr0.accessing_symbol[stateno as State] == symbol2 {
                         break;
                     }
                 }
@@ -245,12 +245,15 @@ fn build_relations(
             while !done_flag {
                 done_flag = true;
                 rp -= 1;
-                if gram.ritem[rp] >= 0 && gram.is_var_old(gram.ritem[rp]) {
-                    length -= 1;
-                    stateno = states[length];
-                    edge.push(map_goto(gram, gotos, stateno, Symbol(gram.ritem[rp])) as i16);
-                    if nullable[Symbol(gram.ritem[rp])] && length > 0 {
-                        done_flag = false;
+                if gram.ritem[rp].is_symbol() {
+                    let gram_ritem = gram.ritem[rp].as_symbol();
+                    if gram.is_var(gram_ritem) {
+                        length -= 1;
+                        stateno = states[length];
+                        edge.push(map_goto(gram, gotos, stateno, gram_ritem) as i16);
+                        if nullable[gram_ritem] && length > 0 {
+                            done_flag = false;
+                        }
                     }
                 }
             }

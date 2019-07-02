@@ -1,5 +1,6 @@
 /* keyword codes */
 
+use crate::SymbolOrRule;
 use crate::Var;
 use crate::Symbol;
 use crate::Rule;
@@ -43,7 +44,7 @@ pub struct Grammar {
     pub nrules: usize,
 
     // len = nitems
-    pub ritem: Vec<i16>,
+    pub ritem: Vec<SymbolOrRule>,
 
     pub rlhs: Vec<i16>,
     pub rrhs: Vec<i16>,
@@ -68,23 +69,27 @@ impl Grammar {
         self.ritem.len()
     }
 
+    pub fn name(&self, symbol: Symbol) -> &syn::Ident {
+        &self.name[symbol.0 as usize]
+    }
+
     pub fn rule_to_str(&self, r: Rule) -> String {
         let mut s = String::new();
         s.push_str(&format!("(r{}) {} :", r, self.name[self.rlhs[r as usize] as usize]));
-        for it in self.ritem[self.rrhs[r as usize] as usize..].iter() {
-            if *it < 0 {
+        for &it in self.ritem[self.rrhs[r as usize] as usize..].iter() {
+            if it.is_rule() {
                 break;
             } // end of this rule
-            s.push_str(&format!(" {}", self.name[*it as usize]));
+            s.push_str(&format!(" {}", self.name(it.as_symbol())));
         }
         s
     }
 
-    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a [i16] {
+    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a [SymbolOrRule] {
         let rhs = self.rrhs[r];
         assert!(rhs >= 0);
         let mut end = rhs as usize;
-        while self.ritem[end] >= 0 {
+        while self.ritem[end].is_symbol() {
             end += 1;
         }
         &self.ritem[rhs as usize..end]
