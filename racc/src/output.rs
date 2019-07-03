@@ -1,4 +1,4 @@
-use crate::{Rule, State};
+use crate::{Rule, State, Symbol, StateOrRule};
 use crate::grammar::Grammar;
 use crate::lalr::GotoMap;
 use crate::mkpar::{ActionCode, YaccParser};
@@ -11,12 +11,14 @@ use syn::{Block, Ident, Type};
 
 use std::i16;
 
+
+
 struct ActionsTable {
     nvectors: usize,
     tally: Vec<i16>,
     width: Vec<i16>,
-    froms: Vec<Vec<i16>>,
-    tos: Vec<Vec<i16>>,
+    froms: Vec<Vec<StateOrRule>>,
+    tos: Vec<Vec<StateOrRule>>,
 }
 
 // Given a constructed parser (a description of a state machine which parses
@@ -58,7 +60,7 @@ pub fn output_parser_to_ast(
     // println!("tokens consts done");
 
     // Generate YYFINAL constant.
-    let yyfinal = parser.final_state as usize;
+    let yyfinal = parser.final_state.0 as usize;
     items.extend(quote! {
         const YYFINAL: usize = #yyfinal;
     });
@@ -322,30 +324,34 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     let mut tally: Vec<i16> = vec![0; nvectors];
     let mut width: Vec<i16> = vec![0; nvectors];
     let mut froms: Vec<Vec<i16>> = vec![Vec::new(); nvectors];
-    let mut tos: Vec<Vec<State>> = vec![Vec::new(); nvectors];
-    let mut actionrow: Vec<Rule> = vec![Rule(0); 2 * gram.ntokens];
+    let mut tos: Vec<Vec<i16>> = vec![Vec::new(); nvectors];
+    let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens]; // contains EITHER Rule or State
 
     for (i, actions) in parser.actions.iter().enumerate() {
         if actions.len() != 0 {
             debug!("    state={}", i);
             for ii in actionrow.iter_mut() {
-                *ii = Rule(0);
+                *ii = 0;
             }
 
             let mut shiftcount: usize = 0;
             let mut reducecount: usize = 0;
             for p in actions.iter() {
                 if p.suppressed == 0 {
-                    if p.action_code == ActionCode::Shift {
-                        shiftcount += 1;
-                        actionrow[p.symbol.0 as usize] = p.number;
-                    // debug!("        shift {}", p.number);
-                    } else if p.action_code == ActionCode::Reduce
-                        && p.number != parser.default_reductions[i]
-                    {
-                        reducecount += 1;
-                        actionrow[(p.symbol.0 as usize) + gram.ntokens] = p.number;
-                        // debug!("        reduce {}", p.number);
+                    match p.action_code {
+                        ActionCode::Shift(to_state) => {
+                            shiftcount += 1;
+                            actionrow[p.symbol.0 as usize] = to_state.0;
+                            // debug!("        shift {}", p.number);
+                        }
+                        ActionCode::Reduce(reduce_rule) => {
+                            if reduce_rule != parser.default_reductions[i] {
+                                reducecount += 1;
+                                actionrow[(p.symbol.0 as usize) + gram.ntokens] = reduce_rule.0;
+                                // debug!("        reduce {}", p.number);
+                            }
+                        }
+
                     }
                 }
             }
@@ -366,11 +372,11 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[j] != Rule(0) {
+                    if actionrow[j] != 0 {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[j].0);
+                        s.push(actionrow[j]);
                         debug!(
                             "        shift for token {} {}, pushing r={} s={}",
                             j, gram.name[j], gram.value[j], actionrow[j]
@@ -388,17 +394,17 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[gram.ntokens + j] != Rule(0) {
+                    if actionrow[gram.ntokens + j] != 0 {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[gram.ntokens + j].0 - 2);
+                        s.push(actionrow[gram.ntokens + j] - 2);
                         debug!(
                             "        reduce for token {} {}, pushing r={} s={}",
                             j,
                             gram.name[j],
                             gram.value[j],
-                            actionrow[gram.ntokens + j].0 - 2
+                            actionrow[gram.ntokens + j] - 2
                         );
                     }
                 }
@@ -421,11 +427,11 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 }
 
 // state_count.len() == nstates
-fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: usize, state_count: &mut [i16]) -> usize {
-    let m = gotos.goto_map[symbol - gram.ntokens] as usize;
-    let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
+fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: Symbol, state_count: &mut [i16]) -> State {
+    let m = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize] as usize;
+    let n = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize + 1] as usize;
     if m == n {
-        return 0;
+        return State(0);
     }
 
     for c in state_count.iter_mut() {
@@ -433,7 +439,7 @@ fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: usize, state_count: &mu
     }
 
     for &state in gotos.to_state[m..n].iter() {
-        state_count[state as usize] += 1;
+        state_count[state.0 as usize] += 1;
     }
 
     let mut max = 0;
@@ -447,19 +453,19 @@ fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: usize, state_count: &mu
 
     debug!("default_goto({}) = {}", symbol, default_state);
 
-    default_state
+    State(default_state as i16)
 }
 
 fn save_column(
     gram: &Grammar,
     nstates: usize,
     gotos: &GotoMap,
-    symbol: usize,
-    default_state: usize,
+    symbol: Symbol,
+    default_state: State,
     act: &mut ActionsTable,
 ) {
-    let m = gotos.goto_map[symbol - gram.ntokens] as usize;
-    let n = gotos.goto_map[symbol - gram.ntokens + 1] as usize;
+    let m = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize] as usize;
+    let n = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize + 1] as usize;
     debug!(
         "save_column: symbol={} default_state={} m={} n={}",
         symbol, default_state, m, n
@@ -467,7 +473,7 @@ fn save_column(
 
     let mut count: usize = 0;
     for i in m..n {
-        if (gotos.to_state[i] as usize) != default_state {
+        if (gotos.to_state[i]) != default_state {
             debug!("    to_state[{}]={}", i, gotos.to_state[i]);
             count += 1;
         }
@@ -477,16 +483,16 @@ fn save_column(
         return;
     }
 
-    let mut spf: Vec<i16> = Vec::with_capacity(count);
-    let mut spt: Vec<State> = Vec::with_capacity(count);
+    let mut spf: Vec<StateOrRule> = Vec::with_capacity(count);
+    let mut spt: Vec<StateOrRule> = Vec::with_capacity(count);
     for i in m..n {
-        if (gotos.to_state[i] as usize) != default_state {
-            spf.push(gotos.from_state[i]);
-            spt.push(gotos.to_state[i]);
+        if gotos.to_state[i] != default_state {
+            spf.push(gotos.from_state[i].0);
+            spt.push(gotos.to_state[i].0);
         }
     }
 
-    let symno = (gram.value[symbol] as usize) + 2 * nstates;
+    let symno = (gram.value[symbol.0 as usize] as usize) + 2 * nstates;
     let spf_width = spf[spf.len() - 1] - spf[0] + 1;
     act.froms[symno] = spf;
     act.tos[symno] = spt;
@@ -504,19 +510,20 @@ fn goto_actions(
     nstates: usize,
     gotos: &GotoMap,
     act: &mut ActionsTable,
-) -> Vec<i16> {
+) -> Vec<StateOrRule> {
     debug!("goto_actions");
 
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
-    let mut dgoto_table: Vec<i16> = Vec::with_capacity(gram.nvars); // the table that we are building
+    let mut dgoto_table: Vec<StateOrRule> = Vec::with_capacity(gram.nvars); // the table that we are building
 
-    let k = default_goto(gram, gotos, gram.start_symbol + 1, &mut state_count);
-    dgoto_table.push(k as i16);
-    save_column(gram, nstates, gotos, gram.start_symbol + 1, k, act);
+    let k = default_goto(gram, gotos, Symbol(gram.start_symbol as i16 + 1), &mut state_count);
+    dgoto_table.push(k.0);
+    save_column(gram, nstates, gotos, Symbol(gram.start_symbol as i16 + 1), k, act);
 
     for i in (gram.start_symbol + 2)..gram.nsyms {
+        let i = Symbol(i as i16);
         let k = default_goto(gram, gotos, i, &mut state_count);
-        dgoto_table.push(k as i16);
+        dgoto_table.push(k.0);
         save_column(gram, nstates, gotos, i, k, act);
     }
 

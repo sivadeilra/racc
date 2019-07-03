@@ -262,16 +262,30 @@ macro_rules! int_alias {
         #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
         pub struct $name(pub $int);
 
+/*
         impl core::convert::TryFrom<$name> for usize {
             type Error = core::num::TryFromIntError;
             fn try_from(i: $name) -> Result<usize, Self::Error> {
                 usize::try_from(i.0)
             }
         }
+*/
 
         impl core::fmt::Display for $name {
             fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 self.0.fmt(fmt)
+            }
+        }
+
+        impl core::convert::From<$name> for usize {
+            fn from(i: $name) -> usize {
+                i.0 as usize
+            }
+        }
+
+        impl core::convert::From<usize> for $name {
+            fn from(i: usize) -> $name  {
+                $name(i as $int)
             }
         }
     }
@@ -290,55 +304,55 @@ macro_rules! int_alias {
 // Use mod aliases to work around this.
 
 mod aliases {
-use super::*;
+    use super::*;
 
-// Type aliases
-int_alias!{type Symbol = i16;}
-int_alias!{type Var = i16;}
-int_alias!{type Rule = i16;}
+    // Type aliases
+    int_alias!{type Symbol = i16;}
+    int_alias!{type Var = i16;}
+    int_alias!{type Rule = i16;}
+    int_alias!{type State = i16;}
 
-impl Rule {
-    pub const RULE_NULL: Rule = Rule(0);
-    pub const RULE_0: Rule = Rule(0);
-    pub const RULE_1: Rule = Rule(1);
-    pub const RULE_2: Rule = Rule(2);
-}
-
-
-
-#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct SymbolOrRule(i16);
-
-impl SymbolOrRule {
-    pub fn rule(rule: Rule) -> SymbolOrRule {
-        assert!(rule.0 > 0);
-        Self(-rule.0)
+    impl Rule {
+        pub const RULE_NULL: Rule = Rule(0);
+        pub const RULE_0: Rule = Rule(0);
+        pub const RULE_1: Rule = Rule(1);
+        pub const RULE_2: Rule = Rule(2);
     }
-    pub fn symbol(symbol: Symbol) -> SymbolOrRule {
-        assert!(symbol.0 >= 0);
-        Self(symbol.0)
-    }
-    pub fn is_symbol(&self) -> bool {
-        self.0 >= 0
-    }
-    pub fn is_rule(&self) -> bool {
-        self.0 < 0
-    }
-    pub fn as_symbol(&self) -> Symbol {
-        assert!(self.is_symbol());
-        Symbol(self.0)
-    }
-    pub fn as_rule(&self) -> Rule {
-        assert!(self.is_rule());
-        Rule(-self.0)
-    }
-}
 
+
+    #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+    pub struct SymbolOrRule(i16);
+
+    impl SymbolOrRule {
+        pub fn rule(rule: Rule) -> SymbolOrRule {
+            assert!(rule.0 > 0);
+            Self(-rule.0)
+        }
+        pub fn symbol(symbol: Symbol) -> SymbolOrRule {
+            assert!(symbol.0 >= 0);
+            Self(symbol.0)
+        }
+        pub fn is_symbol(&self) -> bool {
+            self.0 >= 0
+        }
+        pub fn is_rule(&self) -> bool {
+            self.0 < 0
+        }
+        pub fn as_symbol(&self) -> Symbol {
+            assert!(self.is_symbol());
+            Symbol(self.0)
+        }
+        pub fn as_rule(&self) -> Rule {
+            assert!(self.is_rule());
+            Rule(-self.0)
+        }
+    }
+
+    pub type StateOrRule = i16;
 }
 
 use aliases::*;
 
-type State = i16;
 type Item = i16;
 
 #[proc_macro]

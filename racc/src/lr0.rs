@@ -126,7 +126,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     while this_state < states.num_keys() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(gram, this_state as State, states.values(this_state as usize));
+        print_core(gram, State(this_state as i16), states.values(this_state as usize));
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
@@ -198,7 +198,7 @@ fn find_or_create_state(
 
     // Search for an existing Core that has the same items.
     for &state in this_state_set.iter() {
-        if symbol_items == states.values(state as usize) {
+        if symbol_items == states.values(state) {
             return state;
         }
     }
@@ -207,7 +207,7 @@ fn find_or_create_state(
 
     assert!(states.num_keys() < 0x7fff);
 
-    let new_state = states.num_keys() as State;
+    let new_state: State = states.num_keys().into();
 
     for &symbol_item in symbol_items {
         states.push_value(symbol_item);

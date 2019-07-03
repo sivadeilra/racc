@@ -15,7 +15,7 @@ pub struct LALROutput {
 pub struct GotoMap {
     pub ngotos: usize,
     pub goto_map: Vec<i16>,
-    pub from_state: Vec<i16>,
+    pub from_state: Vec<State>,
     /// Var -> State
     pub to_state: Vec<State>,
 }
@@ -86,10 +86,11 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     temp_map.push(ngotos as i16);
     // at this point, temp_map and goto_map have identical length and contents
 
-    let mut from_state: Vec<i16> = vec![0; ngotos];
-    let mut to_state: Vec<State> = vec![0; ngotos];
+    let mut from_state: Vec<State> = vec![State(0); ngotos];
+    let mut to_state: Vec<State> = vec![State(0); ngotos];
 
     for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
+        let sp_state = State(sp_state as i16);
         for &state2 in sp_shifts.iter().rev() {
             let symbol = lr0.accessing_symbol[state2];
             if gram.is_token(symbol) {
@@ -98,7 +99,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
             let k = temp_map[symbol.0 as usize - gram.ntokens] as usize;
             temp_map[symbol.0 as usize - gram.ntokens] += 1;
-            from_state[k] = sp_state as State;
+            from_state[k] = sp_state;
             to_state[k] = state2;
         }
     }
@@ -161,7 +162,7 @@ fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &TVec<Symbol, bool>, 
 
     for i in 0..ngotos {
         let stateno = gotos.to_state[i];
-        let shifts = lr0.shifts.values(stateno as usize);
+        let shifts = lr0.shifts.values(stateno.0 as usize);
 
         if !shifts.is_empty() {
             let mut j: usize = 0;
@@ -209,7 +210,7 @@ fn build_relations(
     let ngotos = gotos.ngotos;
     let mut includes: Vec<Vec<i16>> = vec![Vec::new(); ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1); // temporary, reused in loops
-    let mut states: Vec<i16> = Vec::with_capacity(set_max_rhs(gram) + 1); // temporary, reused in loops
+    let mut states: Vec<State> = Vec::with_capacity(set_max_rhs(gram) + 1); // temporary, reused in loops
     let mut lookback: Vec<Vec<i16>> = vec![Vec::new(); lr0.reductions.num_values()];
 
     for i in 0..ngotos {
@@ -223,20 +224,20 @@ fn build_relations(
         // while lr0.derives.derives_rules[rulep] >= 0 {
         for &rule in lr0.derives.values(symbol1.0 as usize) {
             assert!(states.len() == 0);
-            states.push(state1 as i16);
+            states.push(state1);
             let mut stateno = state1;
             let rule_rhs = gram.rule_rhs_syms(rule);
             let mut rp: usize = 0; // index into rule_rhs
             while rp < rule_rhs.len() {
                 let symbol2 = rule_rhs[rp].as_symbol();
-                for &shift in lr0.shifts.values(stateno as usize) {
+                for &shift in lr0.shifts.values(stateno.0 as usize) {
                     stateno = shift;
                     if lr0.accessing_symbol[stateno as State] == symbol2 {
                         break;
                     }
                 }
 
-                states.push(stateno as i16);
+                states.push(stateno);
                 rp += 1;
             }
 
@@ -278,8 +279,8 @@ fn add_lookback_edge(
     reductions: &Reductions,
     lookback: &mut Vec<Vec<i16>>,
 ) {
-    let range = reductions.values_range(stateno as usize);
-    let state_rules = reductions.values(stateno as usize);
+    let range = reductions.values_range(stateno);
+    let state_rules = reductions.values(stateno);
     for (i, &r) in range.clone().zip(state_rules) {
         if r == ruleno {
             lookback[i].insert(0, gotono as i16);

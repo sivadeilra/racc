@@ -30,7 +30,8 @@ impl<T> RampTable<T> {
         self.table.len()
     }
 
-    pub fn values(&self, key: usize) -> &[T] {
+    pub fn values<Q: Into<usize>>(&self, key: Q) -> &[T] {
+        let key: usize = key.into();
         let start = self.index[key];
         let end = self.index[key + 1];
         &self.table[start..end]
@@ -42,7 +43,8 @@ impl<T> RampTable<T> {
         &mut self.table[start..end]
     }
 
-    pub fn values_range(&self, key: usize) -> Range<usize> {
+    pub fn values_range<Q: Into<usize>>(&self, key: Q) -> Range<usize> {
+        let key: usize = key.into();
         self.index[key]..self.index[key + 1]
     }
 
