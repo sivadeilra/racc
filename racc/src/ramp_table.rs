@@ -52,6 +52,14 @@ impl<T> RampTable<T> {
         &self.table
     }
 
+    pub fn value(&self, value_index: usize) -> &T {
+        &self.table[value_index]
+    }
+
+    pub fn value_mut(&mut self, value_index: usize) -> &mut T {
+        &mut self.table[value_index]
+    }
+
     pub fn iter_sets(&self) -> impl Iterator<Item = (usize, &[T])> {
         self.index
             .windows(2)

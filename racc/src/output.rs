@@ -8,10 +8,7 @@ use quote::quote;
 use std::cmp;
 use std::iter::repeat;
 use syn::{Block, Ident, Type};
-
 use std::i16;
-
-
 
 struct ActionsTable {
     nvectors: usize,
@@ -428,9 +425,8 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
 
 // state_count.len() == nstates
 fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: Symbol, state_count: &mut [i16]) -> State {
-    let m = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize] as usize;
-    let n = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize + 1] as usize;
-    if m == n {
+    let var_gotos = gotos.values(gram.symbol_to_var(symbol));
+    if var_gotos.is_empty() {
         return State(0);
     }
 
@@ -438,8 +434,8 @@ fn default_goto(gram: &Grammar, gotos: &GotoMap, symbol: Symbol, state_count: &m
         *c = 0;
     }
 
-    for &state in gotos.to_state[m..n].iter() {
-        state_count[state.0 as usize] += 1;
+    for &entry in var_gotos.iter() {
+        state_count[entry.to_state.0 as usize] += 1;
     }
 
     let mut max = 0;
@@ -464,17 +460,16 @@ fn save_column(
     default_state: State,
     act: &mut ActionsTable,
 ) {
-    let m = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize] as usize;
-    let n = gotos.goto_map[gram.symbol_to_var(symbol).0 as usize + 1] as usize;
+    let  symbol_gotos = gotos.values(gram.symbol_to_var(symbol));
     debug!(
-        "save_column: symbol={} default_state={} m={} n={}",
-        symbol, default_state, m, n
+        "save_column: symbol={} default_state={} symbol_gotos={:?}",
+        symbol, default_state, symbol_gotos
     );
 
     let mut count: usize = 0;
-    for i in m..n {
-        if (gotos.to_state[i]) != default_state {
-            debug!("    to_state[{}]={}", i, gotos.to_state[i]);
+    for &entry in  symbol_gotos.iter() {
+        if entry.to_state != default_state {
+            // debug!("    to_state[{}]={}", i, entry.to_state);
             count += 1;
         }
     }
@@ -485,10 +480,10 @@ fn save_column(
 
     let mut spf: Vec<StateOrRule> = Vec::with_capacity(count);
     let mut spt: Vec<StateOrRule> = Vec::with_capacity(count);
-    for i in m..n {
-        if gotos.to_state[i] != default_state {
-            spf.push(gotos.from_state[i].0);
-            spt.push(gotos.to_state[i].0);
+    for &entry in symbol_gotos.iter() {
+        if entry.to_state != default_state {
+            spf.push(entry.from_state.0);
+            spt.push(entry.to_state.0);
         }
     }
 
