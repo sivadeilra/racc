@@ -1,4 +1,4 @@
-use crate::Rule;
+use crate::{Rule, State};
 use crate::grammar::Grammar;
 use crate::lalr::GotoMap;
 use crate::mkpar::{ActionCode, YaccParser};
@@ -42,7 +42,7 @@ pub fn output_parser_to_ast(
     let yydefred: Vec<i16> = parser
         .default_reductions
         .iter()
-        .map(|s| if *s != 0 { *s - 2 } else { 0 })
+        .map(|&s| if s != Rule(0) { s.0 - 2 } else { 0 })
         .collect();
     items.extend({ make_table_i16(Ident::new("YYDEFRED", sp), &yydefred) });
 
@@ -113,7 +113,7 @@ pub fn output_parser_to_ast(
         };
 
         let pat_value = rule - 2;
-        let rule_str = gram.rule_to_str(rule as Rule);
+        let rule_str = gram.rule_to_str(Rule(rule as i16));
         action_arms.extend(quote! {
             #pat_value => {
                 // log::debug!("reduce: {}", #rule_str);
@@ -231,7 +231,7 @@ fn make_table_string(name: Ident, strings: &[String]) -> TokenStream {
 
 fn make_rule_text_table(span: Span, gram: &Grammar) -> TokenStream {
     let rules: Vec<String> = (2..gram.nrules)
-        .map(|rule| gram.rule_to_str(rule as Rule))
+        .map(|rule| gram.rule_to_str(Rule(rule as i16)))
         .collect();
     make_table_string(Ident::new("YYRULES", span), &rules)
 }
@@ -321,15 +321,15 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
     let nvectors = 2 * nstates + gram.nvars;
     let mut tally: Vec<i16> = vec![0; nvectors];
     let mut width: Vec<i16> = vec![0; nvectors];
-    let mut froms: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
-    let mut tos: Vec<Vec<i16>> = repeat(Vec::new()).take(nvectors).collect();
-    let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens];
+    let mut froms: Vec<Vec<i16>> = vec![Vec::new(); nvectors];
+    let mut tos: Vec<Vec<State>> = vec![Vec::new(); nvectors];
+    let mut actionrow: Vec<Rule> = vec![Rule(0); 2 * gram.ntokens];
 
     for (i, actions) in parser.actions.iter().enumerate() {
         if actions.len() != 0 {
             debug!("    state={}", i);
             for ii in actionrow.iter_mut() {
-                *ii = 0;
+                *ii = Rule(0);
             }
 
             let mut shiftcount: usize = 0;
@@ -338,13 +338,13 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 if p.suppressed == 0 {
                     if p.action_code == ActionCode::Shift {
                         shiftcount += 1;
-                        actionrow[p.symbol as usize] = p.number;
+                        actionrow[p.symbol.0 as usize] = p.number;
                     // debug!("        shift {}", p.number);
                     } else if p.action_code == ActionCode::Reduce
                         && p.number != parser.default_reductions[i]
                     {
                         reducecount += 1;
-                        actionrow[(p.symbol as usize) + gram.ntokens] = p.number;
+                        actionrow[(p.symbol.0 as usize) + gram.ntokens] = p.number;
                         // debug!("        reduce {}", p.number);
                     }
                 }
@@ -366,11 +366,11 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[j] != 0 {
+                    if actionrow[j] != Rule(0) {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[j]);
+                        s.push(actionrow[j].0);
                         debug!(
                             "        shift for token {} {}, pushing r={} s={}",
                             j, gram.name[j], gram.value[j], actionrow[j]
@@ -388,17 +388,17 @@ fn token_actions(gram: &Grammar, parser: &YaccParser) -> ActionsTable {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[gram.ntokens + j] != 0 {
+                    if actionrow[gram.ntokens + j] != Rule(0) {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[gram.ntokens + j] - 2);
+                        s.push(actionrow[gram.ntokens + j].0 - 2);
                         debug!(
                             "        reduce for token {} {}, pushing r={} s={}",
                             j,
                             gram.name[j],
                             gram.value[j],
-                            actionrow[gram.ntokens + j] - 2
+                            actionrow[gram.ntokens + j].0 - 2
                         );
                     }
                 }
@@ -478,7 +478,7 @@ fn save_column(
     }
 
     let mut spf: Vec<i16> = Vec::with_capacity(count);
-    let mut spt: Vec<i16> = Vec::with_capacity(count);
+    let mut spt: Vec<State> = Vec::with_capacity(count);
     for i in m..n {
         if (gotos.to_state[i] as usize) != default_state {
             spf.push(gotos.from_state[i]);

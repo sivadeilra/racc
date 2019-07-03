@@ -12,7 +12,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
         for &rule in derives.values(gram.start_symbol + row) {
-            let symbol = gram.ritem[gram.rrhs[rule as usize] as usize].as_symbol();
+            let symbol = gram.ritem(gram.rrhs(rule)).as_symbol();
             if gram.is_var(symbol) {
                 eff.set(row, symbol.0 as usize - gram.start_symbol);
             }
@@ -81,7 +81,7 @@ pub fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     assert!(eff.cols == gram.nvars);
     for (i, j) in eff.iter_ones() {
         for &rule in derives.values(gram.start_symbol + j) {
-            first_derives.set(i, rule as usize);
+            first_derives.set(i, rule.0 as usize);
         }
     }
 

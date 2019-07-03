@@ -1,5 +1,6 @@
 /* keyword codes */
 
+use crate::Item;
 use crate::SymbolOrRule;
 use crate::Var;
 use crate::Symbol;
@@ -46,17 +47,22 @@ pub struct Grammar {
     // len = nitems
     pub ritem: Vec<SymbolOrRule>,
 
+    /// Rule -> Symbol
+    /// Gives the LHS symbol of each rule
     pub rlhs: Vec<Symbol>,
-    pub rrhs: Vec<i16>,
+
+    /// Rule -> Item
+    /// Contains the item (index in ritem) of the first symbol on the RHS.
+    pub rrhs: Vec<Item>,
+
+    /// Rule -> precedence
     pub rprec: Vec<i16>,
+
+    /// Rule -> associativity
     pub rassoc: Vec<u8>,
 }
 
 impl Grammar {
-    pub fn is_var_old(&self, s: i16) -> bool {
-        (s as usize) >= self.start_symbol
-    }
-
     pub fn is_var(&self, s: Symbol) -> bool {
         (s.0 as usize) >= self.start_symbol
     }
@@ -69,20 +75,28 @@ impl Grammar {
         self.ritem.len()
     }
 
+    pub fn ritem(&self, item: Item) -> SymbolOrRule {
+        self.ritem[item as usize]
+    }
+
     pub fn name(&self, symbol: Symbol) -> &syn::Ident {
         &self.name[symbol.0 as usize]
     }
 
     pub fn rule_to_str(&self, r: Rule) -> String {
         let mut s = String::new();
-        s.push_str(&format!("(r{}) {} :", r, self.name(self.rlhs[r as usize])));
-        for &it in self.ritem[self.rrhs[r as usize] as usize..].iter() {
-            if it.is_rule() {
-                break;
-            } // end of this rule
-            s.push_str(&format!(" {}", self.name(it.as_symbol())));
+        s.push_str(&format!("(r{}) {} :", r, self.name(self.rlhs(r))));
+        for &sym in self.rule_rhs_syms(r).iter() {
+            let sym = sym.as_symbol();
+            s.push_str(&format!(" {}", self.name(sym)));
         }
         s
+    }
+
+    pub fn rule_rhs_syms(&self, rule: Rule) -> &[SymbolOrRule] {
+        let start = self.rrhs[rule.0 as usize] as usize;
+        let end = self.rrhs[rule.0 as usize + 1] as usize - 1;
+        &self.ritem[start..end]
     }
 
     pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a [SymbolOrRule] {
@@ -108,5 +122,25 @@ impl Grammar {
         } else {
             None
         }
+    }
+
+    pub fn iter_var_syms(&self) -> impl Iterator<Item=Symbol> {
+        (self.start_symbol..self.nsyms).map(move |i| Symbol(i as i16))
+    }
+
+    pub fn iter_token_syms(&self) -> impl Iterator<Item=Symbol> {
+        (0..self.start_symbol).map(move |i| Symbol(i as i16))
+    }
+
+    pub fn iter_rules(&self) -> impl Iterator<Item=Rule> {
+        (0..self.nrules).map(move |i| Rule(i as i16))
+    }
+
+    pub fn rlhs(&self, rule: Rule) -> Symbol {
+        self.rlhs[rule.0 as usize]
+    }
+
+    pub fn rrhs(&self, rule: Rule) -> Item {
+        self.rrhs[rule.0 as usize]
     }
 }

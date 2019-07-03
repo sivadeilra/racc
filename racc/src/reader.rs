@@ -27,6 +27,7 @@
 
 use crate::Symbol;
 use crate::SymbolOrRule;
+use crate::Rule;
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
 use log::debug;
@@ -482,10 +483,10 @@ impl ReaderState {
         );
 
         let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(Symbol(0)); self.nitems()];
-        ritem[0] = SymbolOrRule::rule(1);
+        ritem[0] = SymbolOrRule::rule(Rule::RULE_1);
         ritem[1] = SymbolOrRule::symbol(Symbol(map_to_packed[goal_symbol]));
         ritem[2] = SymbolOrRule::symbol(Symbol(0));
-        ritem[3] = SymbolOrRule::rule(2);
+        ritem[3] = SymbolOrRule::rule(Rule::RULE_2);
 
         let mut rrhs: Vec<i16> = vec![0; nrules + 1];
         rrhs[0] = 0;
@@ -512,7 +513,7 @@ impl ReaderState {
             // This is important; it is used by the code in lr0::save_reductions()
             // in order to realize when we've reached the end of a rule, and so can
             // emit a reduction in a particular state.
-            ritem[j] = SymbolOrRule::rule(i as i16);
+            ritem[j] = SymbolOrRule::rule(Rule(i as i16));
             j += 1;
             if gram_rprec[i] == UNDEFINED {
                 gram_rprec[i] = prec2 as i16;

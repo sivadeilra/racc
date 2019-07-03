@@ -96,7 +96,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // other states, by examining a state, the next variables that could be
     // encountered in those states, and finding the transitive closure over same.
     // Initializes the state table.
-    states.push_entry(derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs[item as usize]));
+    states.push_entry(derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs(item)));
     accessing_symbol.push(INITIAL_STATE_SYMBOL);
 
     // Contains the set of states that are relevant for each item.  Each entry in this
@@ -199,7 +199,7 @@ fn find_or_create_state(
     // Search for an existing Core that has the same items.
     for &state in this_state_set.iter() {
         if symbol_items == states.values(state as usize) {
-            return state as i16;
+            return state;
         }
     }
 
@@ -295,10 +295,10 @@ fn new_item_sets(
 /// negative, then we have reached the end of the symbols on the rhs of a rule.  See
 /// the code in reader::pack_grammar(), where this information is set up.
 fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTableBuilder<Rule>) {
-    for &i in item_set {
-        let item = gram.ritem[i as usize];
-        if item.is_rule() {
-            rules.push_value(item.as_rule());
+    for &item in item_set {
+        let sr = gram.ritem(item);
+        if sr.is_rule() {
+            rules.push_value(sr.as_rule());
         }
     }
 }
@@ -311,14 +311,14 @@ fn set_derives(gram: &Grammar) -> DerivesTable {
     // note: 'derives' appears to waste its token space; consider adjusting indices
     // so that only var indices are used
     let mut d = RampTableBuilder::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
-    for _ in 0..gram.start_symbol {
+    for _ in gram.iter_token_syms() {
         d.start_key();
     }
-    for lhs in gram.start_symbol..gram.nsyms {
+    for lhs in gram.iter_var_syms() {
         d.start_key();
-        for r in 0..gram.nrules {
-            if gram.rlhs[r].0 as usize == lhs {
-                d.push_value(r as Rule);
+        for rule in gram.iter_rules() {
+            if gram.rlhs(rule) == lhs {
+                d.push_value(rule as Rule);
             }
         }
     }
@@ -358,7 +358,7 @@ pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
                 i += 1;
             };
             if empty {
-                let sym = gram.rlhs[rule as usize];
+                let sym = gram.rlhs(rule);
                 if !nullable[sym.0 as usize] {
                     nullable[sym.0 as usize] = true;
                     done = false;

@@ -1,4 +1,4 @@
-use crate::Symbol;
+use crate::{Symbol, Rule};
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
@@ -17,8 +17,8 @@ pub const LEFT: u8 = 1;
 pub const RIGHT: u8 = 2;
 
 pub struct ParserAction {
-    pub symbol: i16,
-    pub number: i16,
+    pub symbol: Symbol,
+    pub number: Rule,
     pub prec: i16,
     pub action_code: ActionCode,
     pub assoc: u8,
@@ -27,7 +27,8 @@ pub struct ParserAction {
 
 pub struct YaccParser {
     pub actions: Vec<Vec<ParserAction>>,
-    pub default_reductions: Vec<i16>,
+    /// State -> Rule
+    pub default_reductions: Vec<Rule>,
     pub final_state: State,
 }
 impl YaccParser {
@@ -72,8 +73,8 @@ fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserActi
         let symbol = lr0.accessing_symbol[k as State];
         if gram.is_token(symbol) {
             actions.push(ParserAction {
-                symbol: symbol.0,
-                number: k,
+                symbol: symbol,
+                number: Rule(k),
                 prec: gram.prec[symbol.0 as usize],
                 action_code: ActionCode::Shift,
                 assoc: gram.assoc[symbol.0 as usize],
@@ -96,13 +97,13 @@ fn add_reductions(
     for (i, &rule) in range.zip(state_rules) {
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
-                add_reduce(gram, actions, rule as usize, j as i16);
+                add_reduce(gram, actions, rule, Symbol(j as i16));
             }
         }
     }
 }
 
-fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, symbol: i16) {
+fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, symbol: Symbol) {
     let mut next: usize = 0;
     while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
@@ -118,7 +119,7 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
     while next < actions.len()
         && actions[next].symbol == symbol
         && actions[next].action_code == ActionCode::Reduce
-        && (actions[next].number as usize) < ruleno
+        && actions[next].number < ruleno
     {
         next += 1;
     }
@@ -127,10 +128,10 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: usize, sy
         next,
         ParserAction {
             symbol: symbol,
-            number: ruleno as i16,
-            prec: gram.rprec[ruleno],
+            number: ruleno,
+            prec: gram.rprec[ruleno.0 as usize],
             action_code: ActionCode::Reduce,
-            assoc: gram.rassoc[ruleno],
+            assoc: gram.rassoc[ruleno.0 as usize],
             suppressed: 0,
         },
     );
@@ -155,7 +156,7 @@ fn report_unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
     for pi in parser.iter() {
         for action in pi.iter() {
             if action.action_code == ActionCode::Reduce && action.suppressed == 0 {
-                rules_used[action.number as usize] = true;
+                rules_used[action.number.0 as usize] = true;
             }
         }
     }
@@ -189,14 +190,14 @@ fn remove_conflicts_for_state(pvec: &mut [ParserAction], is_final_state: bool) -
     let mut srcount: usize = 0;
     let mut rrcount: usize = 0;
     if !pvec.is_empty() {
-        let mut symbol: i16 = pvec[0].symbol;
+        let mut symbol = pvec[0].symbol;
         let mut pref: usize = 0; // index into pvec
         for p in 1..pvec.len() {
             // p is index into pvec
             if pvec[p].symbol != symbol {
                 pref = p;
                 symbol = pvec[p].symbol;
-            } else if is_final_state && symbol == 0 {
+            } else if is_final_state && symbol == Symbol(0) {
                 srcount += 1;
                 pvec[p].suppressed = 1;
             } else if pvec[pref].action_code == ActionCode::Shift {
@@ -239,23 +240,21 @@ fn total_conflicts(srtotal: usize, rrtotal: usize) {
 }
 
 // Computese the default reduction for a single state.
-fn sole_reduction(parser: &[ParserAction]) -> i16 {
+fn sole_reduction(parser: &[ParserAction]) -> Rule {
     let mut count: usize = 0;
-    let mut ruleno: i16 = 0;
+    let mut ruleno = Rule(0);
     for p in parser.iter() {
         if p.action_code == ActionCode::Shift && p.suppressed == 0 {
             debug!("    found unsuppressed shift, returning 0");
-            return 0;
-        } else if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
-            if ruleno > 0 && p.number != ruleno {
-                debug!(
-                    "    found unsuppressed reduce for rule {}, returning 0",
-                    ruleno
-                );
-                return 0;
+            return Rule(0);
+        }
+        if p.action_code == ActionCode::Reduce && p.suppressed == 0 {
+            if ruleno > Rule(0) && p.number != ruleno {
+                debug!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
+                return Rule(0);
             }
             debug!("    found unsuppressed reduce");
-            if p.symbol != 1 {
+            if p.symbol != Symbol(1) {
                 count += 1;
                 debug!("    count --> {}", count);
             }
@@ -266,14 +265,14 @@ fn sole_reduction(parser: &[ParserAction]) -> i16 {
 
     if count == 0 {
         debug!("    did not find any reductions");
-        return 0;
+        return Rule(0);
     }
     debug!("    selected default reduction {}", ruleno);
     ruleno
 }
 
 /// Computes the default reduction for each state.
-pub fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<i16> {
+pub fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<Rule> {
     debug!("default_reductions");
     parser
         .iter()

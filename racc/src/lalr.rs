@@ -16,7 +16,8 @@ pub struct GotoMap {
     pub ngotos: usize,
     pub goto_map: Vec<i16>,
     pub from_state: Vec<i16>,
-    pub to_state: Vec<i16>,
+    /// Var -> State
+    pub to_state: Vec<State>,
 }
 
 #[allow(non_snake_case)]
@@ -86,7 +87,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // at this point, temp_map and goto_map have identical length and contents
 
     let mut from_state: Vec<i16> = vec![0; ngotos];
-    let mut to_state: Vec<i16> = vec![0; ngotos];
+    let mut to_state: Vec<State> = vec![0; ngotos];
 
     for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
         for &state2 in sp_shifts.iter().rev() {
@@ -215,7 +216,7 @@ fn build_relations(
         assert!(edge.len() == 0);
         assert!(states.len() == 0);
 
-        let state1: State = gotos.from_state[i];
+        let state1 = gotos.from_state[i];
         let symbol1 = lr0.accessing_symbol[gotos.to_state[i]];
 
         // let mut rulep: usize = lr0.derives.derives[symbol1] as usize;
@@ -224,9 +225,10 @@ fn build_relations(
             assert!(states.len() == 0);
             states.push(state1 as i16);
             let mut stateno = state1;
-            let mut rp: usize = gram.rrhs[rule as usize] as usize;
-            while gram.ritem[rp].is_symbol() {
-                let symbol2 = gram.ritem[rp].as_symbol();
+            let rule_rhs = gram.rule_rhs_syms(rule);
+            let mut rp: usize = 0; // index into rule_rhs
+            while rp < rule_rhs.len() {
+                let symbol2 = rule_rhs[rp].as_symbol();
                 for &shift in lr0.shifts.values(stateno as usize) {
                     stateno = shift;
                     if lr0.accessing_symbol[stateno as State] == symbol2 {
@@ -238,23 +240,19 @@ fn build_relations(
                 rp += 1;
             }
 
-            add_lookback_edge(stateno as State, rule, i, &lr0.reductions, &mut lookback);
+            add_lookback_edge(stateno, rule, i, &lr0.reductions, &mut lookback);
 
             let mut length = states.len() - 1;
-            let mut done_flag = false;
-            while !done_flag {
-                done_flag = true;
+            while rp > 0 {
                 rp -= 1;
-                if gram.ritem[rp].is_symbol() {
-                    let gram_ritem = gram.ritem[rp].as_symbol();
-                    if gram.is_var(gram_ritem) {
-                        length -= 1;
-                        stateno = states[length];
-                        edge.push(map_goto(gram, gotos, stateno, gram_ritem) as i16);
-                        if nullable[gram_ritem] && length > 0 {
-                            done_flag = false;
-                        }
-                    }
+                let gram_ritem = rule_rhs[rp].as_symbol();
+                if !gram.is_var(gram_ritem) {
+                    break;
+                }
+                length -= 1;
+                edge.push(map_goto(gram, gotos, states[length], gram_ritem) as i16);
+                if !nullable[gram_ritem] || length == 0 {
+                    break;
                 }
             }
             states.clear(); // prepare for next use

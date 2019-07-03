@@ -268,6 +268,12 @@ macro_rules! int_alias {
                 usize::try_from(i.0)
             }
         }
+
+        impl core::fmt::Display for $name {
+            fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                self.0.fmt(fmt)
+            }
+        }
     }
 }
 
@@ -289,14 +295,24 @@ use super::*;
 // Type aliases
 int_alias!{type Symbol = i16;}
 int_alias!{type Var = i16;}
+int_alias!{type Rule = i16;}
+
+impl Rule {
+    pub const RULE_NULL: Rule = Rule(0);
+    pub const RULE_0: Rule = Rule(0);
+    pub const RULE_1: Rule = Rule(1);
+    pub const RULE_2: Rule = Rule(2);
+}
+
+
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct SymbolOrRule(i16);
 
 impl SymbolOrRule {
     pub fn rule(rule: Rule) -> SymbolOrRule {
-        assert!(rule > 0);
-        Self(-rule)
+        assert!(rule.0 > 0);
+        Self(-rule.0)
     }
     pub fn symbol(symbol: Symbol) -> SymbolOrRule {
         assert!(symbol.0 >= 0);
@@ -314,7 +330,7 @@ impl SymbolOrRule {
     }
     pub fn as_rule(&self) -> Rule {
         assert!(self.is_rule());
-        -self.0
+        Rule(-self.0)
     }
 }
 
@@ -322,11 +338,8 @@ impl SymbolOrRule {
 
 use aliases::*;
 
-type Rule = i16;
 type State = i16;
 type Item = i16;
-
-
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
