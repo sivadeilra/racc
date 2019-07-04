@@ -2,7 +2,7 @@ use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use crate::lr0::Reductions;
-use crate::{Rule, State, Symbol, Token};
+use crate::{Rule, State, Token};
 use log::debug;
 use log::warn;
 
@@ -19,6 +19,8 @@ impl ActionCode {
             false
         }
     }
+
+    #[allow(dead_code)]
     pub fn is_reduce(&self) -> bool {
         if let ActionCode::Reduce(_) = self {
             true

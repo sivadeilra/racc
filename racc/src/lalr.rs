@@ -51,6 +51,9 @@ fn set_max_rhs(gram: &Grammar) -> usize {
     max
 }
 
+/// Builds the GotoMap: Var -> [FromTo]
+///
+/// GotoMap::num_keys() = nvars
 fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
     // Var -> count

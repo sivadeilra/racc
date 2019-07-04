@@ -2,9 +2,9 @@
 
 use crate::Item;
 use crate::Rule;
-use crate::{Symbol, Token};
 use crate::SymbolOrRule;
 use crate::Var;
+use crate::{Symbol, Token};
 
 pub const TOKEN: u8 = 0;
 
@@ -128,6 +128,7 @@ impl Grammar {
         Symbol(self.ntokens as i16 + var.0)
     }
 
+    #[allow(dead_code)]
     pub fn symbol_to_var_opt(&self, sym: Symbol) -> Option<Var> {
         let su = sym.0 as usize;
         if su >= self.ntokens {
@@ -135,6 +136,10 @@ impl Grammar {
         } else {
             None
         }
+    }
+
+    pub fn iter_vars(&self) -> impl Iterator<Item = Var> {
+        (0..self.nvars).map(move |i| Var(i as i16))
     }
 
     pub fn iter_var_syms(&self) -> impl Iterator<Item = Symbol> {

@@ -7,7 +7,7 @@ use crate::util::Bitv32;
 use crate::{Item, Rule, State};
 use log::debug;
 
-use crate::aliases::Symbol;
+use crate::Symbol;
 
 pub const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
 

@@ -319,8 +319,6 @@ macro_rules! int_alias {
 // Use mod aliases to work around this.
 
 mod aliases {
-    use super::*;
-
     // Type aliases
     int_alias! {type Symbol = i16;}
     int_alias! {type Var = i16;}

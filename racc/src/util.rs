@@ -213,3 +213,9 @@ impl Bitv32 {
         bit_vector_iter_ones(&self.data, self.nbits)
     }
 }
+
+pub fn fill_copy<T: Copy>(dst: &mut [T], value: T) {
+    for ii in dst.iter_mut() {
+        *ii = value;
+    }
+}
