@@ -266,17 +266,14 @@ fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccPars
     token_actions(gram, parser, &mut act.froms, &mut act.tos);
     let default_goto_table = default_goto_table(nstates, gotos);
     goto_actions(gram, nstates, gotos, &default_goto_table, &mut act.froms, &mut act.tos);
-
     let order = sort_actions(&mut act);
-
     let packed = packing::pack_table(parser.nstates(), &order, &act);
 
-    let mut items: TokenStream = TokenStream::new();
+    let mut items = TokenStream::new();
     items.extend(make_table_i16(
         Ident::new("YYDGOTO", span),
         &default_goto_table.iter().map(|s| s.0).collect::<Vec<i16>>(),
     ));
-
     items.extend(make_table_i16_signed(
         Ident::new("YYSINDEX", span),
         &packed.base[..nstates],
@@ -289,18 +286,8 @@ fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccPars
         Ident::new("YYGINDEX", span),
         &packed.base[nstates * 2..act.nvectors],
     ));
-
-    // todo, emit const YYTABLESIZE = m_high
-    items.extend(make_table_i16(
-        Ident::new("YYTABLE", span),
-        &packed.table[..packed.high + 1],
-    ));
-
-    items.extend(make_table_i16(
-        Ident::new("YYCHECK", span),
-        &packed.check[..packed.high + 1],
-    ));
-
+    items.extend(make_table_i16(Ident::new("YYTABLE", span), &packed.table));
+    items.extend(make_table_i16(Ident::new("YYCHECK", span), &packed.check));
     items
 }
 
@@ -309,7 +296,7 @@ fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccPars
 ///
 /// * S: first region,  length = nstates, contains: shifts
 /// * R: second region, length = nstates, contains: reduces
-/// * V:  third region,  length = nvars,   contains: var stuff
+/// * V: third region,  length = nvars,   contains: var stuff
 ///
 /// nvectors = sum of the lengths of these regions = 2 * nstates + gram.nvars
 pub struct ActionsTable {
@@ -353,7 +340,6 @@ impl ActionsTable {
 /// (See commit 1cc0a3174406eb28f767af0b91fc850e9364aaf2 for the last code
 /// based on the old algorithm.)
 fn token_actions(gram: &Grammar, parser: &YaccParser,
-    //act: &mut ActionsTable,
     froms: &mut Vec<Vec<i16>>,
     tos: &mut Vec<Vec<StateOrRule>>,
     ) {
@@ -422,10 +408,9 @@ fn goto_actions(
         let default_state = default_goto_table[var.index()];
 
         // was: save_column
-        let symbol_gotos = gotos.values(var);
-        let mut spf: Vec<StateOrRule> = Vec::new();
-        let mut spt: Vec<StateOrRule> = Vec::new();
-        for &entry in symbol_gotos.iter() {
+        let mut spf = Vec::new();
+        let mut spt = Vec::new();
+        for &entry in gotos.values(var).iter() {
             if entry.to_state != default_state {
                 spf.push(entry.from_state.0);
                 spt.push(entry.to_state.0);
@@ -659,6 +644,9 @@ mod packing {
             pack.pos[i] = place;
             pack.base[order[i]] = place;
         }
+
+        pack.check.truncate(pack.high + 1);
+        pack.table.truncate(pack.high + 1);
 
         PackedTables {
             base: pack.base,
