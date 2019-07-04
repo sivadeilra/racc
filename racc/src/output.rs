@@ -270,9 +270,9 @@ fn output_actions(
 
     token_actions(gram, parser, &mut act);
     let dgoto = goto_actions(gram, nstates, gotos, &mut act);
-    let (nentries, order) = sort_actions(&mut act);
+    let order = sort_actions(&mut act);
 
-    let packed = pack_table(parser.nstates(), nentries, &order, &act);
+    let packed = pack_table(parser.nstates(), &order, &act);
 
     let mut items: Vec<TokenStream> = Vec::new();
     // debug!("emitting tables");
@@ -308,14 +308,20 @@ fn output_actions(
     items
 }
 
+/// All of the vectors defined in ActionsTable have the same length (nvectors)
+/// and the indices are assigned in the same way.
+///
+/// * S0: first region,  length = nstates, contains: shifts
+/// * S1: second region, length = nstates, contains: reduces
+/// * V:  third region,  length = nvars,   contains: var stuff
+///
+/// nvectors = sum of the lengths of these regions = 2 * nstates + gram.nvars
 struct ActionsTable {
     /// nvectors = 2 * nstates + gram.nvars
     nvectors: usize,
 
-    // len = nvectors
-    // tally[0..nstates] =  shift_count for each state
-    // tally[nstates..nstates * 2] = reduce_count for each  state
-    // actually, it seems more complex than that
+    // tally[S0] = shift_count for each state
+    // tally[S1] = reduce_count for each state
     tally: Vec<i16>,
 
     // len = nstates *  2
@@ -327,7 +333,7 @@ impl ActionsTable {
     pub fn new(nstates: usize, nvars: usize) -> Self {
         let nvectors = 2 * nstates + nvars;
         Self {
-            nvectors: nvectors,
+            nvectors,
             tally: vec![0; nvectors],
             width: vec![0; nvectors],
             froms: vec![Vec::new(); nvectors],
@@ -342,27 +348,27 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
     let nstates = parser.nstates();
     let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens]; // contains EITHER Rule or State
 
-    for (i, actions) in parser.actions.iter().enumerate() {
+    for (state, actions) in parser.actions.iter().enumerate() {
         if actions.len() != 0 {
-            debug!("    state={}", i);
+            debug!("    state={}", state);
             for ii in actionrow.iter_mut() {
                 *ii = 0;
             }
 
             let mut shiftcount: usize = 0;
             let mut reducecount: usize = 0;
-            for p in actions.iter() {
-                if p.suppressed == 0 {
-                    match p.action_code {
+            for action in actions.iter() {
+                if action.suppressed == 0 {
+                    match action.action_code {
                         ActionCode::Shift(to_state) => {
                             shiftcount += 1;
-                            actionrow[p.symbol.0 as usize] = to_state.0;
+                            actionrow[action.symbol.0 as usize] = to_state.0;
                             // debug!("        shift {}", p.number);
                         }
                         ActionCode::Reduce(reduce_rule) => {
-                            if reduce_rule != parser.default_reductions[i] {
+                            if reduce_rule != parser.default_reductions[state] {
                                 reducecount += 1;
-                                actionrow[(p.symbol.0 as usize) + gram.ntokens] = reduce_rule.0;
+                                actionrow[(action.symbol.0 as usize) + gram.ntokens] = reduce_rule.0;
                                 // debug!("        reduce {}", p.number);
                             }
                         }
@@ -375,10 +381,10 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                 shiftcount, reducecount
             );
 
-            act.tally[i] = shiftcount as i16;
-            act.tally[nstates + i] = reducecount as i16;
-            act.width[i] = 0;
-            act.width[nstates + i] = 0;
+            act.tally[state] = shiftcount as i16;
+            act.tally[nstates + state] = reducecount as i16;
+            act.width[state] = 0;
+            act.width[nstates + state] = 0;
 
             if shiftcount > 0 {
                 let mut r: Vec<i16> = Vec::with_capacity(shiftcount);
@@ -397,9 +403,9 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                         );
                     }
                 }
-                act.froms[i] = r;
-                act.tos[i] = s;
-                act.width[i] = max - min + 1;
+                act.froms[state] = r;
+                act.tos[state] = s;
+                act.width[state] = max - min + 1;
             }
 
             if reducecount > 0 {
@@ -422,12 +428,12 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                         );
                     }
                 }
-                act.froms[nstates + i] = r;
-                act.tos[nstates + i] = s;
-                act.width[nstates + i] = max - min + 1;
+                act.froms[nstates + state] = r;
+                act.tos[nstates + state] = s;
+                act.width[nstates + state] = max - min + 1;
             }
         } else {
-            debug!("    state={} has no actions", i);
+            debug!("    state={} has no actions", state);
         }
     }
 }
@@ -443,9 +449,9 @@ fn goto_actions(
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
     let mut dgoto_table: Vec<StateOrRule> = Vec::with_capacity(gram.nvars); // the table that we are building
     for s in gram.iter_var_syms().skip(1) {
-        let k = default_goto(gram, gotos, s, &mut state_count);
-        dgoto_table.push(k.0);
-        save_column(gram, nstates, gotos, s, k, act);
+        let default_state = default_goto(gram, gotos, s, &mut state_count);
+        dgoto_table.push(default_state.0);
+        save_column(gram, nstates, gotos, s, default_state, act);
     }
     dgoto_table
 }
@@ -521,54 +527,37 @@ fn save_column(
     act.tos[symno] = spt;
     act.tally[symno] = count as i16;
     act.width[symno] = spf_width;
-    debug!(
-        "    tally[{}]={} width[{}]={}",
-        symno, act.tally[symno], symno, act.width[symno]
-    );
+    debug!("    tally[{}]={} width[{}]={}", symno, count, symno, spf_width);
 }
 
-fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
+/// Reads ActionTable.tally and width and produces a sorted index vector over
+/// those two parallel vectors. The vector is sorted in descending order of 'width',
+/// then descending order of tally.
+fn sort_actions_old(act: &ActionsTable) -> Vec<usize> {
     debug!("sort_actions() nvectors={}", act.nvectors);
 
-    let mut order: Vec<usize> = vec![0; act.nvectors];
-    let mut nentries: isize = 0;
-
+    let mut order: Vec<usize> = Vec::with_capacity(act.nvectors);
     for i in 0..act.nvectors {
-        debug!("tally[{}]={}", i, act.tally[i]);
-        if act.tally[i] > 0 {
-            let t = act.tally[i];
+        let t = act.tally[i];
+        if t > 0 {
+            debug!("tally[{}]={}", i, t);
             let w = act.width[i];
-            let mut j: isize = nentries - 1;
+            let mut j = order.len();
             debug!("    t={} w={} j={}", t, w, j);
 
-            while j >= 0 && (act.width[order[j as usize]] < w) {
+            while j > 0 && (act.width[order[j - 1]] < w) {
                 j -= 1;
-                debug!("    j-- to {}, because width < w", j);
             }
 
-            while j >= 0
-                && (act.width[order[j as usize]] == w)
-                && (act.tally[order[j as usize]] < t)
+            while j > 0
+                && (act.width[order[j - 1]] == w)
+                && (act.tally[order[j - 1]] < t)
             {
                 j -= 1;
-                debug!("    j-- to {}, because tally < t", j);
             }
 
-            let mut k = nentries - 1;
-            while k > j {
-                debug!(
-                    "        order[{}] = order[{}] = {} (shifting)",
-                    (k + 1) as usize,
-                    k as usize,
-                    order[k as usize]
-                );
-                order[(k + 1) as usize] = order[k as usize];
-                k -= 1;
-            }
-
-            debug!("        order[{}] = {}", (j + 1) as usize, i);
-            order[(j + 1) as usize] = i;
-            nentries += 1;
+            debug!("        order[{}] = {}", j as usize, i);
+            order.insert(j, i);
         }
     }
 
@@ -576,10 +565,37 @@ fn sort_actions(act: &ActionsTable) -> (usize, Vec<usize>) {
     for &n in order.iter() {
         debug!("    {}", n);
     }
-    debug!("nentries={}", nentries);
-
-    (nentries as usize, order)
+    debug!("nentries={}", order.len());
+    order
 }
+
+fn sort_actions_new(act: &ActionsTable) -> Vec<usize> {
+    use std::cmp::Ordering;
+    let mut order: Vec<usize> = Vec::with_capacity(act.nvectors);
+    for i in 0..act.nvectors {
+        let t = act.tally[i];
+        if t > 0 {
+            order.push(i);
+        }
+    }
+    order.sort_by(|&a, &b| {
+        let a = a as usize;
+        let b = b as usize;
+        match act.width[b].cmp(&act.width[a]) {
+            Ordering::Equal => act.tally[b].cmp(&act.tally[a]),
+            c => c
+        }
+    });
+    order
+}
+
+fn sort_actions(act: &ActionsTable) -> Vec<usize> {
+    let old = sort_actions_old(act);
+    let new = sort_actions_new(act);
+    assert_eq!(old, new);
+    new
+}
+
 
 // The function matching_vector determines if the vector specified by
 // the input parameter matches a previously considered vector. The
@@ -624,7 +640,7 @@ fn matching_vector(pack: &PackState<'_>, vector: usize) -> Option<usize> {
     return None;
 }
 
-fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> isize {
+fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> i16 {
     // debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
     let act = pack.act;
     let i = pack.order[vector];
@@ -698,7 +714,7 @@ fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> isize {
             pack.lowzero += 1;
         }
 
-        return j;
+        return j as i16;
     }
 }
 
@@ -717,17 +733,16 @@ struct PackState<'a> {
 
 fn pack_table<'a>(
     nstates: usize,
-    nentries: usize,
     order: &'a [usize],
     act: &'a ActionsTable,
 ) -> PackState<'a> {
-    debug!("pack_table: nentries={}", nentries);
+    debug!("pack_table: nentries={}", order.len());
 
     let initial_maxtable = 1000;
 
     let mut pack = PackState {
         base: vec![0; act.nvectors],
-        pos: vec![0; nentries],
+        pos: vec![0; order.len()],
         table: vec![0; initial_maxtable],
         check: vec![-1; initial_maxtable],
         lowzero: 0,
@@ -737,14 +752,14 @@ fn pack_table<'a>(
         act: act,
     };
 
-    for i in 0..nentries {
-        let place: isize = match matching_vector(&pack, i) {
-            Some(state) => pack.base[state] as isize,
+    for i in 0..order.len() {
+        let place = match matching_vector(&pack, i) {
+            Some(state) => pack.base[state],
             None => pack_vector(&mut pack, i),
         };
 
-        pack.pos[i] = place as i16;
-        pack.base[order[i]] = place as i16;
+        pack.pos[i] = place;
+        pack.base[order[i]] = place;
     }
 
     pack
