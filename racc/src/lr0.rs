@@ -39,7 +39,7 @@ impl LR0Output {
 }
 
 struct KernelTable {
-    base: Vec<i16>, // values in this array are indexes into the KernelTable::items array
+    base: Vec<Item>, // values in this array are indexes into the KernelTable::items array
     items: Vec<Item>,
 }
 
@@ -74,15 +74,15 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     }
     let mut kernels = KernelTable {
         base: {
-            let mut kernel_base: Vec<i16> = vec![0; gram.nsyms];
+            let mut kernel_base: Vec<Item> = vec![Item(0); gram.nsyms];
             let mut count: usize = 0;
             for i in 0..gram.nsyms {
-                kernel_base[i] = count as i16;
+                kernel_base[i] = Item(count as i16);
                 count += symbol_count[i] as usize;
             }
             kernel_base
         },
-        items: vec![0; kernel_items_count],
+        items: vec![Item(0); kernel_items_count],
     };
 
     // values in this array are indexes into the KernelTable::items array
@@ -96,7 +96,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // other states, by examining a state, the next variables that could be
     // encountered in those states, and finding the transitive closure over same.
     // Initializes the state table.
-    states.push_entry(derives.values(gram.start_symbol).iter().map(|&item| gram.rrhs(item)));
+    states.push_entry(derives.values(gram.start()).iter().map(|&item| gram.rrhs(item)));
     accessing_symbol.push(INITIAL_STATE_SYMBOL);
 
     // Contains the set of states that are relevant for each item.  Each entry in this
@@ -109,7 +109,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // These vectors are used for building tables during each state.
     // It is inefficient to allocate and free these vectors within
     // the scope of processing each state.
-    let mut item_set: Vec<i16> = Vec::with_capacity(gram.nitems());
+    let mut item_set: Vec<Item> = Vec::with_capacity(gram.nitems());
     let mut rule_set: Bitv32 = Bitv32::from_elem(gram.nrules, false);
     let mut shift_symbol: Vec<Symbol> = Vec::new();
 
@@ -155,7 +155,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
             for &symbol in shift_symbol.iter() {
-                let symbol_items = &kernels.items[kernels.base[symbol.0 as usize] as usize..kernels_end[symbol.0 as usize] as usize];
+                let symbol_items = &kernels.items[kernels.base[symbol.0 as usize].0 as usize..kernels_end[symbol.0 as usize] as usize];
                 let shift_state =
                     find_or_create_state(gram, symbol_items, &mut state_set, &mut states, &mut accessing_symbol, symbol);
                 shifts.push_value(shift_state);
@@ -193,7 +193,7 @@ fn find_or_create_state(
     accessing_symbol: &mut TVec<State, Symbol>,
     symbol: Symbol,
 ) -> State {
-    let key_item = symbol_items[0] as usize; // key is an item index, in [0..nitems).
+    let key_item = symbol_items[0].0 as usize; // key is an item index, in [0..nitems).
     let this_state_set = &mut state_set[key_item];
 
     // Search for an existing Core that has the same items.
@@ -230,7 +230,7 @@ fn print_core(gram: &Grammar, state: State, items: &[Item]) {
 
     let mut line = String::new();
     for i in 0..items.len() {
-        let rhs = items[i] as usize;
+        let rhs = items[i].0 as usize;
         line.push_str(&format!("item {:4} : ", rhs));
 
         // back up to start of this rule
@@ -275,15 +275,15 @@ fn new_item_sets(
     }
 
     for &item in item_set.iter() {
-        let symbol = gram.ritem[item as usize];
+        let symbol = gram.ritem(item);
         if symbol.is_symbol() {
             let symbol = symbol.as_symbol();
             let mut ksp = kernels_end[symbol.0 as usize];
             if ksp == -1 {
                 shift_symbol.push(symbol);
-                ksp = kernels_base[symbol.0 as usize];
+                ksp = kernels_base[symbol.0 as usize].0;
             }
-            kernels_items[ksp as usize] = (item + 1) as i16;
+            kernels_items[ksp as usize] = Item((item.0 + 1) as i16);
             kernels_end[symbol.0 as usize] = ksp + 1;
         }
     }
@@ -330,8 +330,8 @@ fn set_derives(gram: &Grammar) -> DerivesTable {
 
 fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     debug!("DERIVES:");
-    for lhs in gram.start_symbol..gram.nsyms {
-        debug!("    {} derives rules: ", gram.name[lhs]);
+    for lhs in gram.iter_var_syms() {
+        debug!("    {} derives rules: ", gram.name(lhs));
         for &rule in derives.values(lhs) {
             debug!("        {}", &gram.rule_to_str(rule));
         }
@@ -339,7 +339,7 @@ fn print_derives(gram: &Grammar, derives: &DerivesTable) {
 }
 
 pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
-    let mut nullable: Vec<bool> = vec![false; gram.nsyms];
+    let mut nullable: TVec<Symbol, bool> = TVec::from_vec(vec![false; gram.nsyms]);
 
     loop {
         let mut done = true;
@@ -352,15 +352,15 @@ pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
                     break sr.as_rule();
                 }
                 let sym = sr.as_symbol();
-                if !nullable[sym.0 as usize] {
+                if !nullable[sym] {
                     empty = false;
                 }
                 i += 1;
             };
             if empty {
                 let sym = gram.rlhs(rule);
-                if !nullable[sym.0 as usize] {
-                    nullable[sym.0 as usize] = true;
+                if !nullable[sym] {
+                    nullable[sym] = true;
                     done = false;
                 }
             }
@@ -371,14 +371,13 @@ pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
         }
     }
 
-    for i in gram.start_symbol..gram.nsyms {
-        let sym = i;
+    for sym in gram.iter_var_syms() {
         if nullable[sym] {
-            debug!("{} is nullable", gram.name[i]);
+            debug!("{} is nullable", gram.name(sym));
         } else {
-            debug!("{} is not nullable", gram.name[i]);
+            debug!("{} is not nullable", gram.name(sym));
         }
     }
 
-    TVec::from_vec(nullable)
+    nullable
 }

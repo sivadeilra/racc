@@ -262,6 +262,19 @@ macro_rules! int_alias {
         #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
         pub struct $name(pub $int);
 
+        impl $name {
+            pub fn index(&self) -> usize {
+                self.0 as usize
+            }
+        }
+
+        impl core::ops::Add<$int> for $name  {
+            type Output = Self;
+            fn add(self, rhs: $int) -> $name {
+                $name(self.0 + rhs)
+            }
+        }
+
 /*
         impl core::convert::TryFrom<$name> for usize {
             type Error = core::num::TryFromIntError;
@@ -311,6 +324,7 @@ mod aliases {
     int_alias!{type Var = i16;}
     int_alias!{type Rule = i16;}
     int_alias!{type State = i16;}
+    int_alias!{type Item = i16;}
 
     impl Rule {
         pub const RULE_NULL: Rule = Rule(0);
@@ -353,7 +367,6 @@ mod aliases {
 
 use aliases::*;
 
-type Item = i16;
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {

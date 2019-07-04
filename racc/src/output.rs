@@ -64,10 +64,11 @@ pub fn output_parser_to_ast(
 
     // Build up actions
     let mut action_arms: TokenStream = TokenStream::new();
-    for (rule, block) in blocks.iter().enumerate() {
-        if rule < 3 {
+    for (rule_i, block) in blocks.iter().enumerate() {
+        if rule_i < 3 {
             continue;
         }
+        let rule = Rule(rule_i as i16);
 
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
@@ -75,7 +76,7 @@ pub fn output_parser_to_ast(
         let stmts: TokenStream = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right to left.
-                let rhs_index = gram.rrhs[rule] as usize;
+                let rhs_index = gram.rrhs(rule).0 as usize;
                 let num_rhs = gram.get_rhs_items(rule).len();
                 let mut t = TokenStream::new();
                 for rhs_binding in rhs_bindings[rhs_index..rhs_index + num_rhs].iter().rev() {
@@ -111,12 +112,12 @@ pub fn output_parser_to_ast(
             }
         };
 
-        let pat_value = rule - 2;
-        let rule_str = gram.rule_to_str(Rule(rule as i16));
+        let pat_value: usize = rule_i - 2;
+        let rule_str = gram.rule_to_str(rule);
         action_arms.extend(quote! {
             #pat_value => {
                 // log::debug!("reduce: {}", #rule_str);
-                log_reduction(#rule, #rule_str);
+                log_reduction(#rule_i, #rule_str);
                 #stmts
             }
         });
@@ -166,8 +167,8 @@ pub fn output_parser_to_ast(
     // Emit the YYLEN table.
     items.extend({
         let yylen: Vec<i16> = (2..gram.nrules)
-            .map(|r| gram.rrhs[r + 1] - gram.rrhs[r] - 1)
-            .collect();
+            .map(|r| gram.rule_rhs_syms(Rule(r as i16)).len() as i16)
+            .collect::<Vec<i16>>();
         make_table_i16(Ident::new("YYLEN", sp), &yylen)
     });
 
@@ -182,7 +183,7 @@ pub fn output_parser_to_ast(
 // Generates the YYLHS table.
 fn output_rule_data(gram: &Grammar) -> TokenStream {
     let mut data: Vec<i16> = Vec::new();
-    data.push(gram.value[gram.start_symbol]);
+    data.push(gram.value[gram.start().index()]);
     for i in 3..gram.nrules {
         data.push(gram.value[gram.rlhs[i].0 as usize]);
     }
@@ -511,12 +512,14 @@ fn goto_actions(
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
     let mut dgoto_table: Vec<StateOrRule> = Vec::with_capacity(gram.nvars); // the table that we are building
 
-    let k = default_goto(gram, gotos, Symbol(gram.start_symbol as i16 + 1), &mut state_count);
+    let k = default_goto(gram, gotos, gram.start() + 1, &mut state_count);
     dgoto_table.push(k.0);
-    save_column(gram, nstates, gotos, Symbol(gram.start_symbol as i16 + 1), k, act);
+    save_column(gram, nstates, gotos, gram.start() + 1, k, act);
 
-    for i in (gram.start_symbol + 2)..gram.nsyms {
-        let i = Symbol(i as i16);
+    let mut vars = gram.iter_var_syms();
+    vars.next();
+    vars.next();
+    for i in vars {
         let k = default_goto(gram, gotos, i, &mut state_count);
         dgoto_table.push(k.0);
         save_column(gram, nstates, gotos, i, k, act);

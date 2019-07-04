@@ -27,7 +27,7 @@ pub struct Grammar {
     pub nsyms: usize,
     pub ntokens: usize,
     pub nvars: usize,
-    pub start_symbol: usize,
+    // pub start_symbol: usize,
 
     /// len = nsyms
     pub name: Vec<syn::Ident>,
@@ -64,11 +64,15 @@ pub struct Grammar {
 
 impl Grammar {
     pub fn is_var(&self, s: Symbol) -> bool {
-        (s.0 as usize) >= self.start_symbol
+        (s.0 as usize) >= self.ntokens
     }
 
     pub fn is_token(&self, s: Symbol) -> bool {
-        (s.0 as usize) < self.start_symbol
+        (s.0 as usize) < self.ntokens
+    }
+
+    pub fn start(&self) -> Symbol {
+        Symbol(self.ntokens as i16)
     }
 
     pub fn nitems(&self) -> usize {
@@ -76,7 +80,7 @@ impl Grammar {
     }
 
     pub fn ritem(&self, item: Item) -> SymbolOrRule {
-        self.ritem[item as usize]
+        self.ritem[item.0 as usize]
     }
 
     pub fn name(&self, symbol: Symbol) -> &syn::Ident {
@@ -94,42 +98,47 @@ impl Grammar {
     }
 
     pub fn rule_rhs_syms(&self, rule: Rule) -> &[SymbolOrRule] {
-        let start = self.rrhs[rule.0 as usize] as usize;
-        let end = self.rrhs[rule.0 as usize + 1] as usize - 1;
+        let start = self.rrhs[rule.0 as usize].0 as usize;
+        let end = self.rrhs[rule.0 as usize + 1].0 as usize - 1;
         &self.ritem[start..end]
     }
 
-    pub fn get_rhs_items<'a>(&'a self, r: usize) -> &'a [SymbolOrRule] {
-        let rhs = self.rrhs[r];
-        assert!(rhs >= 0);
-        let mut end = rhs as usize;
+    pub fn get_rhs_items(&self, r: Rule) -> &[SymbolOrRule] {
+        let rhs = self.rrhs[r.0 as usize];
+        assert!(rhs.0 >= 0);
+        let mut end = rhs.0 as usize;
         while self.ritem[end].is_symbol() {
             end += 1;
         }
-        &self.ritem[rhs as usize..end]
+        &self.ritem[rhs.0 as usize..end]
     }
 
     pub fn symbol_to_var(&self, sym: Symbol) -> Var {
         let su = sym.0 as usize;
-        assert!(su >= self.start_symbol);
-        Var((su - self.start_symbol) as i16)
+        assert!(su >= self.ntokens);
+        Var((su - self.ntokens) as i16)
+    }
+
+    pub fn var_to_symbol(&self, var: Var) -> Symbol {
+        assert!((var.0 as usize) < self.nvars);
+        Symbol(self.ntokens as i16 + var.0)
     }
 
     pub fn symbol_to_var_opt(&self, sym: Symbol) -> Option<Var> {
         let su = sym.0 as usize;
-        if su >= self.start_symbol {
-            Some(Var((su - self.start_symbol) as i16))
+        if su >= self.ntokens {
+            Some(Var((su - self.ntokens) as i16))
         } else {
             None
         }
     }
 
     pub fn iter_var_syms(&self) -> impl Iterator<Item=Symbol> {
-        (self.start_symbol..self.nsyms).map(move |i| Symbol(i as i16))
+        (self.ntokens..self.nsyms).map(move |i| Symbol(i as i16))
     }
 
     pub fn iter_token_syms(&self) -> impl Iterator<Item=Symbol> {
-        (0..self.start_symbol).map(move |i| Symbol(i as i16))
+        (0..self.ntokens).map(move |i| Symbol(i as i16))
     }
 
     pub fn iter_rules(&self) -> impl Iterator<Item=Rule> {

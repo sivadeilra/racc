@@ -25,7 +25,7 @@
 // then all variables.  The plhs and ritem tables are read, and are used to
 // produce several new tables.
 
-use crate::Symbol;
+use crate::{Symbol, Item};
 use crate::SymbolOrRule;
 use crate::Rule;
 use crate::grammar::Grammar;
@@ -488,16 +488,16 @@ impl ReaderState {
         ritem[2] = SymbolOrRule::symbol(Symbol(0));
         ritem[3] = SymbolOrRule::rule(Rule::RULE_2);
 
-        let mut rrhs: Vec<i16> = vec![0; nrules + 1];
-        rrhs[0] = 0;
-        rrhs[1] = 0;
-        rrhs[2] = 1;
+        let mut rrhs: Vec<Item> = vec![Item(0); nrules + 1];
+        rrhs[0] = Item(0);
+        rrhs[1] = Item(0);
+        rrhs[2] = Item(1);
 
         let mut j = PREDEFINED_ITEMS; // index of next item to output
         let pitem = &self.pitem;
         let symbols = &self.symbols;
         for i in PREDEFINED_RULES..nrules {
-            rrhs[i] = j as i16;
+            rrhs[i] = Item(j as i16);
             let mut assoc = TOKEN;
             let mut prec2 = 0u8;
             while pitem[j] != NO_ITEM {
@@ -522,13 +522,13 @@ impl ReaderState {
         }
 
         // Terminate the rrhs list
-        rrhs[nrules] = j as i16;
+        rrhs[nrules] = Item(j as i16);
 
         Grammar {
             nsyms: nsyms,
             ntokens: ntokens,
             nvars: nvars,
-            start_symbol: start_symbol,
+            // start_symbol: start_symbol,
 
             name: gram_name.into_iter().map(|opt| opt.unwrap()).collect(),
             pname: Vec::new(),
