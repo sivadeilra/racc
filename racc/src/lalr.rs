@@ -1,10 +1,10 @@
-use crate::StateOrRule;
-use crate::ramp_table::RampTable;
-use crate::Symbol;
-use crate::tvec::TVec;
 use crate::grammar::Grammar;
 use crate::lr0::{LR0Output, Reductions};
+use crate::ramp_table::RampTable;
+use crate::tvec::TVec;
 use crate::util::Bitmat;
+use crate::StateOrRule;
+use crate::Symbol;
 use crate::{Rule, State};
 use log::debug;
 
@@ -17,7 +17,7 @@ pub struct LALROutput {
 #[derive(Copy, Clone, Debug)]
 pub struct FromTo {
     pub from_state: State,
-    pub to_state: State
+    pub to_state: State,
 }
 
 // Var -> [FromTo]
@@ -91,7 +91,13 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     temp_map.push(ngotos);
     // at this point, temp_map and goto_map have identical length and contents
 
-    let mut from_to: Vec<FromTo> = vec![FromTo { from_state: State(0), to_state: State(0) }; ngotos];
+    let mut from_to: Vec<FromTo> = vec![
+        FromTo {
+            from_state: State(0),
+            to_state: State(0)
+        };
+        ngotos
+    ];
 
     for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
         let sp_state = State(sp_state as i16);
@@ -103,31 +109,34 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 
             let k = temp_map[symbol.0 as usize - gram.ntokens] as usize;
             temp_map[symbol.0 as usize - gram.ntokens] += 1;
-            from_to[k] = FromTo { from_state: sp_state, to_state: state2 };
+            from_to[k] = FromTo {
+                from_state: sp_state,
+                to_state: state2,
+            };
         }
     }
 
-/*
-    debug!("set_goto_map: ngotos={}", ngotos);
-    for i in 0..ngotos {
-        debug!("    from {:3} to {:3}", from_state[i], to_state[i]);
-    }
+    /*
+        debug!("set_goto_map: ngotos={}", ngotos);
+        for i in 0..ngotos {
+            debug!("    from {:3} to {:3}", from_state[i], to_state[i]);
+        }
 
-    debug!("goto_map:");
-    for i in 0..gram.nvars {
-        debug!(
-            "    {:3} {} --> {}",
-            i,
-            gram.name[i + gram.ntokens],
-            goto_map[i]
-        );
-    }
-    debug!(".");
-*/
+        debug!("goto_map:");
+        for i in 0..gram.nvars {
+            debug!(
+                "    {:3} {} --> {}",
+                i,
+                gram.name[i + gram.ntokens],
+                goto_map[i]
+            );
+        }
+        debug!(".");
+    */
 
     GotoMap {
         index: goto_map,
-        table: from_to
+        table: from_to,
     }
 }
 
@@ -153,7 +162,12 @@ fn map_goto(gram: &Grammar, gotos: &GotoMap, state: State, symbol: Symbol) -> us
 }
 
 #[allow(non_snake_case)]
-fn initialize_F(gram: &Grammar, lr0: &LR0Output, nullable: &TVec<Symbol, bool>, gotos: &GotoMap) -> Bitmat {
+fn initialize_F(
+    gram: &Grammar,
+    lr0: &LR0Output,
+    nullable: &TVec<Symbol, bool>,
+    gotos: &GotoMap,
+) -> Bitmat {
     debug!("initialize_F");
 
     let ngotos = gotos.num_values();

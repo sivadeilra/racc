@@ -1,5 +1,5 @@
-use crate::lr0::DerivesTable;
 use crate::grammar::Grammar;
+use crate::lr0::DerivesTable;
 use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
 use crate::{Item, Rule, Var};
@@ -126,7 +126,8 @@ pub fn closure(
     for &ni in nucleus.iter() {
         let symbol = gram.ritem(ni);
         if symbol.is_symbol() && gram.is_var(symbol.as_symbol()) {
-            let dsp: usize = ((symbol.as_symbol().0 as usize) - gram.ntokens) * first_derives.rowsize;
+            let dsp: usize =
+                ((symbol.as_symbol().0 as usize) - gram.ntokens) * first_derives.rowsize;
             for i in 0..rulesetsize {
                 rule_set.data[i] |= first_derives.data[dsp + i];
             }
@@ -177,4 +178,3 @@ fn print_first_derives(gram: &Grammar, first_derives: &Bitmat) {
         }
     }
 }
-

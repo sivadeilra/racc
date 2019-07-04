@@ -1,10 +1,10 @@
 use crate::closure::closure;
 use crate::closure::set_first_derives;
 use crate::grammar::Grammar;
-use crate::util::Bitv32;
 use crate::ramp_table::{RampTable, RampTableBuilder};
-use crate::{Rule, State, Item};
 use crate::tvec::TVec;
+use crate::util::Bitv32;
+use crate::{Item, Rule, State};
 use log::debug;
 
 use crate::aliases::Symbol;
@@ -96,7 +96,12 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // other states, by examining a state, the next variables that could be
     // encountered in those states, and finding the transitive closure over same.
     // Initializes the state table.
-    states.push_entry(derives.values(gram.start()).iter().map(|&item| gram.rrhs(item)));
+    states.push_entry(
+        derives
+            .values(gram.start())
+            .iter()
+            .map(|&item| gram.rrhs(item)),
+    );
     accessing_symbol.push(INITIAL_STATE_SYMBOL);
 
     // Contains the set of states that are relevant for each item.  Each entry in this
@@ -126,7 +131,11 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     while this_state < states.num_keys() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(gram, State(this_state as i16), states.values(this_state as usize));
+        print_core(
+            gram,
+            State(this_state as i16),
+            states.values(this_state as usize),
+        );
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
@@ -147,7 +156,14 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
         // computes (returns) the number of shifts for the current state.
         debug!("    new_item_sets: item_set = {:?}", item_set);
-        new_item_sets(&kernels.base, &mut kernels.items, &mut kernels_end, gram, &item_set, &mut shift_symbol);
+        new_item_sets(
+            &kernels.base,
+            &mut kernels.items,
+            &mut kernels_end,
+            gram,
+            &item_set,
+            &mut shift_symbol,
+        );
 
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
@@ -155,9 +171,16 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         if !shift_symbol.is_empty() {
             sort_shift_symbols(&mut shift_symbol);
             for &symbol in shift_symbol.iter() {
-                let symbol_items = &kernels.items[kernels.base[symbol.0 as usize].0 as usize..kernels_end[symbol.0 as usize] as usize];
-                let shift_state =
-                    find_or_create_state(gram, symbol_items, &mut state_set, &mut states, &mut accessing_symbol, symbol);
+                let symbol_items = &kernels.items[kernels.base[symbol.0 as usize].0 as usize
+                    ..kernels_end[symbol.0 as usize] as usize];
+                let shift_state = find_or_create_state(
+                    gram,
+                    symbol_items,
+                    &mut state_set,
+                    &mut states,
+                    &mut accessing_symbol,
+                    symbol,
+                );
                 shifts.push_value(shift_state);
             }
         }

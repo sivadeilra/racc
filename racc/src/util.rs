@@ -203,7 +203,7 @@ impl Bitv32 {
     }
 
     pub fn set_all(&mut self, value: bool) {
-        let w = if value { 0u32 } else { 0u32 };
+        let w = if value { !0u32 } else { 0u32 };
         for i in self.data.iter_mut() {
             *i = w;
         }
@@ -213,4 +213,3 @@ impl Bitv32 {
         bit_vector_iter_ones(&self.data, self.nbits)
     }
 }
-

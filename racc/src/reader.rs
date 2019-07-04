@@ -25,11 +25,11 @@
 // then all variables.  The plhs and ritem tables are read, and are used to
 // produce several new tables.
 
-use crate::{Symbol, Item};
-use crate::SymbolOrRule;
-use crate::Rule;
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
+use crate::Rule;
+use crate::SymbolOrRule;
+use crate::{Item, Symbol};
 use log::debug;
 use log::warn;
 use proc_macro2::Span;
@@ -529,7 +529,6 @@ impl ReaderState {
             ntokens: ntokens,
             nvars: nvars,
             // start_symbol: start_symbol,
-
             name: gram_name.into_iter().map(|opt| opt.unwrap()).collect(),
             pname: Vec::new(),
             value: gram_value,
@@ -567,7 +566,12 @@ impl ReaderState {
             if it.is_rule() {
                 debug!("    {:3} --> r{:3}", i, it.as_rule());
             } else {
-                debug!("    {:3} --> {:3} {}", i, it.as_symbol().0, gram.name[it.as_symbol().0 as usize]);
+                debug!(
+                    "    {:3} --> {:3} {}",
+                    i,
+                    it.as_symbol().0,
+                    gram.name[it.as_symbol().0 as usize]
+                );
             }
         }
 

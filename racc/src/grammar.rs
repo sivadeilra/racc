@@ -1,10 +1,10 @@
 /* keyword codes */
 
 use crate::Item;
+use crate::Rule;
+use crate::Symbol;
 use crate::SymbolOrRule;
 use crate::Var;
-use crate::Symbol;
-use crate::Rule;
 
 pub const TOKEN: u8 = 0;
 
@@ -28,7 +28,6 @@ pub struct Grammar {
     pub ntokens: usize,
     pub nvars: usize,
     // pub start_symbol: usize,
-
     /// len = nsyms
     pub name: Vec<syn::Ident>,
 
@@ -133,15 +132,15 @@ impl Grammar {
         }
     }
 
-    pub fn iter_var_syms(&self) -> impl Iterator<Item=Symbol> {
+    pub fn iter_var_syms(&self) -> impl Iterator<Item = Symbol> {
         (self.ntokens..self.nsyms).map(move |i| Symbol(i as i16))
     }
 
-    pub fn iter_token_syms(&self) -> impl Iterator<Item=Symbol> {
+    pub fn iter_token_syms(&self) -> impl Iterator<Item = Symbol> {
         (0..self.ntokens).map(move |i| Symbol(i as i16))
     }
 
-    pub fn iter_rules(&self) -> impl Iterator<Item=Rule> {
+    pub fn iter_rules(&self) -> impl Iterator<Item = Rule> {
         (0..self.nrules).map(move |i| Rule(i as i16))
     }
 

@@ -239,6 +239,8 @@
 
 #![recursion_limit = "256"]
 #![warn(rust_2018_idioms)]
+#![allow(clippy::needless_lifetimes)]
+#![allow(clippy::cognitive_complexity)]
 
 mod closure;
 mod grammar;
@@ -268,21 +270,21 @@ macro_rules! int_alias {
             }
         }
 
-        impl core::ops::Add<$int> for $name  {
+        impl core::ops::Add<$int> for $name {
             type Output = Self;
             fn add(self, rhs: $int) -> $name {
                 $name(self.0 + rhs)
             }
         }
 
-/*
-        impl core::convert::TryFrom<$name> for usize {
-            type Error = core::num::TryFromIntError;
-            fn try_from(i: $name) -> Result<usize, Self::Error> {
-                usize::try_from(i.0)
-            }
-        }
-*/
+        /*
+                impl core::convert::TryFrom<$name> for usize {
+                    type Error = core::num::TryFromIntError;
+                    fn try_from(i: $name) -> Result<usize, Self::Error> {
+                        usize::try_from(i.0)
+                    }
+                }
+        */
 
         impl core::fmt::Display for $name {
             fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -297,11 +299,11 @@ macro_rules! int_alias {
         }
 
         impl core::convert::From<usize> for $name {
-            fn from(i: usize) -> $name  {
+            fn from(i: usize) -> $name {
                 $name(i as $int)
             }
         }
-    }
+    };
 }
 
 // There appears to be a bug in Rust where:
@@ -320,11 +322,11 @@ mod aliases {
     use super::*;
 
     // Type aliases
-    int_alias!{type Symbol = i16;}
-    int_alias!{type Var = i16;}
-    int_alias!{type Rule = i16;}
-    int_alias!{type State = i16;}
-    int_alias!{type Item = i16;}
+    int_alias! {type Symbol = i16;}
+    int_alias! {type Var = i16;}
+    int_alias! {type Rule = i16;}
+    int_alias! {type State = i16;}
+    int_alias! {type Item = i16;}
 
     impl Rule {
         pub const RULE_NULL: Rule = Rule(0);
@@ -332,7 +334,6 @@ mod aliases {
         pub const RULE_1: Rule = Rule(1);
         pub const RULE_2: Rule = Rule(2);
     }
-
 
     #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
     pub struct SymbolOrRule(i16);
@@ -346,17 +347,17 @@ mod aliases {
             assert!(symbol.0 >= 0);
             Self(symbol.0)
         }
-        pub fn is_symbol(&self) -> bool {
+        pub fn is_symbol(self) -> bool {
             self.0 >= 0
         }
-        pub fn is_rule(&self) -> bool {
+        pub fn is_rule(self) -> bool {
             self.0 < 0
         }
-        pub fn as_symbol(&self) -> Symbol {
+        pub fn as_symbol(self) -> Symbol {
             assert!(self.is_symbol());
             Symbol(self.0)
         }
-        pub fn as_rule(&self) -> Rule {
+        pub fn as_rule(self) -> Rule {
             assert!(self.is_rule());
             Rule(-self.0)
         }
@@ -366,7 +367,6 @@ mod aliases {
 }
 
 use aliases::*;
-
 
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {

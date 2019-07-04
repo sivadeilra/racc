@@ -1,9 +1,9 @@
-use crate::{Symbol, Rule};
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use crate::lr0::Reductions;
 use crate::State;
+use crate::{Rule, Symbol};
 use log::debug;
 use log::warn;
 
@@ -27,7 +27,6 @@ impl ActionCode {
             false
         }
     }
-
 }
 
 pub const LEFT: u8 = 1;
@@ -132,9 +131,7 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, sym
     }
 
     // find insertion position for a Reduce action
-    while next < actions.len()
-        && actions[next].symbol == symbol
-    {
+    while next < actions.len() && actions[next].symbol == symbol {
         let action = &actions[next];
         if let ActionCode::Reduce(action_rule) = action.action_code {
             if action_rule < ruleno {
@@ -276,7 +273,10 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
             ActionCode::Reduce(reduce_rule) => {
                 if p.suppressed == 0 {
                     if ruleno > Rule(0) && *reduce_rule != ruleno {
-                        debug!("    found unsuppressed reduce for rule {}, returning 0", ruleno);
+                        debug!(
+                            "    found unsuppressed reduce for rule {}, returning 0",
+                            ruleno
+                        );
                         return Rule(0);
                     }
                     debug!("    found unsuppressed reduce");

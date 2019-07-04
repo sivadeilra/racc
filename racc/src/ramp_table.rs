@@ -87,7 +87,7 @@ impl<T> RampTable<T> {
         self.index.push(end);
     }
 
-    pub fn push_entry(&mut self, iter: impl Iterator<Item=T>) {
+    pub fn push_entry(&mut self, iter: impl Iterator<Item = T>) {
         self.table.extend(iter);
         self.finish_key();
     }
@@ -109,7 +109,7 @@ impl<T> RampTableBuilder<T> {
     pub fn with_capacity(keys: usize, values: usize) -> Self {
         Self {
             index: Vec::with_capacity(keys + 1),
-            table: Vec::with_capacity(values)
+            table: Vec::with_capacity(values),
         }
     }
 
