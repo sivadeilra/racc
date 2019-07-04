@@ -346,13 +346,19 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
     debug!("token_actions()");
 
     let nstates = parser.nstates();
-    let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens]; // contains EITHER Rule or State
+    // let mut actionrow: Vec<i16> = vec![0; 2 * gram.ntokens]; // contains EITHER Rule or State
+
+    let mut actionrow_reduce: Vec<Rule> = vec![Rule(0); gram.ntokens];
+    let mut actionrow_shift: Vec<State> = vec![State(0); gram.ntokens];
 
     for (state, actions) in parser.actions.iter().enumerate() {
         if actions.len() != 0 {
             debug!("    state={}", state);
-            for ii in actionrow.iter_mut() {
-                *ii = 0;
+            for ii in actionrow_reduce.iter_mut() {
+                *ii = Rule(0);
+            }
+            for ii in actionrow_shift.iter_mut() {
+                *ii = State(0);
             }
 
             let mut shiftcount: usize = 0;
@@ -362,14 +368,12 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                     match action.action_code {
                         ActionCode::Shift(to_state) => {
                             shiftcount += 1;
-                            actionrow[action.symbol.0 as usize] = to_state.0;
-                            // debug!("        shift {}", p.number);
+                            actionrow_shift[action.symbol.index()] = to_state;
                         }
                         ActionCode::Reduce(reduce_rule) => {
                             if reduce_rule != parser.default_reductions[state] {
                                 reducecount += 1;
-                                actionrow[(action.symbol.0 as usize) + gram.ntokens] = reduce_rule.0;
-                                // debug!("        reduce {}", p.number);
+                                actionrow_reduce[action.symbol.index()] = reduce_rule;
                             }
                         }
                     }
@@ -392,14 +396,15 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[j] != 0 {
+                    let shift = actionrow_shift[j];
+                    if shift != State(0) {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[j]);
+                        s.push(shift.0);
                         debug!(
                             "        shift for token {} {}, pushing r={} s={}",
-                            j, gram.name[j], gram.value[j], actionrow[j]
+                            j, gram.name[j], gram.value[j], actionrow_shift[j]
                         );
                     }
                 }
@@ -414,17 +419,18 @@ fn token_actions(gram: &Grammar, parser: &YaccParser, act: &mut ActionsTable)  {
                 let mut min = i16::MAX;
                 let mut max = 0;
                 for j in 0..gram.ntokens {
-                    if actionrow[gram.ntokens + j] != 0 {
+                    let rule = actionrow_reduce[j];
+                    if rule != Rule(0) {
                         min = cmp::min(min, gram.value[j]);
                         max = cmp::max(max, gram.value[j]);
                         r.push(gram.value[j]);
-                        s.push(actionrow[gram.ntokens + j] - 2);
+                        s.push(rule.0 - 2);
                         debug!(
                             "        reduce for token {} {}, pushing r={} s={}",
                             j,
                             gram.name[j],
                             gram.value[j],
-                            actionrow[gram.ntokens + j] - 2
+                            rule.0 - 2
                         );
                     }
                 }

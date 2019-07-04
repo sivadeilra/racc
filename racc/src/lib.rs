@@ -327,6 +327,7 @@ mod aliases {
     int_alias! {type Rule = i16;}
     int_alias! {type State = i16;}
     int_alias! {type Item = i16;}
+    int_alias! {type Token = i16;}
 
     impl Rule {
         pub const RULE_NULL: Rule = Rule(0);

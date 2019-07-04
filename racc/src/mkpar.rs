@@ -2,8 +2,7 @@ use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use crate::lr0::Reductions;
-use crate::State;
-use crate::{Rule, Symbol};
+use crate::{Rule, State, Symbol, Token};
 use log::debug;
 use log::warn;
 
@@ -33,7 +32,8 @@ pub const LEFT: u8 = 1;
 pub const RIGHT: u8 = 2;
 
 pub struct ParserAction {
-    pub symbol: Symbol,
+    /// is this symbol always a token?
+    pub symbol: Token,
     pub prec: i16,
     pub action_code: ActionCode,
     pub assoc: u8,
@@ -88,7 +88,7 @@ fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserActi
         let symbol = lr0.accessing_symbol[k as State];
         if gram.is_token(symbol) {
             actions.push(ParserAction {
-                symbol: symbol,
+                symbol: gram.symbol_to_token(symbol),
                 prec: gram.prec[symbol.0 as usize],
                 action_code: ActionCode::Shift(k),
                 assoc: gram.assoc[symbol.0 as usize],
@@ -111,13 +111,13 @@ fn add_reductions(
     for (i, &rule) in range.zip(state_rules) {
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
-                add_reduce(gram, actions, rule, Symbol(j as i16));
+                add_reduce(gram, actions, rule, Token(j as i16));
             }
         }
     }
 }
 
-fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, symbol: Symbol) {
+fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, symbol: Token) {
     let mut next: usize = 0;
     while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
@@ -216,7 +216,7 @@ fn remove_conflicts_for_state(pvec: &mut [ParserAction], is_final_state: bool) -
             if pvec[p].symbol != symbol {
                 pref = p;
                 symbol = pvec[p].symbol;
-            } else if is_final_state && symbol == Symbol(0) {
+            } else if is_final_state && symbol == Token(0) {
                 srcount += 1;
                 pvec[p].suppressed = 1;
             } else if let ActionCode::Shift(_) = pvec[pref].action_code {
@@ -280,7 +280,7 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
                         return Rule(0);
                     }
                     debug!("    found unsuppressed reduce");
-                    if p.symbol != Symbol(1) {
+                    if p.symbol != Token(1) {
                         count += 1;
                         debug!("    count --> {}", count);
                     }

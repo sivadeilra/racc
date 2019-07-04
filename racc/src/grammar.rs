@@ -2,7 +2,7 @@
 
 use crate::Item;
 use crate::Rule;
-use crate::Symbol;
+use crate::{Symbol, Token};
 use crate::SymbolOrRule;
 use crate::Var;
 
@@ -116,6 +116,11 @@ impl Grammar {
         let su = sym.0 as usize;
         assert!(su >= self.ntokens);
         Var((su - self.ntokens) as i16)
+    }
+
+    pub fn symbol_to_token(&self, sym: Symbol) -> Token {
+        assert!((sym.0 as usize) < self.ntokens);
+        Token(sym.0)
     }
 
     pub fn var_to_symbol(&self, var: Var) -> Symbol {
