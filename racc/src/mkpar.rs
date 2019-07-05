@@ -186,10 +186,10 @@ fn report_unused_rules(gram: &Grammar, parser: &RampTable<ParserAction>) {
 fn remove_conflicts(final_state: State, parser: &mut RampTable<ParserAction>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    for (state, pvec) in parser.iter_entries_mut().enumerate() {
+    for (state, actions) in parser.iter_entries_mut().enumerate() {
         let state = State(state as i16);
         let is_final_state = state == final_state;
-        let (srcount, rrcount) = remove_conflicts_for_state(pvec, is_final_state);
+        let (srcount, rrcount) = remove_conflicts_for_state(actions, is_final_state);
         srtotal += srcount;
         rrtotal += rrcount;
     }
@@ -201,43 +201,44 @@ fn remove_conflicts(final_state: State, parser: &mut RampTable<ParserAction>) {
 /// Modifies ParserAction::suppressed. That field could potentially be moved to a
 /// separate vector, which this function would produce.
 /// Returns (shift_reduce_conflict_count, reduce_reduce_conflict_count)
-fn remove_conflicts_for_state(pvec: &mut [ParserAction], is_final_state: bool) -> (usize, usize) {
+fn remove_conflicts_for_state(actions: &mut [ParserAction], is_final_state: bool) -> (usize, usize) {
     let mut srcount: usize = 0;
     let mut rrcount: usize = 0;
-    if !pvec.is_empty() {
-        let mut symbol = pvec[0].symbol;
-        let mut pref: usize = 0; // index into pvec
-        for p in 1..pvec.len() {
-            // p is index into pvec
-            if pvec[p].symbol != symbol {
+    let mut iter_actions = actions.iter_mut();
+    if let Some(first) = iter_actions.next() {
+        // preferred
+        let mut pref = first;
+        let mut symbol = pref.symbol;
+        for p in iter_actions {
+            if p.symbol != symbol {
                 pref = p;
-                symbol = pvec[p].symbol;
+                symbol = pref.symbol;
             } else if is_final_state && symbol == Token(0) {
                 srcount += 1;
-                pvec[p].suppressed = 1;
-            } else if let ActionCode::Shift(_) = pvec[pref].action_code {
-                if pvec[pref].prec > 0 && pvec[p].prec > 0 {
-                    if pvec[pref].prec < pvec[p].prec {
-                        pvec[pref].suppressed = 2;
+                p.suppressed = 1;
+            } else if let ActionCode::Shift(_) = pref.action_code {
+                if pref.prec > 0 && p.prec > 0 {
+                    if pref.prec < p.prec {
+                        pref.suppressed = 2;
                         pref = p;
-                    } else if pvec[pref].prec > pvec[p].prec {
-                        pvec[p].suppressed = 2;
-                    } else if pvec[pref].assoc == LEFT {
-                        pvec[pref].suppressed = 2;
+                    } else if pref.prec > p.prec {
+                        p.suppressed = 2;
+                    } else if pref.assoc == LEFT {
+                        pref.suppressed = 2;
                         pref = p;
-                    } else if pvec[pref].assoc == RIGHT {
-                        pvec[p].suppressed = 2;
+                    } else if pref.assoc == RIGHT {
+                        p.suppressed = 2;
                     } else {
-                        pvec[pref].suppressed = 2;
-                        pvec[p].suppressed = 2;
+                        pref.suppressed = 2;
+                        p.suppressed = 2;
                     }
                 } else {
                     srcount += 1;
-                    pvec[p].suppressed = 1;
+                    p.suppressed = 1;
                 }
             } else {
                 rrcount += 1;
-                pvec[p].suppressed = 1;
+                p.suppressed = 1;
             }
         }
     }
