@@ -492,53 +492,41 @@ mod packing {
     fn matching_vector(pack: &PackState<'_>, vector: usize) -> Option<usize> {
         let i = pack.order[vector];
         if i >= 2 * pack.nstates {
-            debug!("    matching_vector: vector={} no match", vector);
+            // Never match among variable gotos.
             return None;
         }
 
         let act = pack.act;
         let t = act.tally(i);
         let w = act.width(i);
-
         for &j in pack.order[0..vector].iter().rev() {
             if act.width(j) != w || act.tally(j) != t {
                 return None;
             }
-
-            let is_match = act.tos[i] == act.tos[j] && act.froms[i] == act.froms[j];
-            if is_match {
-                debug!("    matching_vector: vector={} matches at {}", vector, j);
+            if act.tos[i] == act.tos[j] && act.froms[i] == act.froms[j] {
                 return Some(j);
             }
         }
-
-        debug!("    matching_vector: vector={} - no match", vector);
-        return None;
+        None
     }
 
     fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> i16 {
         // debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
         let act = pack.act;
         let i = pack.order[vector];
-        let t = act.tally(i);
-        assert!(t != 0);
-
         let from = &act.froms[i];
         let to = &act.tos[i];
+        let t = from.len();
+        assert!(t != 0);
 
-        // debug!("from[0]={}", from[0]);
-
-        let mut j: isize = (pack.lowzero as isize) - (from[0] as isize);
-        // debug!("j={}", j);
+        let mut j: i16 = pack.lowzero - from[0];
         for &f in from[1..t].iter() {
-            if (pack.lowzero as isize) - (f as isize) > j {
-                j = (pack.lowzero as isize) - (f as isize);
-                // debug!("j={}", j);
+            if pack.lowzero - f > j {
+                j = pack.lowzero - f;
             }
         }
 
         loop {
-            // debug!("    loop: j={}", j);
             if j == 0 {
                 j = 1;
                 continue;
@@ -546,7 +534,7 @@ mod packing {
 
             let mut ok = true;
             for &f in &from[0..t] {
-                let loc = (j + (f as isize)) as usize;
+                let loc = (j + f) as usize;
 
                 // make sure we can read/write table[loc] and table[check]
                 if loc > pack.table.len() {
@@ -566,27 +554,21 @@ mod packing {
                 j += 1;
                 continue;
             }
-            for k in 0..vector {
-                if pack.pos[k] as isize == j {
-                    ok = false;
-                    break;
-                }
-            }
-            if !ok {
+            if pack.pos[0..vector].iter().any(|&p| p == j) {
                 j += 1;
                 continue;
             }
 
-            for k in 0..t {
-                let loc = (j + (from[k] as isize)) as usize;
-                pack.table[loc] = to[k];
-                pack.check[loc] = from[k];
+            for (&f, &t) in from[0..t].iter().zip(to[0..t].iter()) {
+                let loc = (j + f) as usize;
+                pack.table[loc] = t;
+                pack.check[loc] = f;
                 if loc > pack.high {
                     pack.high = loc;
                 }
             }
 
-            while pack.check[pack.lowzero] != -1 {
+            while pack.check[pack.lowzero as usize] != -1 {
                 pack.lowzero += 1;
             }
 
@@ -599,7 +581,7 @@ mod packing {
         pos: Vec<i16>,
         table: Vec<i16>, // table and check always have same len
         check: Vec<i16>, // table is 0-filled, check is -1-filled
-        lowzero: usize,
+        lowzero: i16,
         high: usize,
 
         order: &'a [usize],

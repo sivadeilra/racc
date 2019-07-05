@@ -91,6 +91,11 @@ impl<T> RampTable<T> {
         self.table.extend(iter);
         self.finish_key();
     }
+
+    pub fn push_entry_copy_slice(&mut self, values: &[T]) where T: Copy {
+        self.table.extend(values);
+        self.finish_key();
+    }
 }
 
 pub struct RampTableBuilder<T> {
