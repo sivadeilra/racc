@@ -60,7 +60,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     let mut goto_map: Vec<usize> = vec![0; gram.nvars + 1];
     let mut ngotos: usize = 0;
 
-    for shifts in lr0.shifts.iter_values() {
+    for shifts in lr0.shifts.iter_entries() {
         for i in (0..shifts.len()).rev() {
             let state = shifts[i];
             let symbol = lr0.accessing_symbol[state];

@@ -67,8 +67,39 @@ impl<T> RampTable<T> {
             .enumerate()
     }
 
+    pub fn iter_entries_mut(&mut self) -> impl Iterator<Item = &mut [T]> {
+        // We can't just use self.index.windows(2).map(...) for this.
+        // We have to implement this iterator manually. Fortunately it's
+        // a fairly elegant iterator.
+
+        struct EntriesMut<'a, T> {
+            last_end: usize,
+            ends: core::slice::Iter<'a, usize>,
+            table: &'a mut [T]
+        }
+        impl<'a, T> Iterator for EntriesMut<'a, T> {
+            type Item = &'a mut [T];
+            fn next(&mut self) -> Option<Self::Item> {
+                let end = *self.ends.next()?;
+                let len = end - self.last_end;
+                self.last_end = end;
+                let (low, high) = std::mem::replace(&mut self.table, &mut []).split_at_mut(len);
+                self.table = high;
+                Some(low)
+            }
+        }
+
+        let mut ends = self.index.iter();
+        let last_end = *ends.next().unwrap();
+        EntriesMut {
+            last_end,
+            ends,
+            table: &mut self.table
+        }
+    }
+
     /// Iterates &[T], one for each key in the table.
-    pub fn iter_values(&self) -> impl Iterator<Item = &[T]> {
+    pub fn iter_entries(&self) -> impl Iterator<Item = &[T]> {
         self.index.windows(2).map(move |w| &self.table[w[0]..w[1]])
     }
 

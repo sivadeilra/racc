@@ -1,3 +1,4 @@
+use crate::ramp_table::RampTable;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
@@ -43,70 +44,57 @@ pub struct ParserAction {
 }
 
 pub struct YaccParser {
-    pub actions: Vec<Vec<ParserAction>>,
-    /// State -> Rule
-    pub default_reductions: Vec<Rule>,
+    /// State -> [ParserAction]
+    pub actions: RampTable<ParserAction>,
     pub final_state: State,
 }
 impl YaccParser {
     pub fn nstates(&self) -> usize {
-        self.actions.len()
+        self.actions.num_keys()
     }
 }
 
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let nstates = lr0.nstates();
-    let mut parser: Vec<Vec<ParserAction>> = (0..nstates)
-        .map(|state| parse_actions(gram, lr0, lalr, state.into()))
-        .collect();
+    let mut parser: RampTable<ParserAction> = RampTable::new();
+    for state in 0..nstates  {
+        let state: State = state.into();
+        get_shifts(gram, lr0, state, &mut parser);
+        get_reductions(gram, &lr0.reductions, lalr, state, &mut parser);
+        parser.finish_key();
+    }
 
     let final_state = find_final_state(gram, lr0);
-    remove_conflicts(final_state, parser.as_mut_slice());
+    remove_conflicts(final_state, &mut parser);
     report_unused_rules(gram, &parser);
-
-    let defred = default_reductions(&parser);
 
     YaccParser {
         actions: parser,
-        default_reductions: defred,
         final_state: final_state,
     }
 }
 
-fn parse_actions(
-    gram: &Grammar,
-    lr0: &LR0Output,
-    lalr: &LALROutput,
-    stateno: State,
-) -> Vec<ParserAction> {
-    let mut actions = get_shifts(gram, lr0, stateno);
-    add_reductions(gram, &lr0.reductions, lalr, stateno, &mut actions);
-    actions
-}
-
-fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State) -> Vec<ParserAction> {
-    let mut actions: Vec<ParserAction> = Vec::new();
+fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State, actions: &mut RampTable<ParserAction>) {
     for &k in lr0.shifts.values(stateno) {
-        let symbol = lr0.accessing_symbol[k as State];
+        let symbol = lr0.accessing_symbol[k];
         if gram.is_token(symbol) {
-            actions.push(ParserAction {
+            actions.push_value(ParserAction {
                 symbol: gram.symbol_to_token(symbol),
-                prec: gram.prec[symbol.0 as usize],
+                prec: gram.prec[symbol.index()],
                 action_code: ActionCode::Shift(k),
-                assoc: gram.assoc[symbol.0 as usize],
+                assoc: gram.assoc[symbol.index()],
                 suppressed: 0,
             });
         }
     }
-    actions
 }
 
-fn add_reductions(
+fn get_reductions(
     gram: &Grammar,
     reductions: &Reductions,
     lalr: &LALROutput,
     stateno: State,
-    actions: &mut Vec<ParserAction>,
+    actions: &mut RampTable<ParserAction>,
 ) {
     let range = reductions.values_range(stateno);
     let state_rules = reductions.values(stateno);
@@ -119,8 +107,14 @@ fn add_reductions(
     }
 }
 
-fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, symbol: Token) {
-    let mut next: usize = 0;
+/// Inserts a new value into the 'actions' table, in a sorted position.
+/// This inserts one new value into the 'values' of the 'actions' table, at the end.
+/// It is careful to insert items in a sorted order.
+fn add_reduce(gram: &Grammar, actions: &mut RampTable<ParserAction>, rule: Rule, symbol: Token) {
+    // end: index of the values of the current (unfinished) key
+    let end = *actions.index.last().unwrap();
+    let actions = &mut actions.table;
+    let mut next: usize = end;
     while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
     }
@@ -136,7 +130,7 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, sym
     while next < actions.len() && actions[next].symbol == symbol {
         let action = &actions[next];
         if let ActionCode::Reduce(action_rule) = action.action_code {
-            if action_rule < ruleno {
+            if action_rule < rule {
                 next += 1;
                 continue;
             }
@@ -148,9 +142,9 @@ fn add_reduce(gram: &Grammar, actions: &mut Vec<ParserAction>, ruleno: Rule, sym
         next,
         ParserAction {
             symbol: symbol,
-            prec: gram.rprec[ruleno.0 as usize],
-            action_code: ActionCode::Reduce(ruleno),
-            assoc: gram.rassoc[ruleno.0 as usize],
+            prec: gram.rprec[rule.index()],
+            action_code: ActionCode::Reduce(rule),
+            assoc: gram.rassoc[rule.index()],
             suppressed: 0,
         },
     );
@@ -169,13 +163,13 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> State {
     final_state
 }
 
-fn report_unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
+fn report_unused_rules(gram: &Grammar, parser: &RampTable<ParserAction>) {
     let mut rules_used = vec![false; gram.nrules];
-    for state_actions in parser.iter() {
+    for state_actions in parser.iter_entries() {
         for action in state_actions.iter() {
             if let ActionCode::Reduce(action_rule) = action.action_code {
                 if action.suppressed == 0 {
-                    rules_used[action_rule.0 as usize] = true;
+                    rules_used[action_rule.index()] = true;
                 }
             }
         }
@@ -189,10 +183,10 @@ fn report_unused_rules(gram: &Grammar, parser: &[Vec<ParserAction>]) {
 
 /// Modifies ParserAction::suppressed. That field could potentially be moved to a
 /// separate vector, which this function would produce.
-fn remove_conflicts(final_state: State, parser: &mut [Vec<ParserAction>]) {
+fn remove_conflicts(final_state: State, parser: &mut RampTable<ParserAction>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    for (state, pvec) in parser.iter_mut().enumerate() {
+    for (state, pvec) in parser.iter_entries_mut().enumerate() {
         let state = State(state as i16);
         let is_final_state = state == final_state;
         let (srcount, rrcount) = remove_conflicts_for_state(pvec, is_final_state);
@@ -302,15 +296,7 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
 }
 
 /// Computes the default reduction for each state.
-pub fn default_reductions(parser: &[Vec<ParserAction>]) -> Vec<Rule> {
-    debug!("default_reductions");
-    parser
-        .iter()
-        .enumerate()
-        .map(|(i, actions)| {
-            let r = sole_reduction(actions);
-            debug!("    state {} has default reduction {}", i, r);
-            r
-        })
-        .collect()
+/// State -> Rule
+pub fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
+    parser.iter_entries().map(|actions| sole_reduction(actions)).collect()
 }

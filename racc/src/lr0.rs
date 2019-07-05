@@ -22,10 +22,13 @@ pub struct LR0Output {
     // value: Symbol
     pub accessing_symbol: TVec<State, Symbol>,
 
-    /// Contains (state -> [state]) mappings for shifts
+    /// Contains (State -> [State]) mappings for shifts
     pub shifts: RampTable<State>,
 
+    /// Contains State -> [Rule]
     pub reductions: Reductions,
+
+    /// Contains Symbol -> [Rule]
     pub derives: DerivesTable,
 }
 

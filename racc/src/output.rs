@@ -29,15 +29,16 @@ pub fn output_parser_to_ast(
 
     let mut items: TokenStream = TokenStream::new();
 
+    let default_reductions = crate::mkpar::default_reductions(&parser.actions);
+
     //  Generate YYDEFRED table.
-    let yydefred: Vec<i16> = parser
-        .default_reductions
+    let yydefred: Vec<i16> = default_reductions
         .iter()
         .map(|&s| if s != Rule(0) { s.0 - 2 } else { 0 })
         .collect();
     items.extend(make_table_i16(Ident::new("YYDEFRED", sp), &yydefred));
 
-    items.extend(output_actions(grammar_span, gram, gotos, parser));
+    items.extend(output_actions(grammar_span, gram, gotos, parser, &default_reductions));
 
     for t in 1..gram.ntokens {
         let tokvalue = gram.value[t] as u16;
@@ -258,12 +259,12 @@ fn make_table_i16_as_u16(name: Ident, values: &[i16]) -> TokenStream {
     }
 }
 
-fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser) -> TokenStream {
+fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser, default_reductions: &[Rule]) -> TokenStream {
     let nstates = parser.nstates();
 
     let mut act = ActionsTable::new(nstates, gram.nvars);
 
-    token_actions(gram, parser, &mut act.froms, &mut act.tos);
+    token_actions(gram, parser, &default_reductions, &mut act.froms, &mut act.tos);
     let default_goto_table = default_goto_table(nstates, gotos);
     goto_actions(gram, nstates, gotos, &default_goto_table, &mut act.froms, &mut act.tos);
     let order = sort_actions(&mut act);
@@ -339,12 +340,14 @@ impl ActionsTable {
 /// should be the same value, as long as action.symbol is in increasing order.
 /// (See commit 1cc0a3174406eb28f767af0b91fc850e9364aaf2 for the last code
 /// based on the old algorithm.)
-fn token_actions(gram: &Grammar, parser: &YaccParser,
+fn token_actions(gram: &Grammar,
+    parser: &YaccParser,
+    default_reductions: &[Rule],
     froms: &mut Vec<Vec<i16>>,
     tos: &mut Vec<Vec<StateOrRule>>,
     ) {
     // shifts
-    for actions in parser.actions.iter() {
+    for actions in parser.actions.iter_entries() {
         let mut shift_r: Vec<i16> = Vec::new();
         let mut shift_s: Vec<i16> = Vec::new();
         for action in actions.iter() {
@@ -364,14 +367,14 @@ fn token_actions(gram: &Grammar, parser: &YaccParser,
     }
 
     // reduces
-    for (state, actions) in parser.actions.iter().enumerate() {
+    for (state, actions) in parser.actions.iter_entries().enumerate() {
         let mut reduce_r: Vec<i16> = Vec::new();
         let mut reduce_s: Vec<i16> = Vec::new();
         for action in actions.iter() {
             if action.suppressed == 0 {
                 match action.action_code {
                     ActionCode::Reduce(reduce_rule) => {
-                        if reduce_rule != parser.default_reductions[state] {
+                        if reduce_rule != default_reductions[state] {
                             let token = action.symbol.index();
                             reduce_r.push(gram.value[token]);
                             reduce_s.push(reduce_rule.0 - 2);
@@ -429,7 +432,7 @@ fn goto_actions(
 /// Returns: Var -> State
 fn default_goto_table(nstates: usize, gotos: &GotoMap) -> Vec<State> {
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
-    gotos.iter_values().map(move |var_gotos| {
+    gotos.iter_entries().map(move |var_gotos| {
         if var_gotos.is_empty() {
             State(0)
         } else {
