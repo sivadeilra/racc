@@ -236,10 +236,11 @@ fn build_relations(
         let mut edge: Vec<StateOrRule> = Vec::new();
         assert!(states.len() == 0);
 
-        let from_state = gotos.value(i).from_state;
-        let symbol1 = lr0.accessing_symbol[gotos.value(i).to_state];
+        let goto = gotos.value(i);
+        let from_state = goto.from_state;
+        let symbol1 = lr0.accessing_symbol[goto.to_state];
 
-        for &rule in lr0.derives.values(symbol1) {
+        for &rule in lr0.derives.values(gram.symbol_to_var(symbol1)) {
             assert!(states.len() == 0);
             states.push(from_state);
             let mut stateno = from_state;

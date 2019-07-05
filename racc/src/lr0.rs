@@ -75,7 +75,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     // Initializes the state table.
     states.push_entry(
         derives
-            .values(gram.start())
+            .values(gram.symbol_to_var(gram.start()))
             .iter()
             .map(|&item| gram.rrhs(item)),
     );
@@ -298,15 +298,9 @@ fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTableBuild
 // maps from Symbol -> [Rule]
 pub type DerivesTable = RampTable<Rule>;
 
-/// Compute the DERIVES table. The DERIVES table maps Symbol -> [Rule].
+/// Compute the DERIVES table. The DERIVES table maps Var -> [Rule].
 fn set_derives(gram: &Grammar) -> DerivesTable {
-    // note: 'derives' appears to waste its token space; consider adjusting indices
-    // so that only var indices are used
     let mut d = RampTableBuilder::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
-    // All of the entries for tokens are empty. (Should DerivesTable be Var -> Rule?)
-    for _ in gram.iter_token_syms() {
-        d.start_key();
-    }
     for lhs in gram.iter_var_syms() {
         d.start_key();
         for rule in gram.iter_rules() {
@@ -323,8 +317,9 @@ fn set_derives(gram: &Grammar) -> DerivesTable {
 
 fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     debug!("DERIVES:");
-    for lhs in gram.iter_var_syms() {
-        debug!("    {} derives rules: ", gram.name(lhs));
+    for lhs in gram.iter_vars() {
+        let lhs_sym = gram.var_to_symbol(lhs);
+        debug!("    {} derives rules: ", gram.name(lhs_sym));
         for &rule in derives.values(lhs) {
             debug!("        {}", &gram.rule_to_str(rule));
         }
