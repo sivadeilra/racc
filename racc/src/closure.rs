@@ -37,51 +37,12 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
 pub fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     // Compute EFF, which is a [nvars, nvars] bit matrix
     let eff = set_eff(gram, derives);
-
-    let mut first_derives = Bitmat::new(gram.nvars, gram.nrules);
-
-    /* known good, old
-    for i in range(0, gram.nvars) {
-        let mut vrow = i * eff.rowsize;     // used to read cols for an eff row, j is column
-        let mut cword: u32 = 0;
-        let mut k = BITS_PER_WORD;
-        for jvar in range(0, gram.nvars) {
-            let j = gram.start_symbol + jvar;
-            if k >= BITS_PER_WORD {
-                cword = eff.data[vrow];
-                vrow += 1;
-                k = 0;
-            }
-
-            if (cword & (1u32 << k)) != 0 {
-                let mut rp = derives[j] as usize;
-                while derives_rules[rp] >= 0 {
-                    first_derives.set(i, derives_rules[rp] as usize);
-                    rp += 1;
-                }
-            }
-
-            k += 1; // advance to next bit
-        }
-    }
-        */
-
-    /* this works! iter based
-    for i in range(0, gram.nvars) {
-        for j in eff.iter_ones_in_row(i) {
-            let mut rp = derives[gram.start_symbol + j] as usize;
-            while derives_rules[rp] >= 0 {
-                first_derives.set(i, derives_rules[rp] as usize);
-                rp += 1;
-            }
-        }
-    } */
-
     assert!(eff.rows == gram.nvars);
     assert!(eff.cols == gram.nvars);
+    let mut first_derives = Bitmat::new(gram.nvars, gram.nrules);
     for (i, j) in eff.iter_ones() {
         for &rule in derives.values(j) {
-            first_derives.set(i, rule.0 as usize);
+            first_derives.set(i, rule.index());
         }
     }
 
@@ -101,14 +62,19 @@ pub fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
 //
 // Similarly, the item_set is passed as a mutable vector.  However, the caller guarantees that
 // item_set will be empty on call to closure(), and closure() writes its output into item_set.
+//
+// * rule_set: bit vector, size=nrules; temporary data, written and read by this fn
+//
+// TODO: Consider changing item_set from Vec<Item> to a bitmap, whose length is nitems.
+// Then the 'states' table becomes a Bitmat.
 pub fn closure(
     gram: &Grammar,
     nucleus: &[Item],
     first_derives: &Bitmat,
     nrules: usize,
-    rule_set: &mut Bitv32, // bit vector, size=nrules; temporary data, written and read by this fn
+    rule_set: &mut Bitv32,
     item_set: &mut Vec<Item>,
-) // output is written to this vec
+)
 {
     assert!(item_set.len() == 0);
 
@@ -123,34 +89,42 @@ pub fn closure(
     // bit vector.  The result is that rule_set will contain a bit vector
     // that identifies the rules need to be added to the closure of the
     // current state.  Keep in mind that we process bit vectors in u32 chunks.
-    for &ni in nucleus.iter() {
-        let symbol = gram.ritem(ni);
-        if symbol.is_symbol() && gram.is_var(symbol.as_symbol()) {
-            let dsp: usize =
-                ((symbol.as_symbol().0 as usize) - gram.ntokens) * first_derives.rowsize;
-            for i in 0..rulesetsize {
-                rule_set.data[i] |= first_derives.data[dsp + i];
+    for &item in nucleus.iter() {
+        let symbol_or_rule = gram.ritem(item);
+        if symbol_or_rule.is_symbol() {
+            let symbol = symbol_or_rule.as_symbol();
+            if gram.is_var(symbol) {
+                let var = gram.symbol_to_var(symbol);
+                let dsp = var.index() * first_derives.rowsize;
+                for i in 0..rulesetsize {
+                    rule_set.data[i] |= first_derives.data[dsp + i];
+                }
             }
         }
     }
 
-    // Scan the rule_set that we just constructed.
-    let mut csp: usize = 0;
-    for r in rule_set.iter_ones() {
-        let itemno = gram.rrhs[r];
-        while csp < nucleus.len() && nucleus[csp] < itemno {
-            item_set.push(nucleus[csp]);
-            csp += 1;
+    // Scan the rule_set that we just constructed. The rule_set tells us which
+    // items need to be merged into the item set for the item set. Thus,
+    // new_items = nucleus merged with rule_set.iter_ones().
+    //
+    // This code relies on this invariant:
+    //      for all r: gram.rrhs[r + 1] > gram.rrhs[r]
+    let mut i: usize = 0; // index into nucleus
+    for rule in rule_set.iter_ones() {
+        let item = gram.rrhs[rule];
+        while i < nucleus.len() && nucleus[i] < item {
+            item_set.push(nucleus[i]);
+            i += 1;
         }
-        item_set.push(itemno);
-        while csp < nucleus.len() && nucleus[csp] == itemno {
-            csp += 1;
+        item_set.push(item);
+        while i < nucleus.len() && nucleus[i] == item {
+            i += 1;
         }
     }
 
-    while csp < nucleus.len() {
-        item_set.push(nucleus[csp]);
-        csp += 1;
+    while i < nucleus.len() {
+        item_set.push(nucleus[i]);
+        i += 1;
     }
 }
 

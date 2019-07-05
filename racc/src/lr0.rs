@@ -117,7 +117,6 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
-        // debug!("    nucleus items: {}", &lr0.states[this_state].items);
         closure(
             gram,
             &states.values(this_state as usize),
@@ -128,7 +127,6 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         );
 
         // The output of save_reductions() is stored in reductions.
-        reductions.start_key();
         save_reductions(gram, &item_set, &mut reductions);
 
         // new_item_sets updates kernel_items, kernel_end, and shift_symbol, and also
@@ -287,6 +285,7 @@ fn new_item_sets(
 /// negative, then we have reached the end of the symbols on the rhs of a rule.  See
 /// the code in reader::pack_grammar(), where this information is set up.
 fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTableBuilder<Rule>) {
+    rules.start_key();
     for &item in item_set {
         let sr = gram.ritem(item);
         if sr.is_rule() {
