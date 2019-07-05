@@ -242,7 +242,6 @@
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::cognitive_complexity)]
 
-mod closure;
 mod grammar;
 mod lalr;
 mod lr0;
