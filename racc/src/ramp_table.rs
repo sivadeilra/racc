@@ -75,7 +75,7 @@ impl<T> RampTable<T> {
         struct EntriesMut<'a, T> {
             last_end: usize,
             ends: core::slice::Iter<'a, usize>,
-            table: &'a mut [T]
+            table: &'a mut [T],
         }
         impl<'a, T> Iterator for EntriesMut<'a, T> {
             type Item = &'a mut [T];
@@ -94,7 +94,7 @@ impl<T> RampTable<T> {
         EntriesMut {
             last_end,
             ends,
-            table: &mut self.table
+            table: &mut self.table,
         }
     }
 
@@ -123,7 +123,10 @@ impl<T> RampTable<T> {
         self.finish_key();
     }
 
-    pub fn push_entry_copy_slice(&mut self, values: &[T]) where T: Copy {
+    pub fn push_entry_copy_slice(&mut self, values: &[T])
+    where
+        T: Copy,
+    {
         self.table.extend(values);
         self.finish_key();
     }

@@ -1,7 +1,7 @@
-use crate::util::fill_copy;
 use crate::grammar::Grammar;
 use crate::lalr::GotoMap;
 use crate::mkpar::{ActionCode, YaccParser};
+use crate::util::fill_copy;
 use crate::{Rule, State, StateOrRule};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
@@ -38,7 +38,13 @@ pub fn output_parser_to_ast(
         .collect();
     items.extend(make_table_i16(Ident::new("YYDEFRED", sp), &yydefred));
 
-    items.extend(output_actions(grammar_span, gram, gotos, parser, &default_reductions));
+    items.extend(output_actions(
+        grammar_span,
+        gram,
+        gotos,
+        parser,
+        &default_reductions,
+    ));
 
     for t in 1..gram.ntokens {
         let tokvalue = gram.value[t] as u16;
@@ -259,14 +265,33 @@ fn make_table_i16_as_u16(name: Ident, values: &[i16]) -> TokenStream {
     }
 }
 
-fn output_actions(span: Span, gram: &Grammar, gotos: &GotoMap, parser: &YaccParser, default_reductions: &[Rule]) -> TokenStream {
+fn output_actions(
+    span: Span,
+    gram: &Grammar,
+    gotos: &GotoMap,
+    parser: &YaccParser,
+    default_reductions: &[Rule],
+) -> TokenStream {
     let nstates = parser.nstates();
 
     let mut act = ActionsTable::new(nstates, gram.nvars);
 
-    token_actions(gram, parser, &default_reductions, &mut act.froms, &mut act.tos);
+    token_actions(
+        gram,
+        parser,
+        &default_reductions,
+        &mut act.froms,
+        &mut act.tos,
+    );
     let default_goto_table = default_goto_table(nstates, gotos);
-    goto_actions(gram, nstates, gotos, &default_goto_table, &mut act.froms, &mut act.tos);
+    goto_actions(
+        gram,
+        nstates,
+        gotos,
+        &default_goto_table,
+        &mut act.froms,
+        &mut act.tos,
+    );
     let order = sort_actions(&mut act);
     let packed = packing::pack_table(parser.nstates(), &order, &act);
 
@@ -312,7 +337,7 @@ impl ActionsTable {
         Self {
             nvectors,
             froms: Vec::new(), // vec![Vec::new(); nvectors],
-            tos: Vec::new(), // vec![Vec::new(); nvectors],
+            tos: Vec::new(),   // vec![Vec::new(); nvectors],
         }
     }
     pub fn tally(&self, i: usize) -> usize {
@@ -340,12 +365,13 @@ impl ActionsTable {
 /// should be the same value, as long as action.symbol is in increasing order.
 /// (See commit 1cc0a3174406eb28f767af0b91fc850e9364aaf2 for the last code
 /// based on the old algorithm.)
-fn token_actions(gram: &Grammar,
+fn token_actions(
+    gram: &Grammar,
     parser: &YaccParser,
     default_reductions: &[Rule],
     froms: &mut Vec<Vec<i16>>,
     tos: &mut Vec<Vec<StateOrRule>>,
-    ) {
+) {
     // shifts
     for actions in parser.actions.iter_entries() {
         let mut shift_r: Vec<i16> = Vec::new();
@@ -432,25 +458,28 @@ fn goto_actions(
 /// Returns: Var -> State
 fn default_goto_table(nstates: usize, gotos: &GotoMap) -> Vec<State> {
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
-    gotos.iter_entries().map(move |var_gotos| {
-        if var_gotos.is_empty() {
-            State(0)
-        } else {
-            fill_copy(&mut state_count, 0);
-            for &entry in var_gotos.iter() {
-                state_count[entry.to_state.0 as usize] += 1;
-            }
-            let mut max = 0;
-            let mut default_state = 0;
-            for (state, &count) in state_count.iter().enumerate() {
-                if count > max {
-                    max = count;
-                    default_state = state;
+    gotos
+        .iter_entries()
+        .map(move |var_gotos| {
+            if var_gotos.is_empty() {
+                State(0)
+            } else {
+                fill_copy(&mut state_count, 0);
+                for &entry in var_gotos.iter() {
+                    state_count[entry.to_state.0 as usize] += 1;
                 }
+                let mut max = 0;
+                let mut default_state = 0;
+                for (state, &count) in state_count.iter().enumerate() {
+                    if count > max {
+                        max = count;
+                        default_state = state;
+                    }
+                }
+                State(default_state as i16)
             }
-            State(default_state as i16)
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 /// Reads ActionTable.tally and width and produces a sorted index vector over
@@ -596,12 +625,12 @@ mod packing {
         pub base: Vec<i16>,
         pub table: Vec<i16>,
         pub check: Vec<i16>,
-        pub high: usize
+        pub high: usize,
     }
 
     use super::ActionsTable;
-    use std::iter::repeat;
     use log::debug;
+    use std::iter::repeat;
 
     pub fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) -> PackedTables {
         debug!("pack_table: nentries={}", order.len());
@@ -637,8 +666,7 @@ mod packing {
             base: pack.base,
             table: pack.table,
             check: pack.check,
-            high: pack.high
+            high: pack.high,
         }
     }
 }
-

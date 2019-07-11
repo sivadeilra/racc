@@ -1,8 +1,8 @@
-use crate::ramp_table::RampTable;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use crate::lr0::Reductions;
+use crate::ramp_table::RampTable;
 use crate::{Rule, State, Token};
 use log::debug;
 use log::warn;
@@ -57,7 +57,7 @@ impl YaccParser {
 pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let nstates = lr0.nstates();
     let mut parser: RampTable<ParserAction> = RampTable::new();
-    for state in 0..nstates  {
+    for state in 0..nstates {
         let state: State = state.into();
         get_shifts(gram, lr0, state, &mut parser);
         get_reductions(gram, &lr0.reductions, lalr, state, &mut parser);
@@ -74,7 +74,12 @@ pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccPa
     }
 }
 
-fn get_shifts(gram: &Grammar, lr0: &LR0Output, stateno: State, actions: &mut RampTable<ParserAction>) {
+fn get_shifts(
+    gram: &Grammar,
+    lr0: &LR0Output,
+    stateno: State,
+    actions: &mut RampTable<ParserAction>,
+) {
     for &k in lr0.shifts.values(stateno) {
         let symbol = lr0.accessing_symbol[k];
         if gram.is_token(symbol) {
@@ -201,7 +206,10 @@ fn remove_conflicts(final_state: State, parser: &mut RampTable<ParserAction>) {
 /// Modifies ParserAction::suppressed. That field could potentially be moved to a
 /// separate vector, which this function would produce.
 /// Returns (shift_reduce_conflict_count, reduce_reduce_conflict_count)
-fn remove_conflicts_for_state(actions: &mut [ParserAction], is_final_state: bool) -> (usize, usize) {
+fn remove_conflicts_for_state(
+    actions: &mut [ParserAction],
+    is_final_state: bool,
+) -> (usize, usize) {
     let mut srcount: usize = 0;
     let mut rrcount: usize = 0;
     let mut iter_actions = actions.iter_mut();
@@ -299,5 +307,8 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
 /// Computes the default reduction for each state.
 /// State -> Rule
 pub fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
-    parser.iter_entries().map(|actions| sole_reduction(actions)).collect()
+    parser
+        .iter_entries()
+        .map(|actions| sole_reduction(actions))
+        .collect()
 }

@@ -34,7 +34,6 @@ use log::debug;
 use log::warn;
 use proc_macro2::Span;
 use std::collections::HashMap;
-use std::mem::replace;
 use std::rc::Rc;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
@@ -142,7 +141,6 @@ impl ReaderState {
     // is not already in the symbol table, then this method adds the symbol.
     pub fn lookup(&mut self, name: &Ident) -> usize {
         if let Some(ii) = self.symbol_table.get(&name.to_string()) {
-            // debug!("found {}_{} already in table", name, *ii);
             return *ii;
         }
 
@@ -150,8 +148,7 @@ impl ReaderState {
         let s = make_symbol(name.clone());
         self.symbols.push(s);
         self.symbol_table.insert(name.to_string(), index);
-        // debug!("added {}_{} to table", name, index);
-        return index;
+        index
     }
 
     pub fn lookup_ref_mut<'a>(&'a mut self, name: &Ident) -> (usize, &'a mut SymbolDef) {
@@ -161,14 +158,9 @@ impl ReaderState {
 
     pub fn start_rule(&mut self, lhs: usize) {
         assert!(self.symbols[lhs].class == SymClass::NonTerminal);
-
-        // debug!("  start_rule: r{}: {}_{} -> (at item {}) ...", self.nrules, self.symbols[lhs].name, lhs, self.pitem.len());
-
         self.lhs.push(lhs);
         self.rprec.push(UNDEFINED);
         self.rassoc.push(TOKEN);
-
-        // nrules is not yet advanced; that happens in end_rule
     }
 
     // Terminates the current rule.
@@ -204,8 +196,6 @@ impl ReaderState {
         self.rhs_binding.push(None);
 
         assert_eq!(self.rule_blocks.len(), self.nrules());
-
-        // debug!("  end_rule: r{}, lhs={} nitems={}", rule, self.plhs[rule], self.pitem.len());
     }
 
     /// Adds a new "empty" rule.  A new symbol name is generated, using the pattern $$nn,
@@ -262,15 +252,13 @@ impl ReaderState {
             self.last_was_action = false;
         }
 
-        // debug!("    add_symbol: pitem[{}] = {}_{}", self.pitem.len(), self.symbols[bp].name, bp);
-
         self.pitem.push(bp);
         self.rhs_binding.push(ident);
     }
 
     /// "Packs" the symbol table and the grammar definition.  In the packed form, the
     /// tokens are numbered sequentially, and are followed by the non-terminals.
-    pub fn pack_symbols_and_grammar(&mut self, goal_symbol: usize) -> Grammar {
+    pub fn pack_symbols_and_grammar(&self, goal_symbol: usize) -> Grammar {
         debug!("pack_symbols");
 
         assert!(goal_symbol < self.symbols.len());
@@ -331,29 +319,29 @@ impl ReaderState {
         // Build the remap table.  map_to_packed[old] gives the index of the packed location.
         // This replaces the bucket::index field, from C.  This is the inverse of v.  The "error"
         // symbol is always at packed index 1.
-        let map_to_packed: Vec<i16> = {
-            let mut map_to_packed: Vec<i16> = vec![-1; nsyms];
-            map_to_packed[0] = 1; // The 'error' symbol
+        let map_to_packed: Vec<Symbol> = {
+            let mut map_to_packed: Vec<Symbol> = vec![Symbol(-1); nsyms];
+            map_to_packed[0] = Symbol::ERROR; // The 'error' symbol
             for i in 1..ntokens {
-                map_to_packed[v[i]] = i as i16;
+                map_to_packed[v[i]] = Symbol(i as i16);
             }
-            map_to_packed[goal_symbol] = (start_symbol + 1) as i16;
+            map_to_packed[goal_symbol] = Symbol((start_symbol + 1) as i16);
             let mut k = start_symbol + 2;
             for &s in v[ntokens + 1..nsyms].iter() {
                 if s != goal_symbol {
-                    map_to_packed[s] = k as i16;
+                    map_to_packed[s] = Symbol(k as i16);
                     k += 1;
                 }
             }
             map_to_packed
         };
 
-        let mut gram_name: Vec<Option<Ident>> = vec![None; nsyms];
+        let mut gram_name: Vec<Ident> = Vec::with_capacity(nsyms);
         let mut gram_value: Vec<i16> = vec![0; nsyms];
-        let mut gram_prec: Vec<i16> = vec![0; nsyms];
-        let mut gram_assoc: Vec<u8> = vec![0; nsyms];
-        let mut gram_rprec = replace(&mut self.rprec, Vec::new());
-        let mut gram_rassoc = replace(&mut self.rassoc, Vec::new());
+        let mut gram_prec: Vec<i16> = Vec::with_capacity(nsyms);
+        let mut gram_assoc: Vec<u8> = Vec::with_capacity(nsyms);
+        let mut gram_rprec = self.rprec.clone();
+        let mut gram_rassoc = self.rassoc.clone();
 
         // symbols_value replaces the bucket::value field.  that is, for (i, j),
         // self.symbols[i].value = j ==> symbols_value[i] = j
@@ -408,37 +396,39 @@ impl ReaderState {
         };
 
         // Propagate $end token
-        gram_name[0] = Some(Ident::new("__end", Span::call_site()));
+        gram_name.push(Ident::new("__end", Span::call_site()));
         gram_value[0] = 0;
-        gram_prec[0] = 0;
-        gram_assoc[0] = TOKEN;
+        gram_prec.push(0);
+        gram_assoc.push(TOKEN);
 
         // Propagate token symbols
         for i in 1..ntokens {
             let from = &self.symbols[v[i]];
-            gram_name[i] = Some(from.name.clone());
+            gram_name.push(from.name.clone());
             gram_value[i] = symbols_value[v[i]];
-            gram_prec[i] = from.prec;
-            gram_assoc[i] = from.assoc;
+            gram_prec.push(from.prec);
+            gram_assoc.push(from.assoc);
         }
 
         // Set up the start (accept) symbol
         assert!(start_symbol == ntokens);
-        gram_name[start_symbol] = Some(Ident::new("__accept", Span::call_site()));
+        gram_name.push(Ident::new("__accept", Span::call_site()));
         gram_value[start_symbol] = -1;
-        gram_prec[start_symbol] = 0;
-        gram_assoc[start_symbol] = TOKEN;
+        gram_prec.push(0);
+        gram_assoc.push(TOKEN);
 
         // Propagate non-terminal symbols
         for i in start_symbol + 1..nsyms {
-            let k = map_to_packed[v[i]] as usize;
-            assert!(k != NO_SYMBOL);
             let from = &self.symbols[v[i]];
-            gram_name[k] = Some(from.name.clone());
-            gram_value[k] = symbols_value[v[i]];
-            gram_prec[k] = from.prec;
-            gram_assoc[k] = from.assoc;
+            gram_name.push(from.name.clone());
+            gram_value[i] = symbols_value[v[i]];
+            gram_prec.push(from.prec);
+            gram_assoc.push(from.assoc);
         }
+
+        assert_eq!(gram_name.len(), nsyms);
+        assert_eq!(gram_prec.len(), nsyms);
+        assert_eq!(gram_assoc.len(), nsyms);
 
         debug!("packed symbol table:");
         for i in 0..nsyms {
@@ -446,7 +436,7 @@ impl ReaderState {
                 "    {:3} {} {:20} value {:3} prec {:2} assoc {:2}",
                 i,
                 if i < ntokens { "token" } else { "var  " },
-                gram_name[i].as_ref().unwrap(),
+                gram_name[i],
                 gram_value[i],
                 gram_prec[i],
                 gram_assoc[i]
@@ -479,33 +469,33 @@ impl ReaderState {
         rlhs.extend(
             self.lhs[PREDEFINED_RULES..nrules]
                 .iter()
-                .map(|&lhs| Symbol(map_to_packed[lhs] as i16)),
+                .map(|&lhs| map_to_packed[lhs]),
         );
 
-        let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(Symbol(0)); self.nitems()];
+        let mut ritem: Vec<SymbolOrRule> = vec![SymbolOrRule::symbol(Symbol::NULL); self.nitems()];
         ritem[0] = SymbolOrRule::rule(Rule::RULE_1);
-        ritem[1] = SymbolOrRule::symbol(Symbol(map_to_packed[goal_symbol]));
-        ritem[2] = SymbolOrRule::symbol(Symbol(0));
+        ritem[1] = SymbolOrRule::symbol(map_to_packed[goal_symbol]);
+        ritem[2] = SymbolOrRule::symbol(Symbol::NULL);
         ritem[3] = SymbolOrRule::rule(Rule::RULE_2);
 
-        let mut rrhs: Vec<Item> = vec![Item(0); nrules + 1];
-        rrhs[0] = Item(0);
-        rrhs[1] = Item(0);
-        rrhs[2] = Item(1);
+        let mut rrhs: Vec<Item> = Vec::with_capacity(nrules + 1);
+        rrhs.push(Item::NULL);
+        rrhs.push(Item::NULL);
+        rrhs.push(Item(1));
 
         let mut j = PREDEFINED_ITEMS; // index of next item to output
         let pitem = &self.pitem;
         let symbols = &self.symbols;
         for i in PREDEFINED_RULES..nrules {
-            rrhs[i] = Item(j as i16);
+            rrhs.push(Item(j as i16));
             let mut assoc = TOKEN;
-            let mut prec2 = 0u8;
+            let mut prec2: i16 = 0;
             while pitem[j] != NO_ITEM {
                 if symbols[pitem[j]].class == SymClass::Terminal {
-                    prec2 = symbols[pitem[j]].prec as u8;
+                    prec2 = symbols[pitem[j]].prec;
                     assoc = symbols[pitem[j]].assoc;
                 }
-                ritem[j] = SymbolOrRule::symbol(Symbol(map_to_packed[pitem[j]]));
+                ritem[j] = SymbolOrRule::symbol(map_to_packed[pitem[j]]);
                 j += 1;
             }
 
@@ -516,20 +506,20 @@ impl ReaderState {
             ritem[j] = SymbolOrRule::rule(Rule(i as i16));
             j += 1;
             if gram_rprec[i] == UNDEFINED {
-                gram_rprec[i] = prec2 as i16;
+                gram_rprec[i] = prec2;
                 gram_rassoc[i] = assoc;
             }
         }
 
         // Terminate the rrhs list
-        rrhs[nrules] = Item(j as i16);
+        rrhs.push(Item(j as i16));
 
         Grammar {
             nsyms: nsyms,
             ntokens: ntokens,
             nvars: nvars,
-            // start_symbol: start_symbol,
-            name: gram_name.into_iter().map(|opt| opt.unwrap()).collect(),
+
+            name: gram_name,
             pname: Vec::new(),
             value: gram_value,
 
@@ -626,11 +616,7 @@ impl Parse for Grammar2 {
 
         let mut goal_symbol: Option<usize> = None;
 
-        // debug!("parsing token definitions");
         while !input.is_empty() {
-            // println!("racc: parsing rule");
-
-            // debug!("token: {:?}", la);
             let la = input.lookahead1();
             if la.peek(Ident) {
                 // An identifier can start either a token definition or a rule definition.
@@ -643,23 +629,19 @@ impl Parse for Grammar2 {
                 let name_def_str = id.to_string();
                 let name_def_span = id.span();
                 let lhs = reader.lookup(&id);
-                // println!("- id: {}", name_def_str);
 
                 let la = input.lookahead1();
                 if la.peek(syn::token::Colon) {
-                    // debug!("found ':', beginning a rule");
                     input.parse::<syn::token::Colon>()?;
                     match reader.symbols[lhs].class {
                         SymClass::Terminal => {
                             return Err(syn::Error::new(name_def_span, "name has been defined as a token, and so cannot be on the left-hand side of a rule"));
-                            // parser.span_err(reader.symbols[lhs].span, "see definition of token");
                             // we continue executing, even with a bogus name index.
                         }
                         SymClass::NonTerminal => {
                             // good, this symbol is already known to be a non-terminal
                         }
                         SymClass::Unknown => {
-                            // debug!("name '{}' was unknown type, changing to non-terminal (variable)", name_def_str);
                             reader.symbols[lhs].class = SymClass::NonTerminal;
                         }
                     }
@@ -684,16 +666,12 @@ impl Parse for Grammar2 {
                         let la = input.lookahead1();
                         if la.peek(Ident) {
                             let rhs_ident = input.parse::<Ident>()?;
-                            // debug!("rule: found token/symbol ref '{}'", rhs_name);
                             let rhs = reader.lookup(&rhs_ident);
-
-                            // see if the symbol is followed by "= binding".
                             let mut rbind: Option<Ident> = None;
                             if input.lookahead1().peek(syn::token::Eq) {
                                 input.parse::<syn::token::Eq>()?;
                                 let la = input.lookahead1();
                                 if la.peek(Ident) {
-                                    // debug!("found rhs binding");
                                     let rhs_bind_ident = input.parse()?;
                                     rbind = Some(rhs_bind_ident);
                                 } else {
@@ -724,7 +702,7 @@ impl Parse for Grammar2 {
                     }
                 } else if la.peek(Token![=]) || la.peek(Token![;]) {
                     let has_value = la.peek(Token![=]);
-                    if la.peek(syn::token::Eq) {
+                    if la.peek(Token![=]) {
                         input.parse::<Token![=]>()?;
                     } else {
                         input.parse::<Token![;]>()?;
@@ -745,21 +723,16 @@ impl Parse for Grammar2 {
                                 name_def_span,
                                 "token was previously used as a variable",
                             ));
-                            // parser.span_err(reader.symbols[lhs].span, "location of previous definition");
                         }
                         SymClass::Unknown => {
-                            // debug!("resolving forward ref of a token '{}'", name_def_str);
                             reader.symbols[lhs].class = SymClass::Terminal;
                         }
                     }
-
-                    // debug!("defining token '{}' at unpacked symbol index {}", name_def_str, lhs);
 
                     if has_value {
                         let la = input.lookahead1();
                         if la.peek(syn::Lit) {
                             let _lit: syn::Lit = input.parse()?;
-                            // debug!("token has value: {:?}", lit);
                             let la = input.lookahead1();
                             if la.peek(Token![;]) {
                                 input.parse::<Token![;]>()?;
@@ -793,8 +766,7 @@ impl Parse for Grammar2 {
         );
 
         // Check for any symbols that were not defined.
-        for i in 0..reader.symbols.len() {
-            let sym = &reader.symbols[i];
+        for sym in reader.symbols.iter() {
             if sym.class == SymClass::Unknown {
                 return Err(syn::Error::new(
                     sym.name.span(),
@@ -802,14 +774,9 @@ impl Parse for Grammar2 {
                 ));
             }
         }
-        //    parser.abort_if_errors();
 
         let gram = reader.pack_symbols_and_grammar(goal_symbol);
         ReaderState::print_grammar(&gram);
-
-        // -> (Grammar, Vec<Option<Expr>>, Vec<Option<syn::Ident>>)
-
-        // println!("finished parsing grammar");
 
         Ok(Grammar2 {
             grammar: gram,

@@ -333,6 +333,24 @@ mod aliases {
         pub const RULE_2: Rule = Rule(2);
     }
 
+    impl Symbol {
+        pub const NULL: Symbol = Symbol(0);
+        pub const ERROR: Symbol = Token::ERROR.to_symbol();
+    }
+
+    impl Token {
+        /// Converts a token to a symbol. This is trivial, since all tokens are symbols
+        /// starting at zero.
+        pub const fn to_symbol(self) -> Symbol {
+            Symbol(self.0)
+        }
+        pub const ERROR: Token = Token(1);
+    }
+
+    impl Item {
+        pub const NULL: Item = Item(0);
+    }
+
     #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
     pub struct SymbolOrRule(i16);
 
