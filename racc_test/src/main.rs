@@ -28,6 +28,7 @@ racc::racc_grammar! {
     THEN;
     WHILE;
     DO;
+    DIVIDE;
 
     Expr : NUM=x {
         println!("NUM={:?}", x); x
@@ -37,6 +38,15 @@ racc::racc_grammar! {
         }
         | Expr=a MINUS Expr=b {
             Some(a.unwrap() - b.unwrap())
+        }
+        | Expr=a DIVIDE Expr=b {
+            let a = a.unwrap();
+            let b = b.unwrap();
+            println!("{} / {}", a, b);
+            if b == 0 {
+                return Err(racc_runtime::Error::AppError);
+            }
+            Some(a / b)
         }
         | LPAREN Expr=inner RPAREN { inner }
         | IF Expr=predicate THEN Expr=true_value {
@@ -64,9 +74,33 @@ racc::racc_grammar! {
 
 }
 
+fn err_test() {
+
+    let toks = vec![
+        (NUM, Some(100)),
+        (DIVIDE, None),
+        (NUM, Some(0))
+    ];
+
+    let mut parser = ParserState::new();
+
+    let mut ctx = AppContext { x: 0 };
+
+    for &(tok, lval) in toks.iter() {
+        parser.push_token(&mut ctx, tok, lval).unwrap();
+    }
+    let result = parser.finish(&mut ctx);
+    assert_eq!(result, Err(racc_runtime::Error::AppError));
+}
+
 fn main() {
     env_logger::init();
 
+    err_test();
+    basic_test();
+}
+
+fn basic_test() {
     let toks = vec![
         (LPAREN, None),
         (NUM, Some(42)),
@@ -75,20 +109,15 @@ fn main() {
         (NUM, Some(24)),
     ];
 
-    let mut parser = new_parser();
+    let mut parser = ParserState::new();
 
     let mut ctx = AppContext { x: 0 };
 
     for &(tok, lval) in toks.iter() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
-
-    match parser.finish(&mut ctx) {
-        Ok(final_value) => {
-            println!("Ok: {:?}", final_value);
-        }
-        Err(e) => {
-            println!("Error: {:?}", e);
-        }
-    }
+    let result = parser.finish(&mut ctx);
+    assert_eq!(result, Ok(Some(66)));
 }
+
+

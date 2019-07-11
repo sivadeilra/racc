@@ -56,7 +56,6 @@ enum SymClass {
 struct SymbolDef {
     name: Ident,
     tag: Option<Rc<String>>,
-    // value: i16,
     prec: i16,
     class: SymClass,
     assoc: u8,
@@ -66,7 +65,6 @@ fn make_symbol(name: Ident) -> SymbolDef {
     SymbolDef {
         name: name,
         tag: None,
-        // value: UNDEFINED,
         prec: 0,
         class: SymClass::Unknown,
         assoc: TOKEN,

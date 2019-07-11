@@ -2,10 +2,15 @@
 use log::debug;
 use std::fmt::Debug;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     SyntaxError,
+    /// This is a terrible way to handle app errors.
+    /// TODO: Find some better way.
+    AppError,
 }
+
+/*
 
 /// Contains references to the parsing tables (and related information) needed by parsers.
 ///
@@ -283,3 +288,6 @@ impl<SymbolValue: Debug, AppContext> ParserState<SymbolValue, AppContext> {
         Err(Error::SyntaxError)
     }
 }
+
+
+*/
