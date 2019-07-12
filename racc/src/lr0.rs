@@ -1,10 +1,10 @@
+use crate::util::Bitmat;
+use crate::warshall::reflexive_transitive_closure;
+use crate::util::word_size;
 use crate::grammar::Grammar;
 use crate::ramp_table::{RampTable, RampTableBuilder};
 use crate::tvec::TVec;
-use crate::util::word_size;
-use crate::util::Bitmat;
 use crate::util::Bitv32;
-use crate::warshall::reflexive_transitive_closure;
 use crate::{Item, Rule, State, Var};
 use log::debug;
 
@@ -113,7 +113,11 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     while this_state < states.num_keys() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(gram, State(this_state as i16), states.values(this_state));
+        print_core(
+            gram,
+            State(this_state as i16),
+            states.values(this_state),
+        );
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
@@ -425,7 +429,8 @@ pub fn closure(
     first_derives: &Bitmat,
     rule_set: &mut Bitv32,
     item_set: &mut Vec<Item>,
-) {
+)
+{
     assert!(item_set.len() == 0);
 
     let rulesetsize = word_size(rule_set.nbits);

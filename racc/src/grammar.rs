@@ -1,5 +1,3 @@
-/* keyword codes */
-
 use crate::Item;
 use crate::Rule;
 use crate::SymbolOrRule;
@@ -126,16 +124,6 @@ impl Grammar {
     pub fn var_to_symbol(&self, var: Var) -> Symbol {
         assert!((var.0 as usize) < self.nvars);
         Symbol(self.ntokens as i16 + var.0)
-    }
-
-    #[allow(dead_code)]
-    pub fn symbol_to_var_opt(&self, sym: Symbol) -> Option<Var> {
-        let su = sym.0 as usize;
-        if su >= self.ntokens {
-            Some(Var((su - self.ntokens) as i16))
-        } else {
-            None
-        }
     }
 
     pub fn iter_vars(&self) -> impl Iterator<Item = Var> {

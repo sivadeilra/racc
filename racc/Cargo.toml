@@ -9,7 +9,6 @@ edition = "2018"
 
 [lib]
 name = "racc"
-crate-type = ["proc-macro"]
 proc-macro = true
 
 [dependencies]
@@ -17,3 +16,9 @@ log = "0.4.*"
 syn = { version = "0.15", features = ["full"] }
 quote = "0.6"
 proc-macro2 = "0.4"
+
+[dev-dependencies]
+racc = { path = "../racc" }
+racc_runtime = { path = "../racc_runtime" }
+log = "0.4.*"
+env_logger = "0.6"
