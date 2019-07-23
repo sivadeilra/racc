@@ -378,7 +378,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
                 Err(racc_runtime::Error::SyntaxError)
             }
         }
-    }    
+    }
 }
 
 // Generates the YYLHS table.

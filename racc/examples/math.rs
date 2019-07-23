@@ -1,4 +1,3 @@
-
 struct AppContext {
     x: usize,
 }
@@ -70,12 +69,7 @@ racc::racc_grammar! {
 }
 
 fn err_test() {
-
-    let toks = vec![
-        (NUM, Some(100)),
-        (DIVIDE, None),
-        (NUM, Some(0))
-    ];
+    let toks = vec![(NUM, Some(100)), (DIVIDE, None), (NUM, Some(0))];
 
     let mut parser = ParserState::new();
     let mut ctx = AppContext { x: 0 };
@@ -110,5 +104,3 @@ fn basic_test() {
     let result = parser.finish(&mut ctx);
     assert_eq!(result, Ok(Some(66)));
 }
-
-

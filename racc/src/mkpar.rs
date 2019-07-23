@@ -35,7 +35,6 @@ pub const LEFT: u8 = 1;
 pub const RIGHT: u8 = 2;
 
 pub struct ParserAction {
-    /// is this symbol always a token?
     pub symbol: Token,
     pub prec: i16,
     pub action_code: ActionCode,

@@ -134,6 +134,7 @@ impl Grammar {
         (self.ntokens..self.nsyms).map(move |i| Symbol(i as i16))
     }
 
+    #[allow(dead_code)] // work in progress
     pub fn iter_token_syms(&self) -> impl Iterator<Item = Symbol> {
         (0..self.ntokens).map(move |i| Symbol(i as i16))
     }

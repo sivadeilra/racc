@@ -7,4 +7,3 @@ pub enum Error {
     /// TODO: Find some better way.
     AppError,
 }
-

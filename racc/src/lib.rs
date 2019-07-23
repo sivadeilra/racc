@@ -414,7 +414,7 @@ pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream 
     let gram = &g.grammar;
 
     let lr0 = lr0::compute_lr0(&gram);
-    let lalr_out = lalr::run_lalr(&gram, &lr0);
+    let lalr_out = lalr::run_lalr_phase(&gram, &lr0);
     let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
 
     let parser_tokens = output::output_parser_to_ast(

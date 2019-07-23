@@ -15,6 +15,17 @@ impl<T> RampTable<T> {
         }
     }
 
+    pub fn with_capacity(num_keys: usize, num_values: usize) -> Self {
+        Self {
+            index: {
+                let mut ii = Vec::with_capacity(num_keys + 1);
+                ii.push(0);
+                ii
+            },
+            table: Vec::with_capacity(num_values),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             index: vec![0],
@@ -129,43 +140,5 @@ impl<T> RampTable<T> {
     {
         self.table.extend(values);
         self.finish_key();
-    }
-}
-
-pub struct RampTableBuilder<T> {
-    index: Vec<usize>,
-    table: Vec<T>,
-}
-
-impl<T> RampTableBuilder<T> {
-    pub fn new() -> Self {
-        Self {
-            index: Vec::new(),
-            table: Vec::new(),
-        }
-    }
-
-    pub fn with_capacity(keys: usize, values: usize) -> Self {
-        Self {
-            index: Vec::with_capacity(keys + 1),
-            table: Vec::with_capacity(values),
-        }
-    }
-
-    pub fn start_key(&mut self) {
-        self.index.push(self.table.len());
-    }
-
-    pub fn push_value(&mut self, item: T) {
-        self.table.push(item);
-    }
-
-    pub fn finish(mut self) -> RampTable<T> {
-        let end = self.table.len();
-        self.index.push(end);
-        RampTable {
-            index: self.index,
-            table: self.table,
-        }
     }
 }

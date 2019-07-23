@@ -1,10 +1,10 @@
-use crate::util::Bitmat;
-use crate::warshall::reflexive_transitive_closure;
-use crate::util::word_size;
 use crate::grammar::Grammar;
-use crate::ramp_table::{RampTable, RampTableBuilder};
+use crate::ramp_table::RampTable;
 use crate::tvec::TVec;
+use crate::util::word_size;
+use crate::util::Bitmat;
 use crate::util::Bitv32;
+use crate::warshall::reflexive_transitive_closure;
 use crate::{Item, Rule, State, Var};
 use log::debug;
 
@@ -113,11 +113,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
     while this_state < states.num_keys() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(
-            gram,
-            State(this_state as i16),
-            states.values(this_state),
-        );
+        print_core(gram, State(this_state as i16), states.values(this_state));
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
@@ -292,17 +288,16 @@ pub type DerivesTable = RampTable<Rule>;
 
 /// Compute the DERIVES table. The DERIVES table maps Var -> [Rule].
 fn set_derives(gram: &Grammar) -> DerivesTable {
-    let mut d = RampTableBuilder::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
+    let mut derives = RampTable::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
     for lhs in gram.iter_var_syms() {
-        d.start_key();
         for rule in gram.iter_rules() {
             if gram.rlhs(rule) == lhs {
-                d.push_value(rule as Rule);
+                derives.push_value(rule as Rule);
             }
         }
+        derives.finish_key();
     }
 
-    let derives = d.finish();
     print_derives(gram, &derives);
     derives
 }
@@ -429,8 +424,7 @@ pub fn closure(
     first_derives: &Bitmat,
     rule_set: &mut Bitv32,
     item_set: &mut Vec<Item>,
-)
-{
+) {
     assert!(item_set.len() == 0);
 
     let rulesetsize = word_size(rule_set.nbits);

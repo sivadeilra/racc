@@ -5,7 +5,7 @@ use crate::tvec::TVec;
 use crate::util::Bitmat;
 use crate::StateOrRule;
 use crate::Symbol;
-use crate::{Rule, State};
+use crate::{Rule, State, Var};
 use log::debug;
 
 #[allow(non_snake_case)]
@@ -24,8 +24,8 @@ pub struct FromTo {
 pub type GotoMap = RampTable<FromTo>;
 
 #[allow(non_snake_case)]
-pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
-    let gotos = set_goto_map(gram, lr0);
+pub fn run_lalr_phase(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
+    let gotos = make_goto_map(gram, lr0);
     let nullable = crate::lr0::set_nullable(gram);
     let mut F = initialize_F(gram, lr0, &nullable, &gotos);
     let (includes, lookback) = build_relations(gram, lr0, &nullable, &gotos);
@@ -34,7 +34,7 @@ pub fn run_lalr(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
     LALROutput { LA, gotos }
 }
 
-// Finds the longest rhs
+/// Finds the longest rhs
 fn set_max_rhs(gram: &Grammar) -> usize {
     let mut length: usize = 0;
     let mut max: usize = 0;
@@ -54,22 +54,21 @@ fn set_max_rhs(gram: &Grammar) -> usize {
 /// Builds the GotoMap: Var -> [FromTo]
 ///
 /// GotoMap::num_keys() = nvars
-fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
+fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
     // Var -> count
     let mut goto_map: Vec<usize> = vec![0; gram.nvars + 1];
     let mut ngotos: usize = 0;
 
     for shifts in lr0.shifts.iter_entries() {
-        for i in (0..shifts.len()).rev() {
-            let state = shifts[i];
+        for &state in shifts.iter().rev() {
             let symbol = lr0.accessing_symbol[state];
             if gram.is_token(symbol) {
                 break;
             }
             assert!(ngotos < 0x7fff);
             ngotos += 1;
-            goto_map[gram.symbol_to_var(symbol).0 as usize] += 1;
+            goto_map[gram.symbol_to_var(symbol).index()] += 1;
         }
     }
 
@@ -86,9 +85,7 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
         temp_map.push(k);
         k += goto_map[i];
     }
-    for i in 0..gram.nvars {
-        goto_map[i] = temp_map[i];
-    }
+    goto_map[..gram.nvars].copy_from_slice(&temp_map);
 
     goto_map[gram.nvars] = ngotos;
     temp_map.push(ngotos);
@@ -102,20 +99,20 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
         ngotos
     ];
 
-    for (sp_state, sp_shifts) in lr0.shifts.iter_sets() {
-        let sp_state = State(sp_state as i16);
-        for &state2 in sp_shifts.iter().rev() {
-            let symbol = lr0.accessing_symbol[state2];
+    for (from_state, sp_shifts) in lr0.shifts.iter_sets() {
+        let from_state = State(from_state as i16);
+        for &to_state in sp_shifts.iter().rev() {
+            let symbol = lr0.accessing_symbol[to_state];
             if gram.is_token(symbol) {
                 break;
             }
 
-            let k = temp_map[symbol.0 as usize - gram.ntokens] as usize;
-            temp_map[symbol.0 as usize - gram.ntokens] += 1;
-            from_to[k] = FromTo {
-                from_state: sp_state,
-                to_state: state2,
+            let k = &mut temp_map[gram.symbol_to_var(symbol).index()];
+            from_to[*k as usize] = FromTo {
+                from_state,
+                to_state,
             };
+            *k += 1;
         }
     }
 
@@ -144,22 +141,20 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 }
 
 // Returns an index into goto_map, i.e. the "goto".
-fn map_goto(gram: &Grammar, gotos: &GotoMap, state: State, symbol: Symbol) -> usize {
-    let var = gram.symbol_to_var(symbol);
+fn map_goto(gotos: &GotoMap, state: State, var: Var) -> usize {
+    use std::cmp::Ordering;
     let range = gotos.values_range(var);
     let mut low = range.start;
     let mut high = range.end;
+    // println!("searching for from_state={} in {:#?}", state, gotos.values(var));
     loop {
         assert!(low < high);
         let middle = (low + high) / 2;
-        let s = gotos.value(middle).from_state;
-        if s == state {
-            return middle;
-        }
-        if s < state {
-            low = middle + 1;
-        } else {
-            high = middle;
+        // println!("checking: middle={} value.from_state={}", middle, gotos.value(middle).from_state);
+        match state.cmp(&gotos.value(middle).from_state) {
+            Ordering::Equal => return middle,
+            Ordering::Less => high = middle,
+            Ordering::Greater => low = middle + 1,
         }
     }
 }
@@ -180,7 +175,7 @@ fn initialize_F(
 
     for i in 0..ngotos {
         let stateno = gotos.table[i].to_state;
-        let shifts = lr0.shifts.values(stateno.0 as usize);
+        let shifts = lr0.shifts.values(stateno.index());
 
         if !shifts.is_empty() {
             let mut j: usize = 0;
@@ -189,24 +184,20 @@ fn initialize_F(
                 if gram.is_var(symbol) {
                     break;
                 }
-                F.set(i, symbol.0 as usize);
+                F.set(i, symbol.index());
                 j += 1;
             }
 
             while j < shifts.len() {
                 let symbol = lr0.accessing_symbol[shifts[j]];
                 if nullable[symbol] {
-                    edge.push(map_goto(gram, gotos, stateno, symbol) as i16);
+                    edge.push(map_goto(gotos, stateno, gram.symbol_to_var(symbol)) as i16);
                 }
                 j += 1;
             }
 
             if edge.len() != 0 {
-                let mut rp: Vec<i16> = Vec::with_capacity(edge.len() + 1);
-                rp.reserve_exact(edge.len() + 1);
-                rp.extend(&edge);
-                rp.push(-1);
-                reads[i] = rp;
+                reads[i] = edge.to_vec();
                 edge.clear();
             }
         }
@@ -217,7 +208,7 @@ fn initialize_F(
     F
 }
 
-// Returns (includes, lookback)
+/// Returns (includes, lookback)
 fn build_relations(
     gram: &Grammar,
     lr0: &LR0Output,
@@ -234,7 +225,7 @@ fn build_relations(
 
     for i in 0..ngotos {
         let mut edge: Vec<StateOrRule> = Vec::new();
-        assert!(states.len() == 0);
+        assert!(states.is_empty());
 
         let goto = gotos.value(i);
         let from_state = goto.from_state;
@@ -269,7 +260,7 @@ fn build_relations(
                     break;
                 }
                 length -= 1;
-                edge.push(map_goto(gram, gotos, states[length], gram_ritem) as i16);
+                edge.push(map_goto(gotos, states[length], gram.symbol_to_var(gram_ritem)) as i16);
                 if !nullable[gram_ritem] || length == 0 {
                     break;
                 }
@@ -278,7 +269,7 @@ fn build_relations(
         }
 
         if !edge.is_empty() {
-            edge.push(-1);
+            //edge.push(-1);
         }
         includes.push(edge);
     }
@@ -308,45 +299,26 @@ fn add_lookback_edge(
 #[allow(non_snake_case)]
 fn transpose(r2: &[Vec<i16>]) -> Vec<Vec<i16>> {
     let mut nedges: Vec<i16> = vec![0; r2.len()];
-    for i in 0..r2.len() {
-        let sp = &r2[i];
-        if sp.len() > 0 {
-            let mut j: usize = 0;
-            while sp[j] >= 0 {
-                let e = sp[j] as usize;
-                j += 1;
-                nedges[e] += 1;
+    for sp in r2.iter() {
+        for &e in sp.iter() {
+            if e < 0 {
+                break;
             }
+            nedges[e as usize] += 1;
         }
     }
 
-    let mut new_R: Vec<Vec<i16>> = vec![Vec::new(); r2.len()];
-
-    for i in 0..r2.len() {
-        let k = nedges[i];
-        if k > 0 {
-            let mut sp: Vec<i16> = vec![0; (k as usize) + 1];
-            sp[k as usize] = -1;
-            new_R[i] = sp;
-        }
-    }
+    let mut new_R: Vec<Vec<i16>> = nedges.iter().map(|&n| vec![0; n as usize]).collect();
     drop(nedges);
 
     let mut temp_R: Vec<i16> = vec![0; r2.len()]; // contains output columns
-    for i in 0..r2.len() {
+    for (i, sp) in r2.iter().enumerate() {
         // i is old-row
-        let sp = &r2[i];
-        let mut j: usize = 0; // j is old-col
-        if sp.len() > 0 {
-            while sp[j] >= 0 {
-                let k = sp[j] as usize;
-                j += 1;
-
-                let out_col = temp_R[k];
-                temp_R[k] += 1;
-
-                new_R[k][out_col as usize] = i as i16;
-            }
+        for &k in sp.iter() {
+            let k =  k as usize;
+            let out_col = temp_R[k];
+            temp_R[k] += 1;
+            new_R[k][out_col as usize] = i as i16;
         }
     }
 
@@ -426,33 +398,24 @@ fn traverse(ds: &mut DigraphState<'_>, i: usize) {
     let base = i * ds.F.rowsize;
     let fp3 = base + ds.F.rowsize;
 
-    if ds.R[i].len() != 0 {
-        let rp = &ds.R[i];
-        let mut rpi: usize = 0;
-        loop {
-            let j = rp[rpi];
-            rpi += 1;
-            if j < 0 {
-                break;
-            }
-            let j = j as usize;
+    for &j in ds.R[i].iter() {
+        let j = j as usize;
 
-            if ds.index[j] == 0 {
-                traverse(ds, j);
-            }
+        if ds.index[j] == 0 {
+            traverse(ds, j);
+        }
 
-            if ds.index[i] > ds.index[j] {
-                ds.index[i] = ds.index[j];
-            }
+        if ds.index[i] > ds.index[j] {
+            ds.index[i] = ds.index[j];
+        }
 
-            let mut fp1 = base;
-            let mut fp2 = j * ds.F.rowsize;
+        let mut fp1 = base;
+        let mut fp2 = j * ds.F.rowsize;
 
-            while fp1 < fp3 {
-                ds.F.data[fp1] |= ds.F.data[fp2];
-                fp1 += 1;
-                fp2 += 1;
-            }
+        while fp1 < fp3 {
+            ds.F.data[fp1] |= ds.F.data[fp2];
+            fp1 += 1;
+            fp2 += 1;
         }
     }
 
