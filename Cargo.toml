@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "racc",
+    "racc_runtime",
+]
