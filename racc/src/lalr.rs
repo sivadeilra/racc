@@ -236,26 +236,22 @@ fn build_relations(
             states.push(from_state);
             let mut stateno = from_state;
             let rule_rhs = gram.rule_rhs_syms(rule);
-            let mut rp: usize = 0; // index into rule_rhs
-            while rp < rule_rhs.len() {
-                let symbol2 = rule_rhs[rp].as_symbol();
+            for r in rule_rhs.iter() {
+                let symbol2 = r.as_symbol();
                 for &shift in lr0.shifts.values(stateno) {
                     stateno = shift;
                     if lr0.accessing_symbol[stateno] == symbol2 {
                         break;
                     }
                 }
-
                 states.push(stateno);
-                rp += 1;
             }
 
             add_lookback_edge(stateno, rule, i, &lr0.reductions, &mut lookback);
 
             let mut length = states.len() - 1;
-            while rp > 0 {
-                rp -= 1;
-                let gram_ritem = rule_rhs[rp].as_symbol();
+            for r in rule_rhs.iter().rev() {
+                let gram_ritem = r.as_symbol();
                 if !gram.is_var(gram_ritem) {
                     break;
                 }
@@ -266,10 +262,6 @@ fn build_relations(
                 }
             }
             states.clear(); // prepare for next use
-        }
-
-        if !edge.is_empty() {
-            //edge.push(-1);
         }
         includes.push(edge);
     }
@@ -301,24 +293,21 @@ fn transpose(r2: &[Vec<i16>]) -> Vec<Vec<i16>> {
     let mut nedges: Vec<i16> = vec![0; r2.len()];
     for sp in r2.iter() {
         for &e in sp.iter() {
-            if e < 0 {
-                break;
-            }
             nedges[e as usize] += 1;
         }
     }
 
-    let mut new_R: Vec<Vec<i16>> = nedges.iter().map(|&n| vec![0; n as usize]).collect();
+    let mut new_R: Vec<Vec<i16>> = nedges
+        .iter()
+        .map(|&n| Vec::with_capacity(n as usize))
+        .collect();
     drop(nedges);
 
-    let mut temp_R: Vec<i16> = vec![0; r2.len()]; // contains output columns
     for (i, sp) in r2.iter().enumerate() {
         // i is old-row
         for &k in sp.iter() {
-            let k =  k as usize;
-            let out_col = temp_R[k];
-            temp_R[k] += 1;
-            new_R[k][out_col as usize] = i as i16;
+            let k = k as usize;
+            new_R[k].push(i as i16);
         }
     }
 

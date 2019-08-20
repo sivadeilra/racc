@@ -140,7 +140,7 @@ pub fn compute_lr0(gram: &Grammar) -> LR0Output {
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
         shift_symbol.sort();
-        for &symbol in shift_symbol.iter() {
+        for symbol in shift_symbol.iter().copied() {
             let shift_state = find_or_create_state(
                 gram,
                 &kernel_items[kernel_base[symbol.index()]..kernel_end[symbol.index()]],
@@ -283,7 +283,7 @@ fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTable<Rule
     rules.finish_key();
 }
 
-// maps from Symbol -> [Rule]
+// maps from Var -> [Rule]
 pub type DerivesTable = RampTable<Rule>;
 
 /// Compute the DERIVES table. The DERIVES table maps Var -> [Rule].
@@ -365,7 +365,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
         for &rule in derives.values(row) {
             let symbol = gram.ritem(gram.rrhs(rule)).as_symbol();
             if gram.is_var(symbol) {
-                eff.set(row, gram.symbol_to_var(symbol).0 as usize);
+                eff.set(row, gram.symbol_to_var(symbol).index());
             }
         }
     }

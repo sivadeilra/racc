@@ -1,6 +1,4 @@
-struct AppContext {
-    x: usize,
-}
+struct AppContext {}
 
 pub trait GrammarToken {
     fn token_value(&self) -> usize;
@@ -72,7 +70,7 @@ fn err_test() {
     let toks = vec![(NUM, Some(100)), (DIVIDE, None), (NUM, Some(0))];
 
     let mut parser = ParserState::new();
-    let mut ctx = AppContext { x: 0 };
+    let mut ctx = AppContext {};
     for &(tok, lval) in toks.iter() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
@@ -97,7 +95,7 @@ fn basic_test() {
     ];
 
     let mut parser = ParserState::new();
-    let mut ctx = AppContext { x: 0 };
+    let mut ctx = AppContext {};
     for &(tok, lval) in toks.iter() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
