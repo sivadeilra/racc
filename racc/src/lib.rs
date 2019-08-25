@@ -362,7 +362,7 @@ fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::T
         &yaccparser,
         &grammar_def.rule_blocks,
         &grammar_def.rhs_bindings,
-        grammar_def.app_context_ty,
+        grammar_def.context_ty,
         context_param_ident,
         grammar_def.value_ty,
     ))

@@ -142,12 +142,12 @@ pub(crate) fn output_parser_to_token_stream(
 
     items.extend(make_rule_text_table(grammar_span, gram));
 
-    items.extend(output_gen_methods(symbol_value_ty));
+    items.extend(output_gen_methods(symbol_value_ty, context_ty));
 
     items
 }
 
-fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
+fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
     quote! {
         /// An active instance of a parser.  This structure contains the state of a parsing state
         /// machine, including the state stack and the value stack.
@@ -190,7 +190,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
                 self.state_stack.push(INITIAL_STATE);
             }
 
-            fn yyreduce(&mut self, reduction: u16, ctx: &mut AppContext)
+            fn yyreduce(&mut self, reduction: u16, ctx: &mut #context_ty)
                 -> Result<(), racc_runtime::Error>
             {
                 let len = YYLEN[reduction as usize] as usize;
@@ -257,7 +257,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
                 Ok(())
             }
 
-            fn do_defreds(&mut self, ctx: &mut AppContext) -> Result<bool, racc_runtime::Error> {
+            fn do_defreds(&mut self, ctx: &mut #context_ty) -> Result<bool, racc_runtime::Error> {
                 // Check for default reductions.
                 let mut any = false;
                 loop {
@@ -299,7 +299,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
             }
 
             // Check to see if there is a REDUCE action for this (state, token).
-            fn try_reduce(&mut self, ctx: &mut AppContext, token: u16)
+            fn try_reduce(&mut self, ctx: &mut #context_ty, token: u16)
                 -> Result<bool, racc_runtime::Error>
             {
                 let red = YYRINDEX[self.yystate as usize];
@@ -322,7 +322,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
             /// from a `yylex()` function in a YACC parser.
             pub fn push_token(
                 &mut self,
-                ctx: &mut AppContext,
+                ctx: &mut #context_ty,
                 token: u16,
                 lval: #symbol_value_ty,
             ) -> Result<(), racc_runtime::Error> {
@@ -356,7 +356,7 @@ fn output_gen_methods(symbol_value_ty: Type) -> TokenStream {
             ///
             /// Calling this method is the equivalent of returning `YYEOF` from a `yylex()` function
             /// in a YACC parser.
-            pub fn finish(&mut self, ctx: &mut AppContext)
+            pub fn finish(&mut self, ctx: &mut #context_ty)
                 -> Result<#symbol_value_ty, racc_runtime::Error>
             {
                 assert!(!self.state_stack.is_empty());

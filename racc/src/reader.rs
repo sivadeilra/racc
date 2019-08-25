@@ -588,7 +588,7 @@ impl ReaderState {
 
 pub(crate) struct GrammarDef {
     pub grammar: Grammar,
-    pub app_context_ty: Type,
+    pub context_ty: Type,
     pub value_ty: Type,
     pub rule_blocks: Vec<Option<Block>>,
     pub rhs_bindings: Vec<Option<Ident>>,
@@ -597,11 +597,8 @@ pub(crate) struct GrammarDef {
 impl Parse for GrammarDef {
     fn parse(input: ParseStream<'_>) -> syn::Result<GrammarDef> {
         let mut reader: ReaderState = ReaderState::new();
-
-        use syn::parse_quote;
-
-        let app_context_ty: Type = parse_quote! { AppContext };
-        let value_ty: Type = parse_quote! { Option<i16> };
+        let mut context_ty: Option<Type> = None;
+        let mut value_ty: Option<Type> = None;
 
         // Add the well-known "error" symbol to the table.
         {
@@ -615,7 +612,38 @@ impl Parse for GrammarDef {
 
         while !input.is_empty() {
             let la = input.lookahead1();
-            if la.peek(Ident) {
+            if la.peek(Token![type]) {
+                // `type Value = <some type>;` - specifies the value stack type.
+                input.parse::<Token![type]>()?;
+                let keyword = input.parse::<Ident>()?;
+                input.parse::<Token![=]>()?;
+                let ty = input.parse::<Type>()?;
+                input.parse::<Token![;]>()?;
+
+                let keyword_string = keyword.to_string();
+                if keyword_string == "Value" {
+                    if value_ty.is_some() {
+                        return Err(syn::Error::new(
+                            keyword.span(),
+                            "The 'Value' type cannot be specified more than once.",
+                        ));
+                    }
+                    value_ty = Some(ty);
+                } else if keyword_string == "Context" {
+                    if context_ty.is_some() {
+                        return Err(syn::Error::new(
+                            keyword.span(),
+                            "The 'Context' type cannot be specified more than once.",
+                        ));
+                    }
+                    context_ty = Some(ty);
+                } else {
+                    return Err(syn::Error::new(
+                        keyword.span(),
+                        format!("The type '{}' is unrecognized.", keyword_string),
+                    ));
+                }
+            } else if la.peek(Ident) {
                 // An identifier can start either a token definition or a rule definition.
                 // The next character will tell us whether this is a token definition or a
                 // rule definition.
@@ -632,7 +660,11 @@ impl Parse for GrammarDef {
                     input.parse::<syn::token::Colon>()?;
                     match reader.symbols[lhs].class {
                         SymClass::Terminal => {
-                            return Err(syn::Error::new(name_def_span, "name has been defined as a token, and so cannot be on the left-hand side of a rule"));
+                            return Err(syn::Error::new(
+                                name_def_span,
+                                "name has been defined as a token, and so cannot be on the \
+                                 left-hand side of a rule",
+                            ));
                             // we continue executing, even with a bogus name index.
                         }
                         SymClass::NonTerminal => {
@@ -683,7 +715,6 @@ impl Parse for GrammarDef {
                         } else if la.peek(syn::token::Brace) {
                             let block = input.parse::<syn::Block>()?;
                             // Parse an action (a code block).  Parsing it is actually very easy, thanks to Rust!
-                            // assert!(reader.rule_blocks.len() == reader.nrules);
                             if reader.last_was_action {
                                 reader.insert_empty_rule(block.span());
                             }
@@ -775,11 +806,29 @@ impl Parse for GrammarDef {
         let gram = reader.pack_symbols_and_grammar(goal_symbol);
         ReaderState::print_grammar(&gram);
 
+        let value_ty = value_ty.ok_or_else(|| {
+            syn::Error::new(
+                Span::call_site(),
+                "The grammar did not specify the value type. \
+                 Please add 'type Value = <your type>;' to the grammar. \
+                 This type is used for the results of rules, and is often an enum.",
+            )
+        })?;
+        let context_ty =
+            context_ty.ok_or_else(|| {
+                syn::Error::new(Span::call_site(),
+                "The grammar did not specify the 'Context' type. \
+                Please add 'type Context = <your type>;' to the grammar. \
+                This type stores 'global' data across all rules, and is accessible within rules \
+                as 'context'. \
+                Note that `()` is a valid type, if context is not needed. ")
+            })?;
+
         Ok(GrammarDef {
             grammar: gram,
             rule_blocks: reader.rule_blocks,
             rhs_bindings: reader.rhs_binding,
-            app_context_ty,
+            context_ty,
             value_ty,
         })
     }
@@ -823,6 +872,9 @@ fn test_foo() {
     case(
         "tokens, but no rules",
         quote! {
+            type Context = ();
+            type Value = ();
+
             FOO;
             BAR;
         },
@@ -831,8 +883,8 @@ fn test_foo() {
     case(
         "math",
         quote! {
-            // AppContext ctx;
-            // Option<i16>;
+            type Context = ();
+            type Value = Option<i16>;
 
             PLUS;
             MINUS;
