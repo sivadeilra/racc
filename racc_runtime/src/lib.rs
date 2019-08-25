@@ -1,4 +1,6 @@
-/// Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
+//! Contains the supporting logic needed for applications that wish to use RACC-generated parsers.
+//! There used to be more stuff in `racc_runtime`, but now there is only a single `Error` type.
+//! Even this might be eliminated and folded into the generated code.
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {

@@ -1,33 +1,25 @@
-// RACC -- Rust Another Compiler-Compiler
-// --------------------------------------
-//
-// This is a port of Barkeley YACC to Rust.  It runs as a syntax extension, directly in the compiler.
-//
-// This port is NOT functional yet.  The front-end (grammar parsing in reader.rs) works, the grammar
-// analysis and table-building works, and it is capable of emitting tables into the AST of the program
-// being generated.  The last missing piece is the driver code which runs the state machine.  That's
-// relatively easy, just haven't finished it yet.
-
-//! RACC is Rust Another Compiler-Compiler.  It is a port of the public domain Berkeley YACC parser
-//! generator to Rust.
+//! # RACC -- Rust Another Compiler-Compiler
 //!
-//! RACC is implemented as a syntax extension.  You write grammar definitions directly in Rust source
-//! code.  Then you enable RACC by referencing the `racc` crate and enabling it to function as a plug-in.
+//! This is a port of Barkeley YACC to Rust.  It runs as a procedural macro, and so allows you to
+//! define grammars directly in Rust source code, rather than calling an external tool or writing
+//! a `build.rs` script.
 //!
 //! # How to write a grammar
 //!
 //! Here is a very brief example of how to use RACC.  This program evaluates a very limited class
 //! of numeric expressions.
 //!
+//! In `Cargo.toml:
+//!
+//! ```toml,ignore
+//! racc = "0.1.0"
+//! ```
+//!
+//! In your code:
+//!
 //! ```rust,ignore
 //!
-//! #![feature(phase)]
-//!
-//! #[phase(plugin, link)] extern crate racc;
-//!
-//! use racc::runtime::{ParserState, ParserTables, FinishParseResult};
-//!
-//! grammar! {
+//! racc::grammar! {
 //!     uint ctx;    // application context; not used in this example
 //!     i32;         // the type of values in the value stack, i.e. %union
 //!
@@ -179,7 +171,6 @@
 //!
 //! Berkeley YACC is in the public domain.  From its `README` file:
 //!
-//!
 //! ```text
 //!         Berkeley Yacc is in the public domain.  The data structures and algorithms
 //!     used in Berkeley Yacc are all either taken from documents available to the
@@ -196,9 +187,8 @@
 //!
 //! The ideas implemented in YACC are stable and time-tested.  RACC is a port of YACC, and should
 //! be considered unstable.  The implementation may contain porting bugs, where the behavior of
-//! RACC is not faithful to the original YACC.  Also, Rust syntax extensions are themselves an
-//! experimental feature, and are not slated to be part of the Rust 1.0 language.  (They will still
-//! be available in unstable / nightly builds of Rust.)
+//! RACC is not faithful to the original YACC.  Rust procedural macros and the ecosystem supporting
+//! them is also still growing and changing.
 //!
 //! So if you build anything using RACC, please be aware that both Rust and RACC are still evolving
 //! quickly, and your code may break quickly and without notice.
@@ -216,8 +206,6 @@
 //!
 //! # TODO List
 //!
-//! * `finish` is probably not strict enough.
-//!
 //! * Allow grammars to specify precedence and associativity.  The underlying code implements
 //!   support for precedence and associativity, exactly as in Berkeley YACC, but this is not
 //!   yet expose.
@@ -230,8 +218,8 @@
 //!
 //! RACC was implemented by Arlie Davis `arlie.davis@gmail.com`.  I did this as an experiment
 //! in porting a well-known (and useful) tool to Rust.  I was also intrigued by Rust's support
-//! for syntax extensions, and I wanted to see whether I could implement something interesting
-//! using syntax extensions.
+//! for procedural macros, and I wanted to see whether I could implement something interesting
+//! using procedural macros.
 //!
 //! # Feedback
 //!
@@ -241,6 +229,8 @@
 #![warn(rust_2018_idioms)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::cognitive_complexity)]
+
+extern crate proc_macro;
 
 mod grammar;
 mod lalr;
@@ -253,15 +243,13 @@ mod tvec;
 mod util;
 mod warshall;
 
-extern crate proc_macro;
-
 use proc_macro2::Span;
-use syn::{parse_macro_input, Ident};
+use syn::Ident;
 
 macro_rules! int_alias {
     (type $name:ident = $int:ty;) => {
         #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
-        pub struct $name(pub $int);
+        struct $name(pub $int);
 
         impl $name {
             pub fn index(&self) -> usize {
@@ -275,15 +263,6 @@ macro_rules! int_alias {
                 $name(self.0 + rhs)
             }
         }
-
-        /*
-                impl core::convert::TryFrom<$name> for usize {
-                    type Error = core::num::TryFromIntError;
-                    fn try_from(i: $name) -> Result<usize, Self::Error> {
-                        usize::try_from(i.0)
-                    }
-                }
-        */
 
         impl core::fmt::Display for $name {
             fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -305,131 +284,92 @@ macro_rules! int_alias {
     };
 }
 
-// There appears to be a bug in Rust where:
-//
-// crate root contains a type T which is: struct T(i16);
-// mod foo {
-//     pub struct K {
-//         pub t: T
-//     }
-// }
-//
-// and rustc thinks that T is being exposed as public for the entire crate.
-// Use mod aliases to work around this.
+// Type aliases
+int_alias! {type Symbol = i16;}
+int_alias! {type Var = i16;}
+int_alias! {type Rule = i16;}
+int_alias! {type State = i16;}
+int_alias! {type Item = i16;}
+int_alias! {type Token = i16;}
 
-mod aliases {
-    // Type aliases
-    int_alias! {type Symbol = i16;}
-    int_alias! {type Var = i16;}
-    int_alias! {type Rule = i16;}
-    int_alias! {type State = i16;}
-    int_alias! {type Item = i16;}
-    int_alias! {type Token = i16;}
-
-    impl Rule {
-        pub const RULE_NULL: Rule = Rule(0);
-        pub const RULE_0: Rule = Rule(0);
-        pub const RULE_1: Rule = Rule(1);
-        pub const RULE_2: Rule = Rule(2);
-    }
-
-    impl Symbol {
-        pub const NULL: Symbol = Symbol(0);
-        pub const ERROR: Symbol = Token::ERROR.to_symbol();
-    }
-
-    impl Token {
-        /// Converts a token to a symbol. This is trivial, since all tokens are symbols
-        /// starting at zero.
-        pub const fn to_symbol(self) -> Symbol {
-            Symbol(self.0)
-        }
-        pub const ERROR: Token = Token(1);
-    }
-
-    impl Item {
-        pub const NULL: Item = Item(0);
-    }
-
-    #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-    pub struct SymbolOrRule(i16);
-
-    impl SymbolOrRule {
-        pub fn rule(rule: Rule) -> SymbolOrRule {
-            assert!(rule.0 > 0);
-            Self(-rule.0)
-        }
-        pub fn symbol(symbol: Symbol) -> SymbolOrRule {
-            assert!(symbol.0 >= 0);
-            Self(symbol.0)
-        }
-        pub fn is_symbol(self) -> bool {
-            self.0 >= 0
-        }
-        pub fn is_rule(self) -> bool {
-            self.0 < 0
-        }
-        pub fn as_symbol(self) -> Symbol {
-            assert!(self.is_symbol());
-            Symbol(self.0)
-        }
-        pub fn as_rule(self) -> Rule {
-            assert!(self.is_rule());
-            Rule(-self.0)
-        }
-    }
-
-    pub type StateOrRule = i16;
+impl Rule {
+    // const RULE_NULL: Rule = Rule(0);
+    // const RULE_0: Rule = Rule(0);
+    const RULE_1: Rule = Rule(1);
+    const RULE_2: Rule = Rule(2);
 }
 
-use aliases::*;
+impl Symbol {
+    pub const NULL: Symbol = Symbol(0);
+    pub const ERROR: Symbol = Token::ERROR.to_symbol();
+}
 
-#[proc_macro]
-pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // println!("hello, world, from racc_grammar");
+impl Token {
+    /// Converts a token to a symbol. This is trivial, since all tokens are symbols
+    /// starting at zero.
+    pub const fn to_symbol(self) -> Symbol {
+        Symbol(self.0)
+    }
+    pub const ERROR: Token = Token(1);
+}
 
-    let g = parse_macro_input!(tokens as reader::Grammar2);
+impl Item {
+    pub const NULL: Item = Item(0);
+}
 
-    /*
-    // First, we read a special list of tokens:
-    //
-    //      <context-type> <context-param> ;
-    //
-    let context_type_ident = parser.parse_ty();
-    let context_param_ident = match parser.parse_ident() {
-        Ok(ident) => ident,
-        Err(_)    => panic!("Fatal Error at parse_ident")
-    };
-    parser.expect(&Token::Semi);
+#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+struct SymbolOrRule(i16);
 
-    // The type of the symbol values (on values.stack)
-    let symbol_value_ty = parser.parse_ty();
-    parser.expect(&Token::Semi);
-    */
+impl SymbolOrRule {
+    pub fn rule(rule: Rule) -> SymbolOrRule {
+        assert!(rule.0 > 0);
+        Self(-rule.0)
+    }
+    pub fn symbol(symbol: Symbol) -> SymbolOrRule {
+        assert!(symbol.0 >= 0);
+        Self(symbol.0)
+    }
+    pub fn is_symbol(self) -> bool {
+        self.0 >= 0
+    }
+    pub fn is_rule(self) -> bool {
+        self.0 < 0
+    }
+    pub fn as_symbol(self) -> Symbol {
+        assert!(self.is_symbol());
+        Symbol(self.0)
+    }
+    pub fn as_rule(self) -> Rule {
+        assert!(self.is_rule());
+        Rule(-self.0)
+    }
+}
 
+type StateOrRule = i16;
+
+use reader::GrammarDef;
+
+fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+    let grammar_def: GrammarDef = syn::parse2::<GrammarDef>(tokens)?;
     let context_param_ident = Ident::new("context", Span::call_site());
-
-    // Read the tokens and rules.
-
-    let gram = &g.grammar;
-
+    let gram = &grammar_def.grammar;
     let lr0 = lr0::compute_lr0(&gram);
     let lalr_out = lalr::run_lalr_phase(&gram, &lr0);
     let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
-
-    let parser_tokens = output::output_parser_to_ast(
+    Ok(output::output_parser_to_token_stream(
         &gram,
         &lalr_out.gotos,
         &yaccparser,
-        &g.rule_blocks,
-        &g.rhs_bindings,
-        g.app_context_ty,
+        &grammar_def.rule_blocks,
+        &grammar_def.rhs_bindings,
+        grammar_def.app_context_ty,
         context_param_ident,
-        g.value_ty,
-    );
+        grammar_def.value_ty,
+    ))
+}
 
-    // println!("almost done!");
-    // println!("{:?}", parser_tokens);
-    // return parser_tokens.into();
-    return parser_tokens.into();
+#[proc_macro]
+pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let tokens2: proc_macro2::TokenStream = tokens.into();
+    racc_grammar2(tokens2).unwrap().into()
 }

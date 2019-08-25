@@ -6,10 +6,14 @@ pub const BITS_PER_WORD: usize = 32;
 // The representation is in row-major form.
 // The representation is exposed.
 pub struct Bitmat {
-    pub data: Vec<u32>, // contains all bits in matrix, in row-major form, with padding at end of row
-    pub rows: usize,    // number of rows
-    pub cols: usize,    // number of columns
-    pub rowsize: usize, // number of u32 elements per row
+    // Contains all bits in matrix, in row-major form, with padding at end of row
+    pub data: Vec<u32>,
+    // Number of rows
+    pub rows: usize,
+    // Number of columns
+    pub cols: usize,
+    // Number of u32 elements per row
+    pub rowsize: usize,
 }
 
 impl Bitmat {
@@ -81,10 +85,14 @@ impl Bitmat {
 }
 
 pub struct BitmatIterOnes<'a> {
-    row: usize,   // index of current row
-    col: usize,   // index of current col
-    current: u32, // contents of current word
-    xormask: u32, // xor mask used when loading current, used to select true/false
+    /// index of current row
+    row: usize,
+    /// index of current col
+    col: usize,
+    /// contents of current word
+    current: u32,
+    /// xor mask used when loading current, used to select true/false
+    xormask: u32,
     mat: &'a Bitmat,
 }
 
@@ -138,10 +146,14 @@ pub fn word_size(n: usize) -> usize {
 
 pub struct BitMaskIterator<'a> {
     words: &'a [u32],
-    current: u32,  // contains the bits that we are currently reading
-    xormask: u32,  // xor mask used when loading current, used to select true/false
-    nbits: usize,  // number of bits remaining in entire sequence
-    bitpos: usize, // current bit position
+    // contains the bits that we are currently reading
+    current: u32,
+    // xor mask used when loading current, used to select true/false
+    xormask: u32,
+    // number of bits remaining in entire sequence
+    nbits: usize,
+    // current bit position
+    bitpos: usize,
 }
 
 impl<'a> Iterator for BitMaskIterator<'a> {

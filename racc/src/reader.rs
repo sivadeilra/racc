@@ -1,30 +1,35 @@
-// Reads a sequence of Rust tokens, which are provided in the body of a macro invocation,
-// and builds a Grammar.
-
-// our grammar for a grammar:
-//
-// <ident> : <ident> ... | <ident> ... ;    // rule def
-// <ident> [ = <literal> ];                 // token def, must precede all rule defs
-
-//
-// This code reads a sequence of input tokens, and builds a simple yacc grammar.
-// It builds a symbol table (names), which name both tokens and variables of the
-// defined grammar.  It also builds the rules of the grammar.  Rules are represented
-// as a table of left-hand side symbols (the plhs vector) and a table of right-hand
-// side symbols (the ritem vector).  The rhs symbols for all rules are packed into
-// a single array, the ritem vector.  Each sequence of rhs symbols (for a single rule)
-// are stored sequentially, and each rule is terminated by a NO_ITEM symbol.
-//
-// As the grammar is parsed, we build a name table.  The name table associates an
-// integer with each name, which is an index into the ReaderState.symbols table.
-// Other tables, such as plhs and ritem, contain indices into the symbols table.
-//
-// Because indices are added in the order that they are found in the grammar,
-// tokens and variables are mixed together in this table.  After the grammar is
-// parsed, it is "packed".  This produces a new table, which lists all tokens,
-// then all variables.  The plhs and ritem tables are read, and are used to
-// produce several new tables.
-
+//! Reads a sequence of Rust tokens, which are provided in the body of a macro invocation,
+//! and builds a Grammar.
+//!
+//! Our grammar for a grammar:
+//!
+//! ```ignore
+//! <ident> : <ident> ... | <ident> ... ;    // rule def
+//! <ident> [ = <literal> ];                 // token def, must precede all rule defs
+//! ```
+//!
+//! This module reads a sequence of input tokens and builds a YACC grammar.
+//! It builds a symbol table (names), which name both tokens and variables of the
+//! defined grammar.  It also builds the rules of the grammar.  Rules are represented
+//! as a table of left-hand side symbols (the plhs vector) and a table of right-hand
+//! side symbols (the ritem vector).  The rhs symbols for all rules are packed into
+//! a single array, the ritem vector.  Each sequence of rhs symbols (for a single rule)
+//! are stored sequentially, and each rule is terminated by a NO_ITEM symbol.
+//!
+//! As the grammar is parsed, we build a name table.  The name table associates an
+//! integer with each name, which is an index into the ReaderState.symbols table.
+//! Other tables, such as plhs and ritem, contain indices into the symbols table.
+//!
+//! Because indices are added in the order that they are found in the grammar,
+//! tokens and variables are mixed together in this table.  After the grammar is
+//! parsed, it is "packed".  This produces a new table, which lists all tokens,
+//! then all variables.  The plhs and ritem tables are read, and are used to
+//! produce several new tables.
+//!
+//! This module is a port of the original Berkeley YACC code. Although RACC and YACC
+//! are quite different syntactically, the algorithms and (at a certain level of
+//! abstraction) the data structures are quite similar.
+//!
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
 use crate::Rule;
@@ -71,6 +76,7 @@ fn make_symbol(name: Ident) -> SymbolDef {
     }
 }
 
+/// Contains state used while parsing the input grammar.
 struct ReaderState {
     /// Contains indices that point into `self.symbols`, or `NO_ITEM`.
     pitem: Vec<usize>,
@@ -134,17 +140,17 @@ impl ReaderState {
         }
     }
 
-    // Looks up a symbol in the symbol table, and returns the symbol index
-    // (the index within ReaderState.symbols) of that symbol.  If the symbol
-    // is not already in the symbol table, then this method adds the symbol.
+    /// Looks up a symbol in the symbol table, and returns the symbol index
+    /// (the index within ReaderState.symbols) of that symbol.  If the symbol
+    /// is not already in the symbol table, then this method adds the symbol.
     pub fn lookup(&mut self, name: &Ident) -> usize {
         if let Some(ii) = self.symbol_table.get(&name.to_string()) {
             return *ii;
         }
 
         let index = self.symbols.len();
-        let s = make_symbol(name.clone());
-        self.symbols.push(s);
+        let symbol = make_symbol(name.clone());
+        self.symbols.push(symbol);
         self.symbol_table.insert(name.to_string(), index);
         index
     }
@@ -196,17 +202,14 @@ impl ReaderState {
         assert_eq!(self.rule_blocks.len(), self.nrules());
     }
 
-    /// Adds a new "empty" rule.  A new symbol name is generated, using the pattern $$nn,
-    /// where $$ is the literal string "$$" and nn is a number.
+    /// Adds a new "empty" rule.  A new symbol name is generated, using the pattern "__gen_{}",
+    /// where "{}" is a number that is incremented for each empty rule.
     pub fn insert_empty_rule(&mut self, span: Span) {
         self.gensym += 1;
         let symname = format!("__gen_{}", self.gensym); // was "$${}"
         let symname_ident = Ident::new(&symname, span);
 
-        debug!("insert_empty_rule: added symbol {}", symname);
-
         let rule = self.nrules() - 1;
-
         let tag: Option<Rc<String>> = self.symbols[self.lhs[rule]].tag.clone();
         let sym_index = {
             let (sym_index, sym) = self.lookup_ref_mut(&symname_ident);
@@ -516,16 +519,12 @@ impl ReaderState {
             nsyms: nsyms,
             ntokens: ntokens,
             nvars: nvars,
-
             name: gram_name,
             pname: Vec::new(),
             value: gram_value,
-
             prec: gram_prec,
             assoc: gram_assoc,
-
             nrules: nrules,
-
             ritem: ritem,
             rlhs: rlhs,
             rrhs: rrhs,
@@ -587,7 +586,7 @@ impl ReaderState {
     }
 }
 
-pub struct Grammar2 {
+pub(crate) struct GrammarDef {
     pub grammar: Grammar,
     pub app_context_ty: Type,
     pub value_ty: Type,
@@ -595,8 +594,8 @@ pub struct Grammar2 {
     pub rhs_bindings: Vec<Option<Ident>>,
 }
 
-impl Parse for Grammar2 {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Grammar2> {
+impl Parse for GrammarDef {
+    fn parse(input: ParseStream<'_>) -> syn::Result<GrammarDef> {
         let mut reader: ReaderState = ReaderState::new();
 
         use syn::parse_quote;
@@ -776,7 +775,7 @@ impl Parse for Grammar2 {
         let gram = reader.pack_symbols_and_grammar(goal_symbol);
         ReaderState::print_grammar(&gram);
 
-        Ok(Grammar2 {
+        Ok(GrammarDef {
             grammar: gram,
             rule_blocks: reader.rule_blocks,
             rhs_bindings: reader.rhs_binding,
@@ -784,4 +783,111 @@ impl Parse for Grammar2 {
             value_ty,
         })
     }
+}
+
+#[test]
+fn test_foo() {
+    use quote::quote;
+
+    fn case(description: &str, tokens: proc_macro2::TokenStream) {
+        println!("parsing grammar: {} -----", description);
+        match syn::parse2::<GrammarDef>(tokens.clone()) {
+            Ok(g) => {
+                // println!("replacement: {:#?}", replacement);
+                println!("parsed grammar: nrules={}", g.grammar.nrules);
+            }
+            Err(e) => {
+                println!("error: {:?}", e);
+            }
+        }
+
+        let r = crate::racc_grammar2(tokens);
+        if let Ok(t) = &r {
+            // will it parse?
+            println!("will it parse?");
+            let tc = t.clone();
+            match syn::parse2::<syn::ItemMod>(quote! { mod the_parser { #tc }}) {
+                Ok(_parsed_item) => {
+                    println!("parsed ok");
+                }
+
+                Err(e) => {
+                    println!("nope, reparse failed: {:?}", e);
+                }
+            }
+        }
+    }
+
+    case("empty grammar", quote! {});
+
+    case(
+        "tokens, but no rules",
+        quote! {
+            FOO;
+            BAR;
+        },
+    );
+
+    case(
+        "math",
+        quote! {
+            // AppContext ctx;
+            // Option<i16>;
+
+            PLUS;
+            MINUS;
+            LPAREN;
+            RPAREN;
+            NUM;
+            IF;
+            ELSE;
+            COMMA;
+            THEN;
+            WHILE;
+            DO;
+            DIVIDE;
+
+            Expr : NUM=x {
+                println!("NUM={:?}", x); x
+            }
+                | Expr=a PLUS Expr=b {
+                    Some(a.unwrap() + b.unwrap())
+                }
+                | Expr=a MINUS Expr=b {
+                    Some(a.unwrap() - b.unwrap())
+                }
+                | Expr=a DIVIDE Expr=b {
+                    let a = a.unwrap();
+                    let b = b.unwrap();
+                    println!("{} / {}", a, b);
+                    if b == 0 {
+                        return Err(racc_runtime::Error::AppError);
+                    }
+                    Some(a / b)
+                }
+                | LPAREN Expr=inner RPAREN { inner }
+                | IF Expr=predicate THEN Expr=true_value {
+                    if let Some(p) = predicate {
+                        if p > 0 {
+                            true_value
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+                    if let Some(p) = predicate {
+                        if p > 0 {
+                            true_value
+                        } else {
+                            false_value
+                        }
+                    } else {
+                        false_value
+                    }
+                };
+        },
+    );
 }

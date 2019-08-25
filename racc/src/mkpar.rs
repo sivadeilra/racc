@@ -8,7 +8,7 @@ use log::debug;
 use log::warn;
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum ActionCode {
+pub(crate) enum ActionCode {
     Shift(State),
     Reduce(Rule),
 }
@@ -31,10 +31,10 @@ impl ActionCode {
     }
 }
 
-pub const LEFT: u8 = 1;
-pub const RIGHT: u8 = 2;
+pub(crate) const LEFT: u8 = 1;
+pub(crate) const RIGHT: u8 = 2;
 
-pub struct ParserAction {
+pub(crate) struct ParserAction {
     pub symbol: Token,
     pub prec: i16,
     pub action_code: ActionCode,
@@ -42,7 +42,7 @@ pub struct ParserAction {
     pub suppressed: u8,
 }
 
-pub struct YaccParser {
+pub(crate) struct YaccParser {
     /// State -> [ParserAction]
     pub actions: RampTable<ParserAction>,
     pub final_state: State,
@@ -53,7 +53,7 @@ impl YaccParser {
     }
 }
 
-pub fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
+pub(crate) fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let nstates = lr0.nstates();
     let mut parser: RampTable<ParserAction> = RampTable::new();
     for state in 0..nstates {
@@ -117,7 +117,7 @@ fn get_reductions(
 fn add_reduce(gram: &Grammar, actions: &mut RampTable<ParserAction>, rule: Rule, symbol: Token) {
     // end: index of the values of the current (unfinished) key
     let end = *actions.index.last().unwrap();
-    let actions = &mut actions.table;
+    let actions = &mut actions.values;
     let mut next: usize = end;
     while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
@@ -305,7 +305,7 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
 
 /// Computes the default reduction for each state.
 /// State -> Rule
-pub fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
+pub(crate) fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
     parser
         .iter_entries()
         .map(|actions| sole_reduction(actions))

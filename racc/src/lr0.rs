@@ -1,21 +1,34 @@
+//! This module builds the LR(0) state machine for a given grammar.
+//!
+//! The state machine represents the state of the parser of the grammar, as tokens are produced by
+//! the lexer. (The details of the lexer are out of scope; for our purposes, all that is relevant is
+//! a sequence of tokens.)
+//!
+//! For a given sequence of tokens (not yet terminated by EOF; in other words, a prefix of a
+//! possibly-valid complete input), there may be any number of rules (productions) which may match
+//! that sequence of tokens. The lr0 module builds a state machine which has one state for each
+//! unique set of rules that may match the current sequence of tokens. (This is somewhat analogous
+//! to the NFA to DFA transform for regular expressions.) More precisely, each state consists of a
+//! unique set of _items_, where each item is a position within a rule.
+//!
+//! All of this is well-described in the literature, especially the Dragon Book, i.e.
+//! _Compilers: Principles, Techniques, and Tools, Edition 2_.
+
 use crate::grammar::Grammar;
 use crate::ramp_table::RampTable;
 use crate::tvec::TVec;
-use crate::util::word_size;
-use crate::util::Bitmat;
-use crate::util::Bitv32;
+use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
+use crate::Symbol;
 use crate::{Item, Rule, State, Var};
 use log::debug;
 
-use crate::Symbol;
-
-pub const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
+pub(crate) const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
 
 // State -> [Item]
 type CoreTable = RampTable<Item>;
 
-pub struct LR0Output {
+pub(crate) struct LR0Output {
     pub nstates: usize,
 
     // index: State
@@ -34,7 +47,7 @@ pub struct LR0Output {
 
 // num_keys = number of states
 // items = rules
-pub type Reductions = RampTable<Rule>;
+pub(crate) type Reductions = RampTable<Rule>;
 
 impl LR0Output {
     pub fn nstates(&self) -> usize {
@@ -42,7 +55,7 @@ impl LR0Output {
     }
 }
 
-pub fn compute_lr0(gram: &Grammar) -> LR0Output {
+pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
     let derives = set_derives(gram);
 
     // was: allocate_item_sets()
@@ -204,7 +217,6 @@ fn find_or_create_state(
 }
 
 fn print_core(gram: &Grammar, state: State, items: &[Item]) {
-    // debug!("    s{} : accessing_symbol={}", state, gram.name[core.accessing_symbol as usize]);
     debug!("    s{}", state);
 
     let mut line = String::new();
@@ -284,7 +296,7 @@ fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTable<Rule
 }
 
 // maps from Var -> [Rule]
-pub type DerivesTable = RampTable<Rule>;
+pub(crate) type DerivesTable = RampTable<Rule>;
 
 /// Compute the DERIVES table. The DERIVES table maps Var -> [Rule].
 fn set_derives(gram: &Grammar) -> DerivesTable {
@@ -313,7 +325,7 @@ fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     }
 }
 
-pub fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
+pub(crate) fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
     let mut nullable: TVec<Symbol, bool> = TVec::from_vec(vec![false; gram.nsyms]);
     loop {
         let mut done = true;
@@ -385,7 +397,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
 ///
 /// This implementation processes bits in groups of 32, for the sake of efficiency.
 /// It is not clear whether this complexity is still justifiable, but it is preserved.
-pub fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
+pub(crate) fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     // Compute EFF, which is a [nvars, nvars] bit matrix
     let eff = set_eff(gram, derives);
     assert!(eff.rows == gram.nvars);
@@ -418,7 +430,7 @@ pub fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
 //
 // TODO: Consider changing item_set from Vec<Item> to a bitmap, whose length is nitems.
 // Then the 'states' table becomes a Bitmat.
-pub fn closure(
+pub(crate) fn closure(
     gram: &Grammar,
     nucleus: &[Item],
     first_derives: &Bitmat,

@@ -6,7 +6,6 @@ use crate::util::Bitmat;
 use crate::StateOrRule;
 use crate::Symbol;
 use crate::{Rule, State, Var};
-use log::debug;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
@@ -16,15 +15,15 @@ pub struct LALROutput {
 
 #[derive(Copy, Clone, Debug)]
 pub struct FromTo {
-    pub from_state: State,
-    pub to_state: State,
+    pub(crate) from_state: State,
+    pub(crate) to_state: State,
 }
 
 // Var -> [FromTo]
 pub type GotoMap = RampTable<FromTo>;
 
 #[allow(non_snake_case)]
-pub fn run_lalr_phase(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
+pub(crate) fn run_lalr_phase(gram: &Grammar, lr0: &LR0Output) -> LALROutput {
     let gotos = make_goto_map(gram, lr0);
     let nullable = crate::lr0::set_nullable(gram);
     let mut F = initialize_F(gram, lr0, &nullable, &gotos);
@@ -116,41 +115,21 @@ fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
         }
     }
 
-    /*
-        debug!("set_goto_map: ngotos={}", ngotos);
-        for i in 0..ngotos {
-            debug!("    from {:3} to {:3}", from_state[i], to_state[i]);
-        }
-
-        debug!("goto_map:");
-        for i in 0..gram.nvars {
-            debug!(
-                "    {:3} {} --> {}",
-                i,
-                gram.name[i + gram.ntokens],
-                goto_map[i]
-            );
-        }
-        debug!(".");
-    */
-
     GotoMap {
         index: goto_map,
-        table: from_to,
+        values: from_to,
     }
 }
 
-// Returns an index into goto_map, i.e. the "goto".
+/// Returns an index into goto_map, i.e. the "goto".
 fn map_goto(gotos: &GotoMap, state: State, var: Var) -> usize {
     use std::cmp::Ordering;
     let range = gotos.values_range(var);
     let mut low = range.start;
     let mut high = range.end;
-    // println!("searching for from_state={} in {:#?}", state, gotos.values(var));
     loop {
         assert!(low < high);
         let middle = (low + high) / 2;
-        // println!("checking: middle={} value.from_state={}", middle, gotos.value(middle).from_state);
         match state.cmp(&gotos.value(middle).from_state) {
             Ordering::Equal => return middle,
             Ordering::Less => high = middle,
@@ -166,15 +145,13 @@ fn initialize_F(
     nullable: &TVec<Symbol, bool>,
     gotos: &GotoMap,
 ) -> Bitmat {
-    debug!("initialize_F");
-
     let ngotos = gotos.num_values();
     let mut F = Bitmat::new(ngotos, gram.ntokens);
     let mut reads: Vec<Vec<i16>> = vec![vec![]; ngotos];
     let mut edge: Vec<i16> = Vec::with_capacity(ngotos + 1);
 
     for i in 0..ngotos {
-        let stateno = gotos.table[i].to_state;
+        let stateno = gotos.all_values()[i].to_state;
         let shifts = lr0.shifts.values(stateno.index());
 
         if !shifts.is_empty() {

@@ -13,9 +13,9 @@ proc-macro = true
 
 [dependencies]
 log = "0.4.*"
-syn = { version = "0.15", features = ["full"] }
-quote = "0.6"
-proc-macro2 = "0.4"
+syn = { version = "1.0.3", features = ["full"] }
+quote = "1.0.2"
+proc-macro2 = "1.0.1"
 
 [dev-dependencies]
 racc = { path = "../racc" }

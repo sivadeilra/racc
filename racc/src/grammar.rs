@@ -3,6 +3,7 @@ use crate::Rule;
 use crate::SymbolOrRule;
 use crate::Var;
 use crate::{Symbol, Token};
+use syn::Ident;
 
 pub const TOKEN: u8 = 0;
 
@@ -17,7 +18,7 @@ pub const UNDEFINED: i16 = -1;
 //       any combination of tokens or variables
 //     * (optional) precedence and associativity rules for rules
 //
-pub struct Grammar {
+pub(crate) struct Grammar {
     // the symbols (non-terminals and terminals/tokens)
     // symbols are ordered as tokens first, then non-terminals.
     // symbol[0] is the special $end token.
@@ -25,9 +26,9 @@ pub struct Grammar {
     pub nsyms: usize,
     pub ntokens: usize,
     pub nvars: usize,
-    // pub start_symbol: usize,
+
     /// len = nsyms
-    pub name: Vec<syn::Ident>,
+    pub name: Vec<Ident>,
 
     pub pname: Vec<String>,
 
@@ -61,11 +62,11 @@ pub struct Grammar {
 
 impl Grammar {
     pub fn is_var(&self, s: Symbol) -> bool {
-        (s.0 as usize) >= self.ntokens
+        s.index() >= self.ntokens
     }
 
     pub fn is_token(&self, s: Symbol) -> bool {
-        (s.0 as usize) < self.ntokens
+        s.index() < self.ntokens
     }
 
     pub fn start(&self) -> Symbol {
@@ -77,11 +78,11 @@ impl Grammar {
     }
 
     pub fn ritem(&self, item: Item) -> SymbolOrRule {
-        self.ritem[item.0 as usize]
+        self.ritem[item.index()]
     }
 
-    pub fn name(&self, symbol: Symbol) -> &syn::Ident {
-        &self.name[symbol.0 as usize]
+    pub fn name(&self, symbol: Symbol) -> &Ident {
+        &self.name[symbol.index()]
     }
 
     pub fn rule_to_str(&self, r: Rule) -> String {
@@ -95,34 +96,34 @@ impl Grammar {
     }
 
     pub fn rule_rhs_syms(&self, rule: Rule) -> &[SymbolOrRule] {
-        let start = self.rrhs[rule.0 as usize].0 as usize;
-        let end = self.rrhs[rule.0 as usize + 1].0 as usize - 1;
+        let start = self.rrhs[rule.index()].index();
+        let end = self.rrhs[rule.index() + 1].index() - 1;
         &self.ritem[start..end]
     }
 
     pub fn get_rhs_items(&self, r: Rule) -> &[SymbolOrRule] {
-        let rhs = self.rrhs[r.0 as usize];
+        let rhs = self.rrhs[r.index()];
         assert!(rhs.0 >= 0);
-        let mut end = rhs.0 as usize;
+        let mut end = rhs.index();
         while self.ritem[end].is_symbol() {
             end += 1;
         }
-        &self.ritem[rhs.0 as usize..end]
+        &self.ritem[rhs.index()..end]
     }
 
     pub fn symbol_to_var(&self, sym: Symbol) -> Var {
-        let su = sym.0 as usize;
+        let su = sym.index();
         assert!(su >= self.ntokens);
         Var((su - self.ntokens) as i16)
     }
 
     pub fn symbol_to_token(&self, sym: Symbol) -> Token {
-        assert!((sym.0 as usize) < self.ntokens);
+        assert!(sym.index() < self.ntokens);
         Token(sym.0)
     }
 
     pub fn var_to_symbol(&self, var: Var) -> Symbol {
-        assert!((var.0 as usize) < self.nvars);
+        assert!(var.index() < self.nvars);
         Symbol(self.ntokens as i16 + var.0)
     }
 
@@ -144,10 +145,10 @@ impl Grammar {
     }
 
     pub fn rlhs(&self, rule: Rule) -> Symbol {
-        self.rlhs[rule.0 as usize]
+        self.rlhs[rule.index()]
     }
 
     pub fn rrhs(&self, rule: Rule) -> Item {
-        self.rrhs[rule.0 as usize]
+        self.rrhs[rule.index()]
     }
 }
