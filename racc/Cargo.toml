@@ -18,7 +18,6 @@ quote = "1.0.2"
 proc-macro2 = "1.0.1"
 
 [dev-dependencies]
-racc = { path = "../racc" }
 racc_runtime = { path = "../racc_runtime" }
 log = "0.4.*"
 env_logger = "0.6"
