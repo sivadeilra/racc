@@ -15,13 +15,13 @@
 //! _Compilers: Principles, Techniques, and Tools, Edition 2_.
 
 use crate::grammar::Grammar;
-use crate::ramp_table::RampTable;
 use crate::tvec::TVec;
 use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
 use crate::Symbol;
 use crate::{Item, Rule, State, Var};
 use log::debug;
+use ramp_table::RampTable;
 
 pub(crate) const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
 
@@ -90,9 +90,8 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
     // other states, by examining a state, the next variables that could be
     // encountered in those states, and finding the transitive closure over same.
     // Initializes the state table.
-    states.push_entry(
-        derives
-            .values(gram.symbol_to_var(gram.start()))
+    states.push_entry_extend(
+        derives[gram.symbol_to_var(gram.start()).index()]
             .iter()
             .map(|&item| gram.rrhs(item)),
     );
@@ -123,16 +122,16 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut reductions = RampTable::<Rule>::new();
     let mut shifts = RampTable::<State>::new();
 
-    while this_state < states.num_keys() {
+    while this_state < states.len() {
         assert!(item_set.len() == 0);
         debug!("computing closure for state s{}:", this_state);
-        print_core(gram, State(this_state as i16), states.values(this_state));
+        print_core(gram, State(this_state as i16), &states[this_state]);
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
         closure(
             gram,
-            &states.values(this_state),
+            &states[this_state],
             &first_derives,
             &mut rule_set,
             &mut item_set,
@@ -171,7 +170,7 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
         this_state += 1;
     }
 
-    let nstates = states.num_keys();
+    let nstates = states.len();
 
     LR0Output {
         nstates,
@@ -197,14 +196,14 @@ fn find_or_create_state(
 
     // Search for an existing Core that has the same items.
     for &state in this_state_set.iter() {
-        if symbol_items == states.values(state) {
+        if *symbol_items == states[state.index()] {
             return state;
         }
     }
 
     // No match.  Add a new entry to the list.
-    let new_state: State = states.num_keys().into();
-    states.push_entry_copy_slice(symbol_items);
+    let new_state: State = states.len().into();
+    states.push_entry_copy(symbol_items);
     accessing_symbol.push(symbol);
 
     // Add the new state to the state set for this symbol.
@@ -319,7 +318,7 @@ fn print_derives(gram: &Grammar, derives: &DerivesTable) {
     for lhs in gram.iter_vars() {
         let lhs_sym = gram.var_to_symbol(lhs);
         debug!("    {} derives rules: ", gram.name(lhs_sym));
-        for &rule in derives.values(lhs) {
+        for &rule in &derives[lhs.index()] {
             debug!("        {}", &gram.rule_to_str(rule));
         }
     }
@@ -374,7 +373,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     let nvars = gram.nvars;
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
-        for &rule in derives.values(row) {
+        for &rule in &derives[row] {
             let symbol = gram.ritem(gram.rrhs(rule)).as_symbol();
             if gram.is_var(symbol) {
                 eff.set(row, gram.symbol_to_var(symbol).index());
@@ -404,7 +403,7 @@ pub(crate) fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitma
     assert!(eff.cols == gram.nvars);
     let mut first_derives = Bitmat::new(gram.nvars, gram.nrules);
     for (i, j) in eff.iter_ones() {
-        for &rule in derives.values(j) {
+        for &rule in &derives[j] {
             first_derives.set(i, rule.index());
         }
     }

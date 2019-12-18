@@ -582,7 +582,7 @@ fn token_actions(
     tos: &mut Vec<Vec<StateOrRule>>,
 ) {
     // shifts
-    for actions in parser.actions.iter_entries() {
+    for actions in parser.actions.iter() {
         let mut shift_r: Vec<i16> = Vec::new();
         let mut shift_s: Vec<i16> = Vec::new();
         for action in actions.iter() {
@@ -602,7 +602,7 @@ fn token_actions(
     }
 
     // reduces
-    for (state, actions) in parser.actions.iter_entries().enumerate() {
+    for (state, actions) in parser.actions.iter().enumerate() {
         let mut reduce_r: Vec<i16> = Vec::new();
         let mut reduce_s: Vec<i16> = Vec::new();
         for action in actions.iter() {
@@ -633,7 +633,7 @@ fn goto_actions(
     froms: &mut Vec<Vec<i16>>,
     tos: &mut Vec<Vec<StateOrRule>>,
 ) {
-    let nvars = gotos.num_keys();
+    let nvars = gotos.len();
     // Reserve area where we will write new entries.
     // We do not write them sequentially, so we reserve space first, then write at indices.
     froms.extend(repeat(Vec::new()).take(nvars));
@@ -645,7 +645,7 @@ fn goto_actions(
         let default_state = default_goto_table[var.index()];
         let mut spf = Vec::new();
         let mut spt = Vec::new();
-        for &entry in gotos.values(var).iter() {
+        for &entry in &gotos[var.index()] {
             if entry.to_state != default_state {
                 spf.push(entry.from_state.0);
                 spt.push(entry.to_state.0);
@@ -665,7 +665,7 @@ fn goto_actions(
 fn default_goto_table(nstates: usize, gotos: &GotoMap) -> Vec<State> {
     let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
     gotos
-        .iter_entries()
+        .iter()
         .map(move |var_gotos| {
             if var_gotos.is_empty() {
                 State(0)

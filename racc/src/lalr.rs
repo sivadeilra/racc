@@ -1,11 +1,11 @@
 use crate::grammar::Grammar;
 use crate::lr0::{LR0Output, Reductions};
-use crate::ramp_table::RampTable;
 use crate::tvec::TVec;
 use crate::util::Bitmat;
 use crate::StateOrRule;
 use crate::Symbol;
 use crate::{Rule, State, Var};
+use ramp_table::RampTable;
 
 #[allow(non_snake_case)]
 pub struct LALROutput {
@@ -56,10 +56,10 @@ fn set_max_rhs(gram: &Grammar) -> usize {
 fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // Count the number of gotos for each variable.
     // Var -> count
-    let mut goto_map: Vec<usize> = vec![0; gram.nvars + 1];
+    let mut goto_map: Vec<u32> = vec![0; gram.nvars + 1];
     let mut ngotos: usize = 0;
 
-    for shifts in lr0.shifts.iter_entries() {
+    for shifts in lr0.shifts.iter() {
         for &state in shifts.iter().rev() {
             let symbol = lr0.accessing_symbol[state];
             if gram.is_token(symbol) {
@@ -79,15 +79,15 @@ fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     // that this could easily be done in place.
     let mut k: usize = 0;
     // Var -> index into goto_map
-    let mut temp_map: Vec<usize> = Vec::with_capacity(gram.nvars + 1);
+    let mut temp_map: Vec<u32> = Vec::with_capacity(gram.nvars + 1);
     for i in 0..gram.nvars {
-        temp_map.push(k);
-        k += goto_map[i];
+        temp_map.push(k as u32);
+        k += goto_map[i] as usize;
     }
     goto_map[..gram.nvars].copy_from_slice(&temp_map);
 
-    goto_map[gram.nvars] = ngotos;
-    temp_map.push(ngotos);
+    goto_map[gram.nvars] = ngotos as u32;
+    temp_map.push(ngotos as u32);
     // at this point, temp_map and goto_map have identical length and contents
 
     let mut from_to: Vec<FromTo> = vec![
@@ -98,7 +98,7 @@ fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
         ngotos
     ];
 
-    for (from_state, sp_shifts) in lr0.shifts.iter_sets() {
+    for (from_state, sp_shifts) in lr0.shifts.iter().enumerate() {
         let from_state = State(from_state as i16);
         for &to_state in sp_shifts.iter().rev() {
             let symbol = lr0.accessing_symbol[to_state];
@@ -124,13 +124,13 @@ fn make_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
 /// Returns an index into goto_map, i.e. the "goto".
 fn map_goto(gotos: &GotoMap, state: State, var: Var) -> usize {
     use std::cmp::Ordering;
-    let range = gotos.values_range(var);
+    let range = gotos.entry_values_range(var.index());
     let mut low = range.start;
     let mut high = range.end;
     loop {
         assert!(low < high);
         let middle = (low + high) / 2;
-        match state.cmp(&gotos.value(middle).from_state) {
+        match state.cmp(&gotos.all_values()[middle].from_state) {
             Ordering::Equal => return middle,
             Ordering::Less => high = middle,
             Ordering::Greater => low = middle + 1,
@@ -152,7 +152,7 @@ fn initialize_F(
 
     for i in 0..ngotos {
         let stateno = gotos.all_values()[i].to_state;
-        let shifts = lr0.shifts.values(stateno.index());
+        let shifts = &lr0.shifts[stateno.index()];
 
         if !shifts.is_empty() {
             let mut j: usize = 0;
@@ -204,18 +204,18 @@ fn build_relations(
         let mut edge: Vec<StateOrRule> = Vec::new();
         assert!(states.is_empty());
 
-        let goto = gotos.value(i);
+        let goto = &gotos.all_values()[i];
         let from_state = goto.from_state;
         let symbol1 = lr0.accessing_symbol[goto.to_state];
 
-        for &rule in lr0.derives.values(gram.symbol_to_var(symbol1)) {
+        for &rule in &lr0.derives[gram.symbol_to_var(symbol1).index()] {
             assert!(states.len() == 0);
             states.push(from_state);
             let mut stateno = from_state;
             let rule_rhs = gram.rule_rhs_syms(rule);
             for r in rule_rhs.iter() {
                 let symbol2 = r.as_symbol();
-                for &shift in lr0.shifts.values(stateno) {
+                for &shift in &lr0.shifts[stateno.index()] {
                     stateno = shift;
                     if lr0.accessing_symbol[stateno] == symbol2 {
                         break;
@@ -254,8 +254,8 @@ fn add_lookback_edge(
     reductions: &Reductions,
     lookback: &mut Vec<Vec<i16>>,
 ) {
-    let range = reductions.values_range(state);
-    let state_rules = reductions.values(state);
+    let range = reductions.entry_values_range(state.index());
+    let state_rules = &reductions[state.index()];
     for (i, &r) in range.clone().zip(state_rules) {
         if r == ruleno {
             lookback[i].insert(0, goto as i16);

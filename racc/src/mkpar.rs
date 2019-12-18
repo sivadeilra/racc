@@ -2,10 +2,10 @@ use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
 use crate::lr0::Reductions;
-use crate::ramp_table::RampTable;
 use crate::{Rule, State, Token};
 use log::debug;
 use log::warn;
+use ramp_table::RampTable;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ActionCode {
@@ -49,7 +49,7 @@ pub(crate) struct YaccParser {
 }
 impl YaccParser {
     pub fn nstates(&self) -> usize {
-        self.actions.num_keys()
+        self.actions.len()
     }
 }
 
@@ -79,7 +79,7 @@ fn get_shifts(
     stateno: State,
     actions: &mut RampTable<ParserAction>,
 ) {
-    for &k in lr0.shifts.values(stateno) {
+    for &k in &lr0.shifts[stateno.index()] {
         let symbol = lr0.accessing_symbol[k];
         if gram.is_token(symbol) {
             actions.push_value(ParserAction {
@@ -100,8 +100,8 @@ fn get_reductions(
     stateno: State,
     actions: &mut RampTable<ParserAction>,
 ) {
-    let range = reductions.values_range(stateno);
-    let state_rules = reductions.values(stateno);
+    let range = reductions.entry_values_range(stateno.index());
+    let state_rules = &reductions[stateno.index()];
     for (i, &rule) in range.zip(state_rules) {
         for j in (0..gram.ntokens).rev() {
             if lalr.LA.get(i, j) {
@@ -118,7 +118,7 @@ fn add_reduce(gram: &Grammar, actions: &mut RampTable<ParserAction>, rule: Rule,
     // end: index of the values of the current (unfinished) key
     let end = *actions.index.last().unwrap();
     let actions = &mut actions.values;
-    let mut next: usize = end;
+    let mut next = end as usize;
     while next < actions.len() && actions[next].symbol < symbol {
         next += 1;
     }
@@ -157,7 +157,7 @@ fn add_reduce(gram: &Grammar, actions: &mut RampTable<ParserAction>, rule: Rule,
 fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> State {
     let goal = gram.ritem[1].as_symbol();
     let mut final_state: State = State(0);
-    for &ts in lr0.shifts.values(0usize).iter().rev() {
+    for &ts in lr0.shifts[0].iter().rev() {
         final_state = ts;
         if lr0.accessing_symbol[final_state] == goal {
             return ts;
@@ -169,7 +169,7 @@ fn find_final_state(gram: &Grammar, lr0: &LR0Output) -> State {
 
 fn report_unused_rules(gram: &Grammar, parser: &RampTable<ParserAction>) {
     let mut rules_used = vec![false; gram.nrules];
-    for state_actions in parser.iter_entries() {
+    for state_actions in parser.iter() {
         for action in state_actions.iter() {
             if let ActionCode::Reduce(action_rule) = action.action_code {
                 if action.suppressed == 0 {
@@ -190,7 +190,7 @@ fn report_unused_rules(gram: &Grammar, parser: &RampTable<ParserAction>) {
 fn remove_conflicts(final_state: State, parser: &mut RampTable<ParserAction>) {
     let mut srtotal = 0;
     let mut rrtotal = 0;
-    for (state, actions) in parser.iter_entries_mut().enumerate() {
+    for (state, actions) in parser.iter_mut().enumerate() {
         let state = State(state as i16);
         let is_final_state = state == final_state;
         let (srcount, rrcount) = remove_conflicts_for_state(actions, is_final_state);
@@ -307,7 +307,7 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
 /// State -> Rule
 pub(crate) fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
     parser
-        .iter_entries()
+        .iter()
         .map(|actions| sole_reduction(actions))
         .collect()
 }
