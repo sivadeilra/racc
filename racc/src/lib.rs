@@ -265,7 +265,7 @@ macro_rules! int_alias {
 
         impl core::fmt::Display for $name {
             fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                self.0.fmt(fmt)
+                core::fmt::Display::fmt(&self.0, fmt)
             }
         }
 
@@ -341,6 +341,17 @@ impl SymbolOrRule {
     pub fn as_rule(self) -> Rule {
         assert!(self.is_rule());
         Rule(-self.0)
+    }
+}
+
+use core::fmt::{Debug, Formatter};
+impl Debug for SymbolOrRule {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> core::fmt::Result {
+        if self.is_symbol() {
+            write!(fmt, "Symbol({})", self.as_symbol().index())
+        } else {
+            write!(fmt, "Rule({})", self.as_rule().index())
+        }
     }
 }
 

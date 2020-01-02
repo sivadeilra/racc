@@ -20,34 +20,39 @@ use crate::util::{word_size, Bitmat, Bitv32};
 use crate::warshall::reflexive_transitive_closure;
 use crate::Symbol;
 use crate::{Item, Rule, State, Var};
-use log::debug;
+use log::{debug, log_enabled, trace};
 use ramp_table::RampTable;
+use std::fmt::Write;
 
 pub(crate) const INITIAL_STATE_SYMBOL: Symbol = Symbol(0);
 
-// State -> [Item]
-type CoreTable = RampTable<Item>;
-
 pub(crate) struct LR0Output {
+    /// The number of states produced by LR(0) analysis.
     pub nstates: usize,
 
+    /// For each state, this gives the symbol that created this state.
     // index: State
     // value: Symbol
     pub accessing_symbol: TVec<State, Symbol>,
 
-    /// Contains (State -> [State]) mappings for shifts
+    /// Contains (State -> [State]) mappings for shifts. For each state, this gives the
+    /// set of states that this state can transition to.
     pub shifts: RampTable<State>,
 
-    /// Contains State -> [Rule]
-    pub reductions: Reductions,
+    /// Contains State -> [Rule]. For each state, this gives the rules that can be
+    /// reduced in this state.
+    pub reductions: RampTable<Rule>,
 
-    /// Contains Symbol -> [Rule]
-    pub derives: DerivesTable,
+    /// Contains Var -> [Rule]
+    /// Each key is a variable (nonterminal). The values for each key are the rules
+    /// that derive (produce) this nonterminal.
+    pub derives: RampTable<Rule>,
+
+    /// Contains State -> [Item]
+    /// The items that make up a given state.
+    /// This is used only for debugging, not for actual analysis.
+    pub state_items: RampTable<Item>,
 }
-
-// num_keys = number of states
-// items = rules
-pub(crate) type Reductions = RampTable<Rule>;
 
 impl LR0Output {
     pub fn nstates(&self) -> usize {
@@ -82,7 +87,8 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
     // values in this array are indexes into kernel_base
     let mut kernel_end: Vec<usize> = vec![0; gram.nsyms];
 
-    let mut states = CoreTable::new();
+    // The item sets for each state.
+    let mut states: RampTable<Item> = RampTable::new();
     let mut accessing_symbol: TVec<State, Symbol> = TVec::new();
 
     // This function creates the initial state, using the DERIVES relation for
@@ -124,8 +130,7 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
 
     while this_state < states.len() {
         assert!(item_set.len() == 0);
-        debug!("computing closure for state s{}:", this_state);
-        print_core(gram, State(this_state as i16), &states[this_state]);
+        trace!("computing closure for state s{}:", this_state);
 
         // The output of closure() is stored in item_set.
         // rule_set is used only as temporary storage.
@@ -153,14 +158,24 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
         shift_symbol.sort();
         for symbol in shift_symbol.iter().copied() {
-            let shift_state = find_or_create_state(
-                gram,
-                &kernel_items[kernel_base[symbol.index()]..kernel_end[symbol.index()]],
-                &mut state_set,
-                &mut states,
-                &mut accessing_symbol,
-                symbol,
-            );
+            // Search for an existing state that has the same items.
+            let symbol_items =
+                &kernel_items[kernel_base[symbol.index()]..kernel_end[symbol.index()]];
+            let this_state_set: &mut Vec<State> = &mut state_set[symbol_items[0].index()];
+            let shift_state = if let Some(&existing_state) = this_state_set
+                .iter()
+                .find(|state| *symbol_items == states[state.index()])
+            {
+                existing_state
+            } else {
+                // No match. Create a new state for this unique set of items.
+                let new_state: State = states.len().into();
+                states.push_entry_copy(symbol_items);
+                accessing_symbol.push(symbol);
+                // Add the new state to the state set for this item.
+                this_state_set.push(new_state);
+                new_state
+            };
             shifts.push_value(shift_state);
         }
         shifts.finish_key();
@@ -170,81 +185,85 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
         this_state += 1;
     }
 
-    let nstates = states.len();
-
-    LR0Output {
-        nstates,
+    let output = LR0Output {
+        nstates: states.len(),
         accessing_symbol,
         reductions,
         shifts,
         derives,
-    }
+        state_items: states,
+    };
+    dump_lr0_output(gram, &output);
+    output
 }
 
-// Gets the state for a particular symbol.  If no appropriate state exists,
-// then a new state will be created.
-fn find_or_create_state(
-    gram: &Grammar,
-    symbol_items: &[Item],
-    state_set: &mut [Vec<State>],
-    states: &mut CoreTable,
-    accessing_symbol: &mut TVec<State, Symbol>,
-    symbol: Symbol,
-) -> State {
-    let key_item = symbol_items[0];
-    let this_state_set = &mut state_set[key_item.index()];
-
-    // Search for an existing Core that has the same items.
-    for &state in this_state_set.iter() {
-        if *symbol_items == states[state.index()] {
-            return state;
-        }
+fn dump_lr0_output(gram: &Grammar, output: &LR0Output) {
+    if !log_enabled!(log::Level::Debug) {
+        return;
     }
 
-    // No match.  Add a new entry to the list.
-    let new_state: State = states.len().into();
-    states.push_entry_copy(symbol_items);
-    accessing_symbol.push(symbol);
+    debug!("States:  (nstates: {})", output.nstates);
+    for istate in 0..output.nstates {
+        let state = State(istate as i16);
+        debug!(
+            "s{}:   (accessing_symbol {})",
+            state,
+            gram.name(output.accessing_symbol[state])
+        );
 
-    // Add the new state to the state set for this symbol.
-    this_state_set.push(new_state);
+        let items = &output.state_items[istate];
 
-    debug!("    created state s{}:", new_state);
-    print_core(gram, new_state, symbol_items);
+        let mut line = String::new();
+        for i in 0..items.len() {
+            let rhs = items[i].index();
+            line.push_str(&format!("item {:4} : ", rhs));
 
-    new_state
-}
+            // back up to start of this rule
+            let mut rhs_first = rhs;
+            while rhs_first > 0 && gram.ritem[rhs_first - 1].is_symbol() {
+                rhs_first -= 1;
+            }
 
-fn print_core(gram: &Grammar, state: State, items: &[Item]) {
-    debug!("    s{}", state);
-
-    let mut line = String::new();
-    for i in 0..items.len() {
-        let rhs = items[i].index();
-        line.push_str(&format!("item {:4} : ", rhs));
-
-        // back up to start of this rule
-        let mut rhs_first = rhs;
-        while rhs_first > 0 && gram.ritem[rhs_first - 1].is_symbol() {
-            rhs_first -= 1;
-        }
-
-        // loop through rhs
-        let mut j = rhs_first;
-        while gram.ritem[j].is_symbol() {
-            let s = gram.ritem[j].as_symbol();
+            // loop through rhs
+            let mut j = rhs_first;
+            while gram.ritem[j].is_symbol() {
+                let s = gram.ritem[j].as_symbol();
+                if j == rhs {
+                    line.push_str(" .");
+                }
+                line.push_str(&format!(" {}", gram.name(s)));
+                j += 1;
+            }
             if j == rhs {
                 line.push_str(" .");
             }
-            line.push_str(&format!(" {}", gram.name(s)));
-            j += 1;
-        }
-        if j == rhs {
-            line.push_str(" .");
+
+            // Is this item a reduction? In other words, is the "." at the end of the RHS?
+            if gram.ritem[rhs].is_rule() {
+                let r = gram.ritem[rhs].as_rule();
+                write!(
+                    line,
+                    "    -> reduction (r{}) {}",
+                    r.index(),
+                    gram.name(gram.rlhs(r)),
+                )
+                .unwrap();
+            }
+
+            debug!("    {}", line);
+            line.clear();
         }
 
-        debug!("        {}", line);
-        line.clear();
+        for &r in &output.reductions[istate] {
+            debug!("    reduction: {}", gram.rule_to_str(r));
+        }
+        for &s in output.shifts[istate].iter() {
+            debug!(
+                "    shift: {:-20} --> s{}",
+                gram.name(output.accessing_symbol[s]),
+                s.index()
+            );
+        }
     }
 }
 
@@ -294,12 +313,12 @@ fn save_reductions(gram: &Grammar, item_set: &[Item], rules: &mut RampTable<Rule
     rules.finish_key();
 }
 
-// maps from Var -> [Rule]
-pub(crate) type DerivesTable = RampTable<Rule>;
-
-/// Compute the DERIVES table. The DERIVES table maps Var -> [Rule].
-fn set_derives(gram: &Grammar) -> DerivesTable {
-    let mut derives = RampTable::<Rule>::with_capacity(gram.nsyms, gram.nvars + gram.nrules);
+/// Computes the `DERIVES` table. The `DERIVES` table maps `Var -> [Rule]`, where each `Var`
+/// is a nonterminal and `[Rule]` contains all of the rules that have `Var` as their left-hand
+/// side. In other words, this table allows you to lookup the set of rules that produce
+/// (derive) a particular nonterminal.
+fn set_derives(gram: &Grammar) -> RampTable<Rule> {
+    let mut derives = RampTable::<Rule>::with_capacity(gram.nsyms, gram.nrules);
     for lhs in gram.iter_var_syms() {
         for rule in gram.iter_rules() {
             if gram.rlhs(rule) == lhs {
@@ -309,21 +328,22 @@ fn set_derives(gram: &Grammar) -> DerivesTable {
         derives.finish_key();
     }
 
-    print_derives(gram, &derives);
+    if log_enabled!(log::Level::Debug) {
+        debug!("DERIVES:");
+        for lhs in gram.iter_vars() {
+            let lhs_sym = gram.var_to_symbol(lhs);
+            debug!("    {} derives rules: ", gram.name(lhs_sym));
+            for &rule in &derives[lhs.index()] {
+                debug!("        {}", &gram.rule_to_str(rule));
+            }
+        }
+    }
+
     derives
 }
 
-fn print_derives(gram: &Grammar, derives: &DerivesTable) {
-    debug!("DERIVES:");
-    for lhs in gram.iter_vars() {
-        let lhs_sym = gram.var_to_symbol(lhs);
-        debug!("    {} derives rules: ", gram.name(lhs_sym));
-        for &rule in &derives[lhs.index()] {
-            debug!("        {}", &gram.rule_to_str(rule));
-        }
-    }
-}
-
+/// Builds a vector of symbols which are nullable. A nullable symbol is one which can be
+/// reduced from an empty sequence of tokens.
 pub(crate) fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
     let mut nullable: TVec<Symbol, bool> = TVec::from_vec(vec![false; gram.nsyms]);
     loop {
@@ -356,11 +376,12 @@ pub(crate) fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
         }
     }
 
-    for sym in gram.iter_var_syms() {
-        if nullable[sym] {
-            debug!("{} is nullable", gram.name(sym));
-        } else {
-            debug!("{} is not nullable", gram.name(sym));
+    if log_enabled!(log::Level::Debug) {
+        debug!("Nullable symbols:");
+        for sym in gram.iter_var_syms() {
+            if nullable[sym] {
+                debug!("{}", gram.name(sym));
+            }
         }
     }
 
@@ -369,12 +390,16 @@ pub(crate) fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
 
 /// Computes the "epsilon-free firsts" (EFF) relation.
 /// The EFF is a bit matrix [nvars, nvars].
-fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
+fn set_eff(gram: &Grammar, derives: &RampTable<Rule>) -> Bitmat {
     let nvars = gram.nvars;
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
         for &rule in &derives[row] {
-            let symbol = gram.ritem(gram.rrhs(rule)).as_symbol();
+            let derived_rule_or_symbol = gram.ritem(gram.rrhs(rule));
+            if derived_rule_or_symbol.is_rule() {
+                continue;
+            }
+            let symbol = derived_rule_or_symbol.as_symbol();
             if gram.is_var(symbol) {
                 eff.set(row, gram.symbol_to_var(symbol).index());
             }
@@ -386,7 +411,18 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
     eff
 }
 
-/// Returns the first_derives relation, which is a bit matrix of size [nvars, nrules].
+fn print_eff(gram: &Grammar, eff: &Bitmat) {
+    debug!("Epsilon Free Firsts");
+    for i in 0..eff.rows {
+        let var = Var(i as i16);
+        debug!("{}", gram.name(gram.var_to_symbol(var)));
+        for j in eff.iter_ones_in_row(i) {
+            debug!("  {}", gram.name(gram.var_to_symbol(Var(j as i16))));
+        }
+    }
+}
+
+/// Computes the `first_derives` relation, which is a bit matrix of size [nvars, nrules].
 /// Each row corresponds to a variable, and each column corresponds to a rule.
 ///
 /// Note: Because this relation is only relevant to variables (non-terminals), the table
@@ -396,8 +432,7 @@ fn set_eff(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
 ///
 /// This implementation processes bits in groups of 32, for the sake of efficiency.
 /// It is not clear whether this complexity is still justifiable, but it is preserved.
-pub(crate) fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitmat {
-    // Compute EFF, which is a [nvars, nvars] bit matrix
+pub(crate) fn set_first_derives(gram: &Grammar, derives: &RampTable<Rule>) -> Bitmat {
     let eff = set_eff(gram, derives);
     assert!(eff.rows == gram.nvars);
     assert!(eff.cols == gram.nvars);
@@ -412,23 +447,23 @@ pub(crate) fn set_first_derives(gram: &Grammar, derives: &DerivesTable) -> Bitma
     first_derives
 }
 
-// Computes the closure of a set of item sets, and writes the result into 'item_set'.
-// nucleus contains a set of items, that is, positions within reductions that are possible
-// in the current state.  The closure() function looks at the next symbol in each item, and
-// if the next symbol is a variable, the first_derives relation is consulted in order to see
-// which other rules need to be added to the closure.
-//
-// The caller provides a mutable rule_set array, which is guaranteed to hold enough space for
-// a bit vector of size nrules.  The caller does not otherwise use rule_set; the caller provides
-// rule_set only to avoid frequently allocating and destroying an array.
-//
-// Similarly, the item_set is passed as a mutable vector.  However, the caller guarantees that
-// item_set will be empty on call to closure(), and closure() writes its output into item_set.
-//
-// * rule_set: bit vector, size=nrules; temporary data, written and read by this fn
-//
-// TODO: Consider changing item_set from Vec<Item> to a bitmap, whose length is nitems.
-// Then the 'states' table becomes a Bitmat.
+/// Computes the closure of a set of item sets, and writes the result into 'item_set'.
+/// nucleus contains a set of items, that is, positions within reductions that are possible
+/// in the current state.  The closure() function looks at the next symbol in each item, and
+/// if the next symbol is a variable, the first_derives relation is consulted in order to see
+/// which other rules need to be added to the closure.
+///
+/// The caller provides a mutable rule_set array, which is guaranteed to hold enough space for
+/// a bit vector of size nrules.  The caller does not otherwise use rule_set; the caller provides
+/// rule_set only to avoid frequently allocating and destroying an array.
+///
+/// Similarly, the item_set is passed as a mutable vector.  However, the caller guarantees that
+/// item_set will be empty on call to closure(), and closure() writes its output into item_set.
+///
+/// * rule_set: bit vector, size=nrules; temporary data, written and read by this fn
+///
+/// TODO: Consider changing item_set from Vec<Item> to a bitmap, whose length is nitems.
+/// Then the 'states' table becomes a Bitmat.
 pub(crate) fn closure(
     gram: &Grammar,
     nucleus: &[Item],
@@ -485,17 +520,6 @@ pub(crate) fn closure(
     while i < nucleus.len() {
         item_set.push(nucleus[i]);
         i += 1;
-    }
-}
-
-fn print_eff(gram: &Grammar, eff: &Bitmat) {
-    debug!("Epsilon Free Firsts");
-    for i in 0..eff.rows {
-        let var = Var(i as i16);
-        debug!("{}", gram.name(gram.var_to_symbol(var)));
-        for j in eff.iter_ones_in_row(i) {
-            debug!("  {}", gram.name(gram.var_to_symbol(Var(j as i16))));
-        }
     }
 }
 

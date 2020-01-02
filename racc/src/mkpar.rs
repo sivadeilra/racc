@@ -1,7 +1,6 @@
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
-use crate::lr0::Reductions;
 use crate::{Rule, State, Token};
 use log::debug;
 use log::warn;
@@ -95,7 +94,7 @@ fn get_shifts(
 
 fn get_reductions(
     gram: &Grammar,
-    reductions: &Reductions,
+    reductions: &RampTable<Rule>,
     lalr: &LALROutput,
     stateno: State,
     actions: &mut RampTable<ParserAction>,

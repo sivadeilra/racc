@@ -1,10 +1,15 @@
 use core::iter::repeat;
+use core::sync::atomic::{AtomicU64, Ordering::SeqCst};
+use log::trace;
 
 pub const BITS_PER_WORD: usize = 32;
+
+static NEXT_BITMAT_ID: AtomicU64 = AtomicU64::new(1);
 
 // An M x N matrix of bits
 // The representation is in row-major form.
 // The representation is exposed.
+#[derive(Clone)]
 pub struct Bitmat {
     // Contains all bits in matrix, in row-major form, with padding at end of row
     pub data: Vec<u32>,
@@ -14,10 +19,14 @@ pub struct Bitmat {
     pub cols: usize,
     // Number of u32 elements per row
     pub rowsize: usize,
+
+    id: u64,
 }
 
 impl Bitmat {
     pub fn new(rows: usize, cols: usize) -> Bitmat {
+        let id = NEXT_BITMAT_ID.fetch_add(1, SeqCst);
+        trace!("(bitmat {}) new: rows {} cols {}", id, rows, cols);
         let rowsize = word_size(cols);
         let total = rowsize * rows;
         Bitmat {
@@ -25,7 +34,15 @@ impl Bitmat {
             rows: rows,
             cols: cols,
             rowsize: rowsize,
+            id,
         }
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
     }
 
     // note: bit() and set_bit() are carried over from the C definitions
@@ -53,12 +70,14 @@ impl Bitmat {
     pub fn set(&mut self, r: usize, c: usize) {
         assert!(r < self.rows);
         assert!(c < self.cols);
+        trace!("(bitmat {}): set: row {} col {}", self.id, r, c);
         self.data[r * self.rowsize + (c >> 5)] |= 1u32 << (c & 31);
     }
 
     pub fn get(&self, r: usize, c: usize) -> bool {
         assert!(r < self.rows);
         assert!(c < self.cols);
+        trace!("get: data = {:x?}", self.data);
         (self.data[r * self.rowsize + (c >> 5)] & (1u32 << (c & 31))) != 0u32
     }
 
@@ -100,7 +119,7 @@ impl<'a> Iterator for BitmatIterOnes<'a> {
     type Item = (usize, usize);
     // This could be made faster with a "find first set bit" intrinsic.
     fn next(&mut self) -> Option<(usize, usize)> {
-        const LOW_MASK: usize = (1 << BITS_PER_WORD) - 1;
+        const LOW_MASK: usize = BITS_PER_WORD - 1;
 
         loop {
             // loop over rows
@@ -124,6 +143,12 @@ impl<'a> Iterator for BitmatIterOnes<'a> {
                 let oldcol = self.col;
                 self.col += 1;
                 if ((self.current >> nextbit) & 1) != 0 {
+                    trace!(
+                        "(bitmat {}) found, row {}, col {}",
+                        self.mat.id,
+                        self.row,
+                        oldcol
+                    );
                     return Some((self.row, oldcol));
                 }
             }
@@ -131,6 +156,7 @@ impl<'a> Iterator for BitmatIterOnes<'a> {
             // reached the end of one row.  check to see if there are more rows.
             if self.row + 1 == self.mat.rows {
                 // No more columns, no more rows.  Do not change state.
+                trace!("bitmat iter: none");
                 return None;
             }
             // Yes, we have more rows.  Reset column.
@@ -160,7 +186,7 @@ impl<'a> Iterator for BitMaskIterator<'a> {
     type Item = usize;
     // This could be made faster with a "find first set bit" intrinsic.
     fn next(&mut self) -> Option<usize> {
-        const LOW_MASK: usize = (1 << BITS_PER_WORD) - 1;
+        const LOW_MASK: usize = BITS_PER_WORD - 1;
 
         while self.bitpos < self.nbits {
             // Are we at a word boundary?  If so, we need to load 'current'.
@@ -178,6 +204,13 @@ impl<'a> Iterator for BitMaskIterator<'a> {
 
             let cpos = self.bitpos;
             self.bitpos += 1;
+            assert!(
+                nextbit < 32,
+                "nextbit = {}, bitpos = {}, low_mask = {:#x}",
+                nextbit,
+                self.bitpos,
+                LOW_MASK
+            );
             if ((self.current >> nextbit) & 1) != 0 {
                 return Some(cpos);
             }

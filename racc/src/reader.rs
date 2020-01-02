@@ -798,7 +798,7 @@ impl Parse for GrammarDef {
             if sym.class == SymClass::Unknown {
                 return Err(syn::Error::new(
                     sym.name.span(),
-                    "symbol was used but never defined",
+                    format!("symbol '{}' was used but never defined", sym.name),
                 ));
             }
         }
