@@ -87,9 +87,11 @@ fn basic_test() {
     let toks = vec![
         (LPAREN, None),
         (NUM, Some(42)),
-        (RPAREN, None),
         (PLUS, None),
         (NUM, Some(24)),
+        (RPAREN, None),
+        (DIVIDE, None),
+        (NUM, Some(2)),
     ];
 
     let mut parser = ParserState::new();

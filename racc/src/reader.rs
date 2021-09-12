@@ -838,6 +838,8 @@ impl Parse for GrammarDef {
 fn test_foo() {
     use quote::quote;
 
+    env_logger::init();
+
     fn case(description: &str, tokens: proc_macro2::TokenStream) {
         println!("parsing grammar: {} -----", description);
         match syn::parse2::<GrammarDef>(tokens.clone()) {
@@ -867,6 +869,7 @@ fn test_foo() {
         }
     }
 
+    /*
     case("empty grammar", quote! {});
 
     case(
@@ -879,6 +882,7 @@ fn test_foo() {
             BAR;
         },
     );
+    */
 
     case(
         "math",
