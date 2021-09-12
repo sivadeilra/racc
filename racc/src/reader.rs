@@ -520,7 +520,6 @@ impl ReaderState {
             ntokens: ntokens,
             nvars: nvars,
             name: gram_name,
-            pname: Vec::new(),
             value: gram_value,
             prec: gram_prec,
             assoc: gram_assoc,
@@ -814,15 +813,16 @@ impl Parse for GrammarDef {
                  This type is used for the results of rules, and is often an enum.",
             )
         })?;
-        let context_ty =
-            context_ty.ok_or_else(|| {
-                syn::Error::new(Span::call_site(),
+        let context_ty = context_ty.ok_or_else(|| {
+            syn::Error::new(
+                Span::call_site(),
                 "The grammar did not specify the 'Context' type. \
                 Please add 'type Context = <your type>;' to the grammar. \
                 This type stores 'global' data across all rules, and is accessible within rules \
                 as 'context'. \
-                Note that `()` is a valid type, if context is not needed. ")
-            })?;
+                Note that `()` is a valid type, if context is not needed. ",
+            )
+        })?;
 
         Ok(GrammarDef {
             grammar: gram,

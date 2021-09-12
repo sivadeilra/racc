@@ -30,8 +30,6 @@ pub(crate) struct Grammar {
     /// len = nsyms
     pub name: Vec<Ident>,
 
-    pub pname: Vec<String>,
-
     /// len = nsyms
     pub value: Vec<i16>,
 

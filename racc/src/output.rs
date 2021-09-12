@@ -114,6 +114,7 @@ pub(crate) fn output_parser_to_token_stream(
     }
 
     items.extend(quote! {
+        #[allow(unused_braces)]
         fn reduce_actions<I: Iterator<Item = #symbol_value_ty>>(
             mut values: I,
             reduction: u16,

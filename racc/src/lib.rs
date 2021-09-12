@@ -41,7 +41,7 @@
 //!     Expr : Expr=left PLUS Expr=right {
 //!         // You can put arbitrary code here.
 //!         println!("evaluating: {} + {}", left, right);
-//!         
+//!
 //!         // The value of the action block is used as the
 //!         // value of the rule (reduction).  Note the absence
 //!         // of a semi-colon here.
@@ -229,8 +229,6 @@
 #![warn(rust_2018_idioms)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::cognitive_complexity)]
-
-extern crate proc_macro;
 
 mod grammar;
 mod lalr;
