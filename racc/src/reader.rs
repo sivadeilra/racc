@@ -41,6 +41,7 @@ use proc_macro2::Span;
 use std::collections::HashMap;
 use std::rc::Rc;
 use syn::parse::{Parse, ParseStream};
+use syn::parse_quote;
 use syn::spanned::Spanned;
 use syn::{Block, Ident, Token, Type};
 
@@ -585,6 +586,29 @@ impl ReaderState {
     }
 }
 
+#[derive(Default)]
+struct Errors {
+    errors: Vec<syn::Error>,
+}
+
+impl Errors {
+    fn push(&mut self, e: syn::Error) {
+        self.errors.push(e);
+    }
+
+    fn into_result(self) -> Result<(), syn::Error> {
+        let mut iter = self.errors.into_iter();
+        if let Some(mut errors) = iter.next() {
+            for e in iter {
+                errors.combine(e);
+            }
+            Err(errors)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 pub(crate) struct GrammarDef {
     pub grammar: Grammar,
     pub context_ty: Type,
@@ -598,6 +622,7 @@ impl Parse for GrammarDef {
         let mut reader: ReaderState = ReaderState::new();
         let mut context_ty: Option<Type> = None;
         let mut value_ty: Option<Type> = None;
+        let mut errors = Errors::default();
 
         // Add the well-known "error" symbol to the table.
         {
@@ -613,7 +638,7 @@ impl Parse for GrammarDef {
             let la = input.lookahead1();
             if la.peek(Token![type]) {
                 // `type Value = <some type>;` - specifies the value stack type.
-                input.parse::<Token![type]>()?;
+                input.parse::<Token![type]>()?; // should always succeed
                 let keyword = input.parse::<Ident>()?;
                 input.parse::<Token![=]>()?;
                 let ty = input.parse::<Type>()?;
@@ -712,7 +737,14 @@ impl Parse for GrammarDef {
                             reader.end_rule();
                             reader.start_rule(lhs);
                         } else if la.peek(syn::token::Brace) {
-                            let block = input.parse::<syn::Block>()?;
+                            let block: syn::Block = match input.parse::<syn::Block>() {
+                                Ok(block) => block,
+                                Err(e) => {
+                                    errors.push(e);
+                                    parse_quote!({})
+                                }
+                            };
+
                             // Parse an action (a code block).  Parsing it is actually very easy, thanks to Rust!
                             if reader.last_was_action {
                                 reader.insert_empty_rule(block.span());
@@ -723,6 +755,21 @@ impl Parse for GrammarDef {
                             input.parse::<Token![;]>()?;
                             reader.end_rule();
                             break;
+                        } else if la.peek(syn::LitChar) {
+                            let char_token = input.parse::<syn::LitChar>()?;
+                            // This is similar to la.peek(Ident).
+                            let ch = char_token.value();
+                            let _s = ch.to_string();
+                            // It is never legal for this literal character to be followed by '=',
+                            // because that is used only for binding non-terminals.
+                            if input.lookahead1().peek(syn::token::Eq) {
+                                errors.push(syn::Error::new(
+                                    input.span(),
+                                    "you can't use = after a literal character",
+                                ));
+                            }
+
+                            // todo: finish implementing!
                         } else {
                             return Err(la.error());
                         }
@@ -774,11 +821,10 @@ impl Parse for GrammarDef {
                     return Err(la.error());
                 }
             } else {
-                return Err(la.error());
+                errors.push(la.error());
+                break;
             }
         }
-
-        debug!("");
 
         // Check that we found a goal state.  This check was in check_symbols().
         // Rebind 'goal_symbol' now that we know it exists.
@@ -823,6 +869,8 @@ impl Parse for GrammarDef {
                 Note that `()` is a valid type, if context is not needed. ",
             )
         })?;
+
+        errors.into_result()?;
 
         Ok(GrammarDef {
             grammar: gram,

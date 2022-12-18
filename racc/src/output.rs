@@ -1,3 +1,4 @@
+use super::*;
 use crate::grammar::Grammar;
 use crate::lalr::GotoMap;
 use crate::mkpar::{ActionCode, YaccParser};
@@ -5,7 +6,7 @@ use crate::util::fill_copy;
 use crate::{Rule, State, StateOrRule};
 use log::debug;
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
+use quote::{quote, quote_spanned};
 use std::cmp;
 use std::i16;
 use std::iter::repeat;
@@ -72,10 +73,12 @@ pub(crate) fn output_parser_to_token_stream(
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
 
+        let block_span: Span;
         let stmts: TokenStream = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right
                 // to left.
+                block_span = block.span();
                 let rhs_index = gram.rrhs(rule).index();
                 let num_rhs = gram.get_rhs_items(rule).len();
                 let mut t = TokenStream::new();
@@ -101,15 +104,19 @@ pub(crate) fn output_parser_to_token_stream(
             None => {
                 // This reduction does not have any code to execute.  Still, we need to
                 // remove items from the value stack. Vec::drain() handles this for us, implicitly.
+                block_span = gram.rule_span(Rule(rule_i as i16));
                 TokenStream::new()
             }
         };
 
         let pat_value: u16 = rule_i as u16 - 2;
-        action_arms.extend(quote! {
+
+        action_arms.extend(quote_spanned! {
+            block_span =>
             #pat_value => {
                 #stmts
             }
+
         });
     }
 
@@ -245,14 +252,14 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
 
                     // todo: port acceptance code
                 } else {
-                    let yyn_0 = YYGINDEX[lhs as usize];
+                    let yyn_0 = YYGINDEX[lhs as usize] as u16;
                     let yyn_1 = yyn_0 + self.yystate;
 
                     let next_state: u16 =
-                        if YYCHECK[yyn_1 as usize] == self.yystate {
-                            YYTABLE[yyn_1 as usize]
+                        if YYCHECK[yyn_1 as usize] as u16 == self.yystate {
+                            YYTABLE[yyn_1 as usize] as u16
                         } else {
-                            YYDGOTO[lhs as usize]
+                            YYDGOTO[lhs as usize] as u16
                         };
                     log::debug!(
                         "        after reduction, shifting from state {} to state {}",
@@ -293,9 +300,9 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                     log::debug!("try_shift: shift={}", shift);
                     let yyn = shift as i32 + (token as i32);
                     assert!(yyn >= 0);
-                    assert!(YYCHECK[yyn as usize] == token,
+                    assert!(YYCHECK[yyn as usize] as u16 == token,
                         "yyn = {}, YYCHECK[yyn] = {}, token = {}", yyn, YYCHECK[yyn as usize], token);
-                    let next_state = YYTABLE[yyn as usize];
+                    let next_state = YYTABLE[yyn as usize] as u16;
                     log::debug!(
                         "state {}, shifting to state {}, pushing lval {:?}",
                         self.yystate, next_state, lval
@@ -317,9 +324,9 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 if red != 0 {
                     let yyn = red + (token as u16);
                     log::debug!("    yyn={}", yyn);
-                    assert!(YYCHECK[yyn as usize] == token);
+                    assert!(YYCHECK[yyn as usize] == token as i16);
                     log::debug!("    reducing by {}", red);
-                    let rr = YYTABLE[yyn as usize];
+                    let rr = YYTABLE[yyn as usize] as u16;
                     self.yyreduce(rr, ctx)?;
                     Ok(true)
                 } else {
@@ -548,7 +555,7 @@ fn output_actions(
     let packed = packing::pack_table(parser.nstates(), &order, &act);
 
     let mut items = TokenStream::new();
-    items.extend(make_table_i16(
+    items.extend(make_table_i16_signed(
         Ident::new("YYDGOTO", span),
         &default_goto_table.iter().map(|s| s.0).collect::<Vec<i16>>(),
     ));
@@ -560,12 +567,12 @@ fn output_actions(
         Ident::new("YYRINDEX", span),
         &packed.base[nstates..nstates * 2],
     ));
-    items.extend(make_table_i16(
+    items.extend(make_table_i16_signed(
         Ident::new("YYGINDEX", span),
         &packed.base[nstates * 2..act.nvectors],
     ));
-    items.extend(make_table_i16(Ident::new("YYTABLE", span), &packed.table));
-    items.extend(make_table_i16(Ident::new("YYCHECK", span), &packed.check));
+    items.extend(make_table_i16_signed(Ident::new("YYTABLE", span), &packed.table));
+    items.extend(make_table_i16_signed(Ident::new("YYCHECK", span), &packed.check));
     items
 }
 

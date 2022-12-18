@@ -241,6 +241,7 @@ mod util;
 mod warshall;
 
 use proc_macro2::Span;
+use syn::spanned::Spanned;
 use syn::Ident;
 
 macro_rules! int_alias {
@@ -379,5 +380,9 @@ fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::T
 #[proc_macro]
 pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let tokens2: proc_macro2::TokenStream = tokens.into();
-    racc_grammar2(tokens2).unwrap().into()
+
+    match racc_grammar2(tokens2) {
+        Ok(result) => result.into(),
+        Err(e) => e.into_compile_error().into(),
+    }
 }

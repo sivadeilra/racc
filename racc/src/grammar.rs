@@ -149,4 +149,16 @@ impl Grammar {
     pub fn rrhs(&self, rule: Rule) -> Item {
         self.rrhs[rule.index()]
     }
+
+    /// Gets the best `Span` for this rule. Ideally, this is the definition of the rule.
+    pub fn rule_span(&self, rule: Rule) -> proc_macro2::Span {
+        let rhs = self.rule_rhs_syms(rule);
+        if let Some(rhs0) = rhs.get(0) {
+            self.name(rhs0.as_symbol()).span()
+        } else {
+            // This rule has no rhs symbols (is an empty production).
+            // Use the lhs symbol for the span.
+            self.name(self.rlhs(rule)).span()
+        }
+    }
 }
