@@ -75,9 +75,7 @@ fn err_test() {
 
 #[test]
 fn basic_test() {
-
     env_logger::builder().default_format_timestamp(false).init();
-
 
     let toks = vec![
         (LPAREN, None),
@@ -95,5 +93,5 @@ fn basic_test() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
     let result = parser.finish(&mut ctx);
-    assert_eq!(result, Ok(Some(66)));
+    assert_eq!(result, Ok(Some(33)));
 }

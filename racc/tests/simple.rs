@@ -91,5 +91,5 @@ fn basic_test() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
     let result = parser.finish(&mut ctx);
-    assert_eq!(result, Ok(Some(66)));
+    assert_eq!(result, Ok(Some(33)));
 }

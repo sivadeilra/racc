@@ -21,7 +21,8 @@ racc::racc_grammar! {
     DIVIDE;
 
     Expr : NUM=x {
-        println!("NUM={:?}", x); x
+        // println!("NUM={:?}", x);
+        x
     }
         | Expr=a PLUS Expr=b {
             Some(a.unwrap() + b.unwrap())
@@ -32,7 +33,7 @@ racc::racc_grammar! {
         | Expr=a DIVIDE Expr=b {
             let a = a.unwrap();
             let b = b.unwrap();
-            println!("{} / {}", a, b);
+            // println!("{} / {}", a, b);
             if b == 0 {
                 return Err(racc_runtime::Error::AppError);
             }
@@ -77,9 +78,9 @@ fn err_test() {
 }
 
 fn main() {
-    env_logger::init();
+    env_logger::builder().default_format_timestamp(false).init();
 
-    err_test();
+    // err_test();
     basic_test();
 }
 
@@ -100,5 +101,5 @@ fn basic_test() {
         parser.push_token(&mut ctx, tok, lval).unwrap();
     }
     let result = parser.finish(&mut ctx);
-    assert_eq!(result, Ok(Some(66)));
+    assert_eq!(result, Ok(Some(33)));
 }

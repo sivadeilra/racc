@@ -166,8 +166,46 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
         /// To create an instance of `ParserState`, use `ParserState::new`.
         struct ParserState {
             yystate: u16,
-            value_stack: Vec<#symbol_value_ty>,
+            /// Contains (symbol, value), where symbol is either the token that gave us a value,
+            /// or a variable that produced a value.
+            value_stack: Vec<ValueEntry>,
             state_stack: Vec<u16>,
+        }
+
+        struct ValueEntry {
+            origin: ValueOrigin,
+            value: #symbol_value_ty,
+        }
+
+        impl core::fmt::Debug for ValueEntry {
+            fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                let mut tuple = fmt.debug_tuple("");
+
+                match &self.origin {
+                    &ValueOrigin::Token(t) => {
+                        if let Some(name) = YYNAME.get(t as usize) {
+                            tuple.field(name);
+                        } else {
+                            tuple.field(&t);
+                        }
+                    }
+                    &ValueOrigin::Rule(r) => {
+                        if let Some(s) = YYRULES.get(r as usize) {
+                            tuple.field(&s);
+                        } else {
+                            tuple.field(&r);
+                        }
+                    }
+                }
+
+                tuple.field(&self.value);
+                tuple.finish()
+            }
+        }
+
+        enum ValueOrigin {
+            Token(i16),
+            Rule(i16),
         }
 
         // The initial state for all parsers.
@@ -180,7 +218,7 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                     value_stack: Vec::new(),
                     state_stack: {
                         let mut v = Vec::with_capacity(20);
-                        v.push(INITIAL_STATE);
+                        // v.push(INITIAL_STATE);
                         v
                     },
                 }
@@ -203,116 +241,23 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 self.yystate = INITIAL_STATE;
                 self.value_stack.clear();
                 self.state_stack.clear();
-                self.state_stack.push(INITIAL_STATE);
+                // self.state_stack.push(INITIAL_STATE);
             }
 
-            fn yyreduce(&mut self, reduction: u16, ctx: &mut #context_ty)
-                -> Result<(), racc_runtime::Error>
-            {
-                let len = YYLEN[reduction as usize] as usize;
-
-                log::debug!(
-                    "state {} reducing by rule {}, len={}",
-                    self.yystate, YYRULES[reduction as usize], len
-                );
-                assert!(self.value_stack.len() >= len);
-                assert!(self.state_stack.len() >= len);
-
-                // Invoke the generated "reduce" method.  This method handles popping values from
-                // parser.values_stack, and then executing the app-supplied code for this reduction.
-                // Because the generated code handles popping items from the stack, it is not
-                // necessary for us to consult a 'yylen' table here; that information is implicit.
-                let old_values_len = self.value_stack.len();
-                let reduce_value = reduce_actions(
-                    self.value_stack.drain(self.value_stack.len() - len..), reduction, ctx)?;
-                assert!(self.value_stack.len() + len == old_values_len);
-                log::debug!(
-                    "    generated code popped {} values from value stack, new len = {}",
-                    old_values_len,
-                    self.value_stack.len()
-                );
-                // Push the value that represents the reduction of this rule (the LHS).
-                log::debug!("    after pushing the result of the reduction, value_stack.len = {}, reduce_value={:?}",
-                    self.value_stack.len() + 1, reduce_value);
-                self.value_stack.push(reduce_value);
-
-                // pop states
-                self.state_stack.drain(self.state_stack.len() - len..);
-                let top_state = *self.state_stack.last().unwrap();
-                self.yystate = top_state;
-
-                let lhs = YYLHS[reduction as usize];
-                if top_state == 0 && lhs == 0 {
-                    log::debug!(
-                        "        after reduction, shifting from state 0 to state {} (0/0 case!)",
-                        YYFINAL
-                    );
-                    self.yystate = YYFINAL;
-                    self.state_stack.push(YYFINAL);
-
-                    // todo: port acceptance code
-                } else {
-                    let yyn_0 = YYGINDEX[lhs as usize] as u16;
-                    let yyn_1 = yyn_0 + self.yystate;
-
-                    let next_state: u16 =
-                        if YYCHECK[yyn_1 as usize] as u16 == self.yystate {
-                            YYTABLE[yyn_1 as usize] as u16
-                        } else {
-                            YYDGOTO[lhs as usize] as u16
-                        };
-                    log::debug!(
-                        "        after reduction, shifting from state {} to state {}",
-                        self.yystate, next_state
-                    );
-
-                    self.yystate = next_state;
-                    self.state_stack.push(next_state);
-                }
-
-                Ok(())
-            }
-
-            fn do_defreds(&mut self, ctx: &mut #context_ty) -> Result<bool, racc_runtime::Error> {
+            // Do default reductions, as long as there are any default reductions.
+            // Returns true if we performed at least one default reduction.
+            fn do_defreds(&mut self, ctx: &mut #context_ty) -> Result<(), racc_runtime::Error> {
                 // Check for default reductions.
-                let mut any = false;
                 loop {
+                    // Keep in mind that the values in YYDEFRED are biased by 2, in order to save
+                    // space in related tables.
                     let defred = YYDEFRED[self.yystate as usize];
                     if defred != 0 {
-                        // log::debug!("    default reduction: yyn={}", defred);
+                        log::debug!("do_defreds: s{} has default reduction r{}", self.yystate, defred + 2);
                         self.yyreduce(defred, ctx)?;
-                        any = true;
                     } else {
-                        // log::debug!("    no more defreds");
-                        return Ok(any);
+                        return Ok(());
                     }
-                }
-            }
-
-            // Check to see if there is a SHIFT action for this (state, token).
-            // All of the values in YYSINDEX are either 0 (meaning no shift) or negative.
-            // If YYSINDEX[state] is non-zero, then (token + YYSINDEX[state]) gives yyn.
-            // TODO: Can we just use positive values here, instead of negative?
-            fn try_shift(&mut self, token: u16, lval: #symbol_value_ty) -> bool {
-                log::debug!("try_shift: yystate={} token={}", self.yystate, token);
-                let shift: i16 = YYSINDEX[self.yystate as usize];
-                if shift != 0 {
-                    log::debug!("try_shift: shift={}", shift);
-                    let yyn = shift as i32 + (token as i32);
-                    assert!(yyn >= 0);
-                    assert!(YYCHECK[yyn as usize] as u16 == token,
-                        "yyn = {}, YYCHECK[yyn] = {}, token = {}", yyn, YYCHECK[yyn as usize], token);
-                    let next_state = YYTABLE[yyn as usize] as u16;
-                    log::debug!(
-                        "state {}, shifting to state {}, pushing lval {:?}",
-                        self.yystate, next_state, lval
-                    );
-                    self.yystate = next_state;
-                    self.state_stack.push(self.yystate);
-                    self.value_stack.push(lval); // <-- lval is consumed
-                    true
-                } else {
-                    false
                 }
             }
 
@@ -321,17 +266,154 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 -> Result<bool, racc_runtime::Error>
             {
                 let red = YYRINDEX[self.yystate as usize];
-                if red != 0 {
-                    let yyn = red + (token as u16);
-                    log::debug!("    yyn={}", yyn);
-                    assert!(YYCHECK[yyn as usize] == token as i16);
-                    log::debug!("    reducing by {}", red);
-                    let rr = YYTABLE[yyn as usize] as u16;
-                    self.yyreduce(rr, ctx)?;
-                    Ok(true)
-                } else {
-                    Ok(false)
+                if red == 0 {
+                    log::debug!("try_reduce: s{} has no reductions", self.yystate);
+                    return Ok(false);
                 }
+
+                let yyn = red + (token as u16);
+                if YYCHECK[yyn as usize] != token as i16 {
+                    log::debug!("try_reduce: s{} has no reduction for token {}", self.yystate, YYNAME[token as usize]);
+                    return Ok(false);
+                }
+
+                let rr = YYTABLE[yyn as usize] as u16;
+                self.yyreduce(rr, ctx)?;
+                Ok(true)
+            }
+
+            // Performs a reduction.
+            fn yyreduce(&mut self, reduction: u16, ctx: &mut #context_ty)
+                -> Result<(), racc_runtime::Error>
+            {
+                let len = YYLEN[reduction as usize] as usize;
+                let lhs = YYLHS[reduction as usize];
+
+                log::debug!(
+                    "yyreduce: reducing: r{} (lhs {}, len {}) {}",
+                    reduction + 2, lhs, len, YYRULES[reduction as usize]
+                );
+                assert!(self.value_stack.len() >= len);
+                // assert!(self.state_stack.len() >= len, "state stack is too small. needed {}, stack has {}", len, self.state_stack.len());
+
+                // Invoke the generated "reduce" method.  This method handles popping values from
+                // parser.values_stack, and then executing the app-supplied code for this reduction.
+                // Because the generated code handles popping items from the stack, it is not
+                // necessary for us to consult a 'yylen' table here; that information is implicit.
+                let old_values_len = self.value_stack.len();
+                let reduce_value = reduce_actions(
+                    self.value_stack.drain(self.value_stack.len() - len..)
+                        .map(|entry| entry.value),
+                    reduction,
+                    ctx)?;
+                assert!(self.value_stack.len() + len == old_values_len);
+                log::trace!(
+                    "yyreduce: generated code popped {} values from value stack, new len = {}",
+                    len,
+                    self.value_stack.len()
+                );
+
+                // Push the value that represents the reduction of this rule (the LHS).
+                log::debug!("yyreduce: action produced value: {:?}", reduce_value);
+                self.value_stack.push(ValueEntry {
+                    origin: ValueOrigin::Rule(reduction as i16),
+                    value: reduce_value,
+                });
+
+                // Pop states. The number of states that we pop is equal to the number of symbols
+                // on the RHS of the current rule (which can be zero).  We treat yystate as one of
+                // the entries to be popped. This is why we pop `len - 1` items from the actual
+                // stack.  Then, if the stack is empty, we set the current state to zero (the
+                // initial state value).
+                if len > 0 {
+                    for _ in 0..len - 1 {
+                        let discard_state = self.state_stack.pop().unwrap();
+                        log::debug!("yyreduce: popped state: s{} (discarded)", discard_state);
+                    }
+                    self.yystate = if let Some(s) = self.state_stack.pop() {
+                        log::debug!("yyreduce: popped state: s{}", s);
+                        s
+                    } else {
+                        log::debug!("yyreduce: stack is empty, using s0");
+                        0
+                    };
+                } else {
+                    log::debug!("yyreduce: rule has no rhs symbols (epsilon rule)");
+                }
+
+                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+
+                if self.yystate == 0 && lhs == 0 {
+                    log::debug!(
+                        "yyreduce: after reduction, shifting to state {} (0/0 case!)",
+                        YYFINAL
+                    );
+                    self.yystate = YYFINAL;
+                    // self.state_stack.push(YYFINAL);
+
+                    // todo: port acceptance code
+                } else {
+                    let yyn_0 = YYGINDEX[lhs as usize] as u16;
+
+                    let next_state: u16 = if yyn_0 != 0 {
+                        let yyn_1 = yyn_0 + self.yystate;
+                        if YYCHECK[yyn_1 as usize] as u16 == self.yystate {
+                            let s = YYTABLE[yyn_1 as usize] as u16;
+                            log::debug!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
+                            s
+                        } else {
+                            let s = YYDGOTO[lhs as usize] as u16;
+                            log::debug!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
+                            s
+                        }
+                    } else {
+                        let s = YYDGOTO[lhs as usize] as u16;
+                        log::debug!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
+                        s
+                    };
+
+                    self.state_stack.push(self.yystate);
+                    self.yystate = next_state;
+
+                    log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                }
+
+                Ok(())
+            }
+
+            // Check to see if there is a SHIFT action for this (state, token).
+            // All of the values in YYSINDEX are either 0 (meaning no shift) or negative.
+            // If YYSINDEX[state] is non-zero, then (token + YYSINDEX[state]) gives yyn.
+            fn try_shift(&mut self, token: u16, lval: #symbol_value_ty) -> bool {
+                let shift: i16 = YYSINDEX[self.yystate as usize];
+                if shift == 0 {
+                    // log::debug!("try_shift: no shift");
+                    return false;
+                }
+
+                let yyn_i32 = shift as i32 + (token as i32);
+                assert!(yyn_i32 >= 0);
+                let yyn = yyn_i32 as usize;
+
+                if YYCHECK[yyn] as u16 != token {
+                    // log::debug!("try_shift: no shift (yycheck failed)");
+                    return false;
+                }
+
+                let next_state = YYTABLE[yyn] as u16;
+
+                self.state_stack.push(self.yystate);
+                self.yystate = next_state;
+                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+
+                // log::debug!("try_shift: shifted state: {:?} {}", self.state_stack, self.yystate);
+
+                log::debug!("try_shift: pushed value: {:?}", lval);
+                self.value_stack.push(ValueEntry {
+                    origin: ValueOrigin::Token(token as i16),
+                    value: lval, // <-- lval is moved
+                });
+                true
             }
 
             /// Advances the state of the parser by reporting a new token to the parser.
@@ -344,30 +426,38 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 token: u16,
                 lval: #symbol_value_ty,
             ) -> Result<(), racc_runtime::Error> {
-                assert!(!self.state_stack.is_empty());
-
                 log::debug!(
-                    "state {}, reading {} ({}) lval {:?}, state_stack = {:?}",
-                    self.yystate, token, YYNAME[token as usize], lval, self.state_stack
+                    "------------- push_token: reading {} ({}) lval {:?} -------------",
+                    token, YYNAME[token as usize], lval
                 );
-                log::debug!("state: {}", YYSTATE_TEXT[self.yystate as usize]);
-                log::debug!("value_stack = {:?}", self.value_stack);
+                // log::debug!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
+                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                log::debug!("values: {:?}", self.value_stack);
 
-                if self.try_shift(token, lval) {
-                    self.do_defreds(ctx)?;
-                    return Ok(());
+                let mut any_reduce = false;
+
+                loop {
+                    if self.try_shift(token, lval) {
+                        self.do_defreds(ctx)?;
+                        break;
+                    } else {
+                        while self.try_reduce(ctx, token)? {
+                            any_reduce = true;
+                            self.do_defreds(ctx)?;
+                        }
+
+                        if !any_reduce {
+                            // If there is neither a shift nor a reduce action defined for this (state, token),
+                            // then we have encountered a syntax error.
+                            log::debug!("syntax error!  token is not recognized in this state.");
+                            return Err(racc_runtime::Error::SyntaxError);
+                        }
+                    }
                 }
 
-                if self.try_reduce(ctx, token)? {
-                    self.do_defreds(ctx)?;
-                    return Ok(());
-                }
-
-                // If there is neither a shift nor a reduce action defined for this (state, token),
-                // then we have encountered a syntax error.
-
-                log::debug!("syntax error!  token is not recognized in this state.");
-                Err(racc_runtime::Error::SyntaxError)
+                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                log::debug!("values: {:?}", self.value_stack);
+                Ok(())
             }
 
             /// Pushes the final "end of input" token into the state machine, and checks whether the
@@ -378,20 +468,29 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
             pub fn finish(&mut self, ctx: &mut #context_ty)
                 -> Result<#symbol_value_ty, racc_runtime::Error>
             {
-                assert!(!self.state_stack.is_empty());
+                // assert!(!self.state_stack.is_empty());
 
-                log::debug!(
-                    "finish: yystate={:?}  state_stack = {:?}",
-                    self.yystate, self.state_stack
-                );
+                log::debug!("------------- finish -------------");
+                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                log::debug!("values: {:?}", self.value_stack);
 
-                self.try_reduce(ctx, 0)?;
+                let mut any_reduce = false;
+
+                loop {
+                    if self.try_reduce(ctx, 0)? {
+                        self.do_defreds(ctx)?;
+                        any_reduce = true;
+                    } else {
+                        break;
+                    }
+                }
+
                 self.do_defreds(ctx)?;
 
                 if self.value_stack.len() == 1 {
                     log::debug!("accept");
                     let final_lval = self.value_stack.pop().unwrap();
-                    return Ok(final_lval);
+                    return Ok(final_lval.value);
                 }
 
                 log::debug!(
@@ -403,6 +502,7 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 // then we have encountered a syntax error.
 
                 log::debug!("syntax error!  token is not recognized in this state.");
+                log::debug!("values: {:?}", self.value_stack);
                 Err(racc_runtime::Error::SyntaxError)
             }
         }
@@ -416,7 +516,7 @@ fn output_rule_data(gram: &Grammar) -> TokenStream {
     for i in 3..gram.nrules {
         data.push(gram.value[gram.rlhs[i].0 as usize]);
     }
-    make_table_i16(Ident::new("YYLHS", Span::call_site()), &data)
+    make_table_i16_signed(Ident::new("YYLHS", Span::call_site()), &data)
 }
 
 fn make_symbol_names_table(span: Span, gram: &Grammar) -> TokenStream {
@@ -555,10 +655,19 @@ fn output_actions(
     let packed = packing::pack_table(parser.nstates(), &order, &act);
 
     let mut items = TokenStream::new();
+
+    // The YYDGOTO table contains a mapping from variables to states. However, the table does
+    // not include an entry for the 'start' symbol, so the length of YYDGOTO is `nvars - 1`, not
+    // `nvars`. See `goto_actions` in the C code. This is why we call skip(1), below.
     items.extend(make_table_i16_signed(
         Ident::new("YYDGOTO", span),
-        &default_goto_table.iter().map(|s| s.0).collect::<Vec<i16>>(),
+        &default_goto_table
+            .iter()
+            .skip(1)
+            .map(|s| s.0)
+            .collect::<Vec<i16>>(),
     ));
+
     items.extend(make_table_i16_signed(
         Ident::new("YYSINDEX", span),
         &packed.base[..nstates],
@@ -569,10 +678,16 @@ fn output_actions(
     ));
     items.extend(make_table_i16_signed(
         Ident::new("YYGINDEX", span),
-        &packed.base[nstates * 2..act.nvectors],
+        &packed.base[nstates * 2..act.nvectors - 1],
     ));
-    items.extend(make_table_i16_signed(Ident::new("YYTABLE", span), &packed.table));
-    items.extend(make_table_i16_signed(Ident::new("YYCHECK", span), &packed.check));
+    items.extend(make_table_i16_signed(
+        Ident::new("YYTABLE", span),
+        &packed.table,
+    ));
+    items.extend(make_table_i16_signed(
+        Ident::new("YYCHECK", span),
+        &packed.check,
+    ));
     items
 }
 
