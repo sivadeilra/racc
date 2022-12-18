@@ -1,5 +1,6 @@
 use crate::util::Bitmat;
 use crate::util::BITS_PER_WORD;
+use super::*;
 
 fn transitive_closure(r: &mut Bitmat) {
     let relend = r.rows * r.rowsize;
@@ -43,6 +44,7 @@ fn transitive_closure(r: &mut Bitmat) {
 
 pub fn reflexive_transitive_closure(r: &mut Bitmat) {
     assert!(r.rows == r.cols);
+    debug!("reflexive_transitive_closure");
 
     transitive_closure(r);
 
@@ -50,4 +52,5 @@ pub fn reflexive_transitive_closure(r: &mut Bitmat) {
     for i in 0..r.rows {
         r.set(i, i);
     }
+
 }

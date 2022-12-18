@@ -6,7 +6,7 @@ fn main() {
         .file("graph.c")
         .file("lalr.c")
         .file("lr0.c")
-        // .file("main.c")
+        .file("main.c")
         .file("mkpar.c")
         .file("mstring.c")
         .file("output.c")
@@ -15,5 +15,6 @@ fn main() {
         .file("verbose.c")
         .file("warshall.c")
         .file("yaccpar.c")
+        .define("main", "yacc_main")
         .compile("racc_orig_c");
 }

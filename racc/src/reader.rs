@@ -886,7 +886,7 @@ impl Parse for GrammarDef {
 fn test_foo() {
     use quote::quote;
 
-    env_logger::init();
+    env_logger::builder().default_format_timestamp(false).init();
 
     fn case(description: &str, tokens: proc_macro2::TokenStream) {
         println!("parsing grammar: {} -----", description);

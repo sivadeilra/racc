@@ -61,6 +61,8 @@ impl LR0Output {
 }
 
 pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
+    debug!("compute_lr0: starting");
+
     let derives = set_derives(gram);
 
     // was: allocate_item_sets()
@@ -157,7 +159,7 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
         // Find or create states for shifts in the current state.  This can potentially add new
         // states to 'states'.  Then record the resulting shifts in 'shifts'.
         shift_symbol.sort();
-        for symbol in shift_symbol.iter().copied() {
+        for &symbol in shift_symbol.iter() {
             // Search for an existing state that has the same items.
             let symbol_items =
                 &kernel_items[kernel_base[symbol.index()]..kernel_end[symbol.index()]];
@@ -287,13 +289,16 @@ fn new_item_sets(
         let symbol = gram.ritem(item);
         if symbol.is_symbol() {
             let symbol = symbol.as_symbol();
-            let base = kernel_base[symbol.index()];
-            let end = &mut kernel_end[symbol.index()];
-            if *end == base {
-                shift_symbol.push(symbol);
+            if symbol.index() > 0 {
+                // The symbol > 0 test is here to exclude the $end symbol.
+                let base = kernel_base[symbol.index()];
+                let end = &mut kernel_end[symbol.index()];
+                if *end == base {
+                    shift_symbol.push(symbol);
+                }
+                kernel_items[*end] = item + 1;
+                *end += 1;
             }
-            kernel_items[*end] = item + 1;
-            *end += 1;
         }
     }
 }
@@ -392,27 +397,38 @@ pub(crate) fn set_nullable(gram: &Grammar) -> TVec<Symbol, bool> {
 /// The EFF is a bit matrix [nvars, nvars].
 fn set_eff(gram: &Grammar, derives: &RampTable<Rule>) -> Bitmat {
     let nvars = gram.nvars;
+    debug!("set_EFF: nvars = {}", nvars);
+
     let mut eff: Bitmat = Bitmat::new(nvars, nvars);
     for row in 0..nvars {
         for &rule in &derives[row] {
             let derived_rule_or_symbol = gram.ritem(gram.rrhs(rule));
-            if derived_rule_or_symbol.is_rule() {
+            if !derived_rule_or_symbol.is_symbol() {
                 continue;
             }
             let symbol = derived_rule_or_symbol.as_symbol();
             if gram.is_var(symbol) {
-                eff.set(row, gram.symbol_to_var(symbol).index());
+                let col = gram.symbol_to_var(symbol).index();
+                debug!("setting eff: row {row}, col {col}");
+                eff.set(row, col);
             }
         }
     }
 
+    // debug!("eff (before reflexive transitive closure):\n{:#?}\n{:#?}", eff, eff.data);
     reflexive_transitive_closure(&mut eff);
+    // debug!("eff (after reflexive transitive closure):\n{:#?}\n{:#?}", eff, eff.data);
     print_eff(gram, &eff);
     eff
 }
 
+/// Prints the Epsilon Free Firsts table.
+///
+/// The C++ code appears to have a bug in it.  It will skip over the first 32 items in each row.
+/// It can result in reading beyond the size of the matrix.
 fn print_eff(gram: &Grammar, eff: &Bitmat) {
     debug!("Epsilon Free Firsts");
+    debug!("{:?}\n{:?}", eff, eff.data);
     for i in 0..eff.rows {
         let var = Var(i as i16);
         debug!("{}", gram.name(gram.var_to_symbol(var)));

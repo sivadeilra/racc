@@ -60,7 +60,7 @@ racc::racc_grammar! {
 
 }
 
-#[test]
+// #[test]
 fn err_test() {
     let toks = vec![(NUM, Some(100)), (DIVIDE, None), (NUM, Some(0))];
 
@@ -75,6 +75,10 @@ fn err_test() {
 
 #[test]
 fn basic_test() {
+
+    env_logger::builder().default_format_timestamp(false).init();
+
+
     let toks = vec![
         (LPAREN, None),
         (NUM, Some(42)),

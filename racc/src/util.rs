@@ -264,3 +264,42 @@ pub fn fill_copy<T: Copy>(dst: &mut [T], value: T) {
         *ii = value;
     }
 }
+
+impl core::fmt::Debug for Bitmat {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        struct Values<'a>(&'a Bitmat);
+
+        impl<'a> core::fmt::Debug for Values<'a> {
+            fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if false {
+                    let mut dl = fmt.debug_map();
+                    let mut s = Vec::new();
+                    for i in 0..self.0.rows {
+                        s.clear();
+                        for j in 0..self.0.cols {
+                            if self.0.get(i, j) {
+                                s.push(j);
+                            }
+                        }
+                        if !s.is_empty() {
+                            dl.entry(&i, &s);
+                        }
+                    }
+                    dl.finish()
+                } else {
+                    let mut dl = fmt.debug_list();
+                    for (i, j) in self.0.iter_ones() {
+                        dl.entry(&(i, j));
+                    }
+                    dl.finish()
+                }
+            }
+        }
+
+        let mut b = fmt.debug_struct("Bitmat");
+        b.field("rows", &self.rows);
+        b.field("cols", &self.cols);
+        b.field("values", &Values(self));
+        b.finish()
+    }
+}

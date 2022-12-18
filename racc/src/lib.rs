@@ -240,9 +240,11 @@ mod tvec;
 mod util;
 mod warshall;
 
+// use core::fmt::Write;
 use proc_macro2::Span;
 use syn::spanned::Spanned;
 use syn::Ident;
+use log::debug;
 
 macro_rules! int_alias {
     (type $name:ident = $int:ty;) => {
