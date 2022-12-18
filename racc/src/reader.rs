@@ -69,7 +69,7 @@ struct SymbolDef {
 
 fn make_symbol(name: Ident) -> SymbolDef {
     SymbolDef {
-        name: name,
+        name,
         tag: None,
         prec: 0,
         class: SymClass::Unknown,
@@ -177,17 +177,18 @@ impl ReaderState {
         assert!(self.rprec.len() == self.nrules());
         assert!(self.rassoc.len() == self.nrules());
 
-        if !self.last_was_action && self.symbols[self.lhs[rule]].tag.is_some() {
-            if self.pitem[self.pitem.len() - 1] != NO_ITEM {
-                let mut i: usize = self.pitem.len() - 1;
-                while (i > 0) && self.pitem[i] != NO_ITEM {
-                    i -= 1;
-                }
-                if self.pitem[i + 1] == NO_ITEM
-                    || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.lhs[rule]].tag
-                {
-                    warn!("default_action_warning();")
-                }
+        if !self.last_was_action
+            && self.symbols[self.lhs[rule]].tag.is_some()
+            && self.pitem[self.pitem.len() - 1] != NO_ITEM
+        {
+            let mut i: usize = self.pitem.len() - 1;
+            while (i > 0) && self.pitem[i] != NO_ITEM {
+                i -= 1;
+            }
+            if self.pitem[i + 1] == NO_ITEM
+                || self.symbols[self.pitem[i + 1]].tag != self.symbols[self.lhs[rule]].tag
+            {
+                warn!("default_action_warning();")
             }
         }
 
@@ -369,7 +370,7 @@ impl ReaderState {
                         gram_value[j] = gram_value[j - 1];
                         j -= 1;
                     }
-                    gram_value[j] = n as i16;
+                    gram_value[j] = n;
                 }
             }
 
@@ -390,7 +391,7 @@ impl ReaderState {
                         }
                         n += 1;
                     }
-                    symbols_value[v[i]] = n as i16;
+                    symbols_value[v[i]] = n;
                     n += 1;
                 }
             }
@@ -517,17 +518,17 @@ impl ReaderState {
         rrhs.push(Item(j as i16));
 
         Grammar {
-            nsyms: nsyms,
-            ntokens: ntokens,
-            nvars: nvars,
+            nsyms,
+            ntokens,
+            nvars,
             name: gram_name,
             value: gram_value,
             prec: gram_prec,
             assoc: gram_assoc,
-            nrules: nrules,
-            ritem: ritem,
-            rlhs: rlhs,
-            rrhs: rrhs,
+            nrules,
+            ritem,
+            rlhs,
+            rrhs,
             rprec: gram_rprec,
             rassoc: gram_rassoc,
         }
@@ -701,7 +702,7 @@ impl Parse for GrammarDef {
 
                     reader.start_rule(lhs);
 
-                    if goal_symbol == None {
+                    if goal_symbol.is_none() {
                         debug!("using '{}' as start symbol", name_def_str);
                         goal_symbol = Some(lhs);
                     }

@@ -131,7 +131,7 @@ pub(crate) fn compute_lr0(gram: &Grammar) -> LR0Output {
     let mut shifts = RampTable::<State>::new();
 
     while this_state < states.len() {
-        assert!(item_set.len() == 0);
+        assert!(item_set.is_empty());
         trace!("computing closure for state s{}:", this_state);
 
         // The output of closure() is stored in item_set.
@@ -216,8 +216,8 @@ fn dump_lr0_output(gram: &Grammar, output: &LR0Output) {
         let items = &output.state_items[istate];
 
         let mut line = String::new();
-        for i in 0..items.len() {
-            let rhs = items[i].index();
+        for rhs_item in items.iter() {
+            let rhs = rhs_item.index();
             line.push_str(&format!("item {:4} : ", rhs));
 
             // back up to start of this rule
@@ -280,7 +280,7 @@ fn new_item_sets(
     item_set: &[Item],
     shift_symbol: &mut Vec<Symbol>,
 ) {
-    assert!(shift_symbol.len() == 0);
+    assert!(shift_symbol.is_empty());
 
     // reset kernel_end
     kernel_end.copy_from_slice(kernel_base);
@@ -487,7 +487,7 @@ pub(crate) fn closure(
     rule_set: &mut Bitv32,
     item_set: &mut Vec<Item>,
 ) {
-    assert!(item_set.len() == 0);
+    assert!(item_set.is_empty());
 
     let rulesetsize = word_size(rule_set.nbits);
 

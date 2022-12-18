@@ -77,23 +77,42 @@ pub(crate) fn output_parser_to_token_stream(
         let stmts: TokenStream = match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right
-                // to left.
+                // to left. The bindings are listed in the order that they are declared in, from
+                // left to right. The values are stored in 'value_stack' in the same order, with
+                // the left-most values being at lower indexes in 'value_stack'.
+                //
+                // Unfortunately, the most natural way to remove things from a `Vec` is to use
+                // `pop()`, which will produce the values in reverse order. To account for this,
+                // we reverse the RHS items and use `pop()`. This gives us the order that we want.
                 block_span = block.span();
                 let rhs_index = gram.rrhs(rule).index();
                 let num_rhs = gram.get_rhs_items(rule).len();
                 let mut t = TokenStream::new();
-                for rhs_binding in rhs_bindings[rhs_index..rhs_index + num_rhs].iter() {
+
+                // We insert this assertion check so that the optimizer can eliminate some redundant
+                // range checks. If we call Vec::pop() repeatedly, we get one range check (one
+                // unwrap call) in the generated code, for each value that we pop. But if we
+                // assert that the Vec has enough items, the optimizer is smart enough to see that
+                // all of the unwrap() calls can be eliminated. For this reason, the assert has
+                // to be a release-mode assert, not just a debug-only assert.
+                if num_rhs > 0 {
+                    t.extend(quote! {
+                        assert!(values.len() >= #num_rhs);
+                    });
+                }
+
+                for rhs_binding in rhs_bindings[rhs_index..][..num_rhs].iter().rev() {
                     t.extend(match rhs_binding {
                         Some(ref rbind) => {
                             quote! {
-                                let #rbind = values.next().unwrap();
+                                let #rbind = values.pop().unwrap().value;
                             }
                         }
                         None => {
                             // The rule has no binding for this value.  Pop it from the stack and
                             // discard it.
                             quote! {
-                                values.next().unwrap();
+                                values.pop().unwrap().value;
                             }
                         }
                     })
@@ -122,8 +141,9 @@ pub(crate) fn output_parser_to_token_stream(
 
     items.extend(quote! {
         #[allow(unused_braces)]
-        fn reduce_actions<I: Iterator<Item = #symbol_value_ty>>(
-            mut values: I,
+        #[allow(unused_mut)]
+        fn reduce_actions(
+            mut values: &mut Vec<ValueEntry>,
             reduction: u16,
             #context_param_ident: &mut #context_ty) -> Result<#symbol_value_ty, racc_runtime::Error> {
 
@@ -302,8 +322,7 @@ fn output_gen_methods(symbol_value_ty: Type, context_ty: Type) -> TokenStream {
                 // necessary for us to consult a 'yylen' table here; that information is implicit.
                 let old_values_len = self.value_stack.len();
                 let reduce_value = reduce_actions(
-                    self.value_stack.drain(self.value_stack.len() - len..)
-                        .map(|entry| entry.value),
+                    &mut self.value_stack,
                     reduction,
                     ctx)?;
                 assert!(self.value_stack.len() + len == old_values_len);
@@ -583,14 +602,14 @@ fn make_states_text_table(span: Span, gram: &Grammar, parser: &YaccParser) -> To
                 .unwrap();
                 match action.action_code {
                     ActionCode::Shift(to_state) => {
-                        write!(s, "shift to s{}\n", to_state).unwrap();
+                        writeln!(s, "shift to s{}", to_state).unwrap();
                     }
                     ActionCode::Reduce(rule) => {
-                        write!(s, "reduce {}\n", gram.rule_to_str(rule)).unwrap();
+                        writeln!(s, "reduce {}", gram.rule_to_str(rule)).unwrap();
                     }
                 }
             }
-            return s;
+            s
         })
         .collect::<Vec<String>>();
     make_table_string(Ident::new("YYSTATE_TEXT", span), &ss)
@@ -638,7 +657,7 @@ fn output_actions(
     token_actions(
         gram,
         parser,
-        &default_reductions,
+        default_reductions,
         &mut act.froms,
         &mut act.tos,
     );
@@ -651,7 +670,7 @@ fn output_actions(
         &mut act.froms,
         &mut act.tos,
     );
-    let order = sort_actions(&mut act);
+    let order = sort_actions(&act);
     let packed = packing::pack_table(parser.nstates(), &order, &act);
 
     let mut items = TokenStream::new();
@@ -719,7 +738,7 @@ impl ActionsTable {
     }
     pub fn width(&self, i: usize) -> i16 {
         let f = &self.froms[i];
-        if f.len() != 0 {
+        if !f.is_empty() {
             f[f.len() - 1] - f[0] + 1
         } else {
             0
@@ -977,7 +996,7 @@ mod packing {
                 pack.lowzero += 1;
             }
 
-            return j as i16;
+            return j;
         }
     }
 
@@ -1013,19 +1032,19 @@ mod packing {
             check: vec![-1; initial_maxtable],
             lowzero: 0,
             high: 0,
-            order: order,
-            nstates: nstates,
-            act: act,
+            order,
+            nstates,
+            act,
         };
 
-        for i in 0..order.len() {
+        for (i, o) in order.iter().enumerate() {
             let place = match matching_vector(&pack, i) {
                 Some(state) => pack.base[state],
                 None => pack_vector(&mut pack, i),
             };
 
             pack.pos[i] = place;
-            pack.base[order[i]] = place;
+            pack.base[*o] = place;
         }
 
         pack.check.truncate(pack.high + 1);

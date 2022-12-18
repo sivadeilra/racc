@@ -32,7 +32,7 @@ impl<I, T> TVec<I, T> {
         &mut self.vec
     }
 
-    pub fn to_vec(self) -> Vec<T> {
+    pub fn into_vec(self) -> Vec<T> {
         self.vec
     }
 

@@ -114,7 +114,7 @@ main (void)
     int base = 10;
 
     while(!feof(stdin)) {
-	yyparse(regs, &base);
+    yyparse(regs, &base);
     }
     return 0;
 }
@@ -132,10 +132,10 @@ YYERROR_DECL()
 int
 YYLEX_DECL()
 {
-	/* lexical analysis routine */
-	/* returns LETTER for a lower case letter, yylval = 0 through 25 */
-	/* return DIGIT for a digit, yylval = 0 through 9 */
-	/* all other characters are returned immediately */
+    /* lexical analysis routine */
+    /* returns LETTER for a lower case letter, yylval = 0 through 25 */
+    /* return DIGIT for a digit, yylval = 0 through 9 */
+    /* all other characters are returned immediately */
 
     int c;
 
@@ -144,12 +144,12 @@ YYLEX_DECL()
     /* c is now nonblank */
 
     if( islower( c )) {
-	*yylval = (c - 'a');
-	return ( LETTER );
+    *yylval = (c - 'a');
+    return ( LETTER );
     }
     if( isdigit( c )) {
-	*yylval = (c - '0') % (*base);
-	return ( DIGIT );
+    *yylval = (c - '0') % (*base);
+    return ( DIGIT );
     }
     return( c );
 }

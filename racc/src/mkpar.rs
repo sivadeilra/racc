@@ -13,20 +13,12 @@ pub(crate) enum ActionCode {
 }
 impl ActionCode {
     pub fn is_shift(&self) -> bool {
-        if let ActionCode::Shift(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, ActionCode::Shift(_))
     }
 
     #[allow(dead_code)]
     pub fn is_reduce(&self) -> bool {
-        if let ActionCode::Reduce(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, ActionCode::Reduce(_))
     }
 }
 
@@ -54,21 +46,21 @@ impl YaccParser {
 
 pub(crate) fn make_parser(gram: &Grammar, lr0: &LR0Output, lalr: &LALROutput) -> YaccParser {
     let nstates = lr0.nstates();
-    let mut parser: RampTable<ParserAction> = RampTable::new();
+    let mut actions: RampTable<ParserAction> = RampTable::new();
     for state in 0..nstates {
         let state: State = state.into();
-        get_shifts(gram, lr0, state, &mut parser);
-        get_reductions(gram, &lr0.reductions, lalr, state, &mut parser);
-        parser.finish_key();
+        get_shifts(gram, lr0, state, &mut actions);
+        get_reductions(gram, &lr0.reductions, lalr, state, &mut actions);
+        actions.finish_key();
     }
 
     let final_state = find_final_state(gram, lr0);
-    remove_conflicts(final_state, &mut parser);
-    report_unused_rules(gram, &parser);
+    remove_conflicts(final_state, &mut actions);
+    report_unused_rules(gram, &actions);
 
     YaccParser {
-        actions: parser,
-        final_state: final_state,
+        actions,
+        final_state,
     }
 }
 
@@ -144,7 +136,7 @@ fn add_reduce(gram: &Grammar, actions: &mut RampTable<ParserAction>, rule: Rule,
     actions.insert(
         next,
         ParserAction {
-            symbol: symbol,
+            symbol,
             prec: gram.rprec[rule.index()],
             action_code: ActionCode::Reduce(rule),
             assoc: gram.rassoc[rule.index()],
@@ -305,8 +297,5 @@ fn sole_reduction(parser: &[ParserAction]) -> Rule {
 /// Computes the default reduction for each state.
 /// State -> Rule
 pub(crate) fn default_reductions(parser: &RampTable<ParserAction>) -> Vec<Rule> {
-    parser
-        .iter()
-        .map(|actions| sole_reduction(actions))
-        .collect()
+    parser.iter().map(sole_reduction).collect()
 }

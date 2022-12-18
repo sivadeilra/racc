@@ -229,6 +229,8 @@
 #![warn(rust_2018_idioms)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::cognitive_complexity)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_range_loop)]
 
 mod grammar;
 mod lalr;
@@ -241,10 +243,10 @@ mod util;
 mod warshall;
 
 // use core::fmt::Write;
+use log::debug;
 use proc_macro2::Span;
 use syn::spanned::Spanned;
 use syn::Ident;
-use log::debug;
 
 macro_rules! int_alias {
     (type $name:ident = $int:ty;) => {
@@ -364,11 +366,11 @@ fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::T
     let grammar_def: GrammarDef = syn::parse2::<GrammarDef>(tokens)?;
     let context_param_ident = Ident::new("context", Span::call_site());
     let gram = &grammar_def.grammar;
-    let lr0 = lr0::compute_lr0(&gram);
-    let lalr_out = lalr::run_lalr_phase(&gram, &lr0);
-    let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
+    let lr0 = lr0::compute_lr0(gram);
+    let lalr_out = lalr::run_lalr_phase(gram, &lr0);
+    let yaccparser = mkpar::make_parser(gram, &lr0, &lalr_out);
     Ok(output::output_parser_to_token_stream(
-        &gram,
+        gram,
         &lalr_out.gotos,
         &yaccparser,
         &grammar_def.rule_blocks,

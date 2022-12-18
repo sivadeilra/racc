@@ -80,9 +80,9 @@ fn set_goto_map(gram: &Grammar, lr0: &LR0Output) -> GotoMap {
     let mut k: usize = 0;
     // Var -> index into goto_map
     let mut temp_map: Vec<u32> = Vec::with_capacity(gram.nvars + 1);
-    for i in 0..gram.nvars {
+    for &g in goto_map[..gram.nvars].iter() {
         temp_map.push(k as u32);
-        k += goto_map[i] as usize;
+        k += g as usize;
     }
     goto_map[..gram.nvars].copy_from_slice(&temp_map);
 
@@ -208,7 +208,7 @@ fn initialize_F(
                 j += 1;
             }
 
-            if edge.len() != 0 {
+            if !edge.is_empty() {
                 // debug!("state: {} has read edges: {:?}", stateno, edge);
                 reads[i] = edge.to_vec();
                 edge.clear();
@@ -296,7 +296,7 @@ fn build_relations(
         let symbol1 = lr0.accessing_symbol[goto.to_state];
 
         for &rule in &lr0.derives[gram.symbol_to_var(symbol1).index()] {
-            assert!(states.len() == 0);
+            assert!(states.is_empty());
             states.push(from_state);
             let mut stateno = from_state;
             for r in gram.rule_rhs_syms(rule).iter() {
@@ -338,11 +338,11 @@ fn add_lookback_edge(
     ruleno: Rule,
     goto: usize,
     reductions: &RampTable<Rule>,
-    lookback: &mut Vec<Vec<i16>>,
+    lookback: &mut [Vec<i16>],
 ) {
     let range = reductions.entry_values_range(state.index());
     let state_rules = &reductions[state.index()];
-    for (i, &r) in range.clone().zip(state_rules) {
+    for (i, &r) in range.zip(state_rules) {
         if r == ruleno {
             lookback[i].insert(0, goto as i16);
             return;
@@ -432,11 +432,11 @@ fn digraph(relation: &[Vec<i16>], F: &mut Bitmat) {
         vertices: vec![0; ngotos + 1],
         top: 0,
         R: relation,
-        F: F,
+        F,
     };
 
     for i in 0..ngotos {
-        if ds.index[i] == 0 && relation[i].len() != 0 {
+        if ds.index[i] == 0 && !relation[i].is_empty() {
             traverse(&mut ds, i);
         }
     }

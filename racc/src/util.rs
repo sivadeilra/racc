@@ -31,9 +31,9 @@ impl Bitmat {
         let total = rowsize * rows;
         Bitmat {
             data: vec![0; total],
-            rows: rows,
-            cols: cols,
-            rowsize: rowsize,
+            rows,
+            cols,
+            rowsize,
             id,
         }
     }
@@ -224,9 +224,9 @@ impl<'a> Iterator for BitMaskIterator<'a> {
 pub fn bit_vector_iter_ones<'a>(words: &'a [u32], nbits: usize) -> BitMaskIterator<'a> {
     assert!(words.len() >= ((nbits + BITS_PER_WORD - 1) / BITS_PER_WORD));
     BitMaskIterator {
-        words: words,
+        words,
         current: 0,
-        nbits: nbits,
+        nbits,
         bitpos: 0,
         xormask: 0,
     }
