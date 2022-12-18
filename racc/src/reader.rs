@@ -54,9 +54,9 @@ const NO_ITEM: usize = !0;
 // symbol classes
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SymClass {
-    Unknown = 0,
-    Terminal = 1,
-    NonTerminal = 2,
+    Unknown,
+    Terminal,
+    NonTerminal,
 }
 
 struct SymbolDef {

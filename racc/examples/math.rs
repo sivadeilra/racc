@@ -3,7 +3,6 @@ pub trait GrammarToken {
 }
 
 racc::racc_grammar! {
-
     type Context = ();
     type Value = Option<i16>;
 
@@ -21,7 +20,7 @@ racc::racc_grammar! {
     DIVIDE;
 
     Expr : NUM=x {
-        // println!("NUM={:?}", x);
+        println!("NUM={:?}", x);
         x
     }
         | Expr=a PLUS Expr=b {
@@ -33,7 +32,7 @@ racc::racc_grammar! {
         | Expr=a DIVIDE Expr=b {
             let a = a.unwrap();
             let b = b.unwrap();
-            // println!("{} / {}", a, b);
+            println!("{} / {}", a, b);
             if b == 0 {
                 return Err(racc_runtime::Error::AppError);
             }
@@ -67,20 +66,14 @@ racc::racc_grammar! {
 
 fn err_test() {
     let toks = vec![(NUM, Some(100)), (DIVIDE, None), (NUM, Some(0))];
-
-    let mut parser = ParserState::new();
-    let mut ctx = ();
-    for &(tok, lval) in toks.iter() {
-        parser.push_token(&mut ctx, tok, lval).unwrap();
-    }
-    let result = parser.finish(&mut ctx);
+    let result = ParserState::parse(toks.into_iter(), &mut ());
     assert_eq!(result, Err(racc_runtime::Error::AppError));
 }
 
 fn main() {
     env_logger::builder().default_format_timestamp(false).init();
 
-    // err_test();
+    err_test();
     basic_test();
 }
 
@@ -95,11 +88,6 @@ fn basic_test() {
         (NUM, Some(2)),
     ];
 
-    let mut parser = ParserState::new();
-    let mut ctx = ();
-    for &(tok, lval) in toks.iter() {
-        parser.push_token(&mut ctx, tok, lval).unwrap();
-    }
-    let result = parser.finish(&mut ctx);
+    let result = ParserState::parse(toks.iter().cloned(), &mut ());
     assert_eq!(result, Ok(Some(33)));
 }
