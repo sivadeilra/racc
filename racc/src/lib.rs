@@ -243,11 +243,12 @@ mod util;
 mod warshall;
 
 // use core::fmt::Write;
+use grammar::Grammar;
 use log::debug;
 use proc_macro2::Span;
+use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::Ident;
-use quote::ToTokens;
 
 macro_rules! int_alias {
     (type $name:ident = $int:ty;) => {
@@ -361,23 +362,15 @@ impl Debug for SymbolOrRule {
 
 type StateOrRule = i16;
 
-use reader::GrammarDef;
-
 fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
-    let grammar_def: GrammarDef = syn::parse2::<GrammarDef>(tokens)?;
-    let context_param_ident = Ident::new("context", Span::call_site());
-    let gram = &grammar_def.grammar;
-    let lr0 = lr0::compute_lr0(gram);
-    let lalr_out = lalr::run_lalr_phase(gram, &lr0);
-    let yaccparser = mkpar::make_parser(gram, &lr0, &lalr_out);
+    let gram: Grammar = syn::parse2::<Grammar>(tokens)?;
+    let lr0 = lr0::compute_lr0(&gram);
+    let lalr_out = lalr::run_lalr_phase(&gram, &lr0);
+    let yaccparser = mkpar::make_parser(&gram, &lr0, &lalr_out);
     Ok(output::output_parser_to_token_stream(
-        gram,
+        &gram,
         &lalr_out.gotos,
         &yaccparser,
-        &grammar_def.rule_blocks,
-        &grammar_def.rhs_bindings,
-        grammar_def.context_ty,
-        context_param_ident,
     ))
 }
 

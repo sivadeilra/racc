@@ -8,9 +8,8 @@ use log::debug;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 use std::cmp;
-use std::i16;
 use std::iter::repeat;
-use syn::{Block, Ident, Type};
+use syn::{Ident, Type};
 
 /// Given a constructed parser (a description of a state machine which parses a given grammar),
 /// produces a TokenStream which implements the parser.
@@ -18,14 +17,11 @@ pub(crate) fn output_parser_to_token_stream(
     gram: &Grammar,
     gotos: &GotoMap,
     parser: &YaccParser,
-    blocks: &[Option<Block>],
-    rhs_bindings: &[Option<Ident>],
-    context_ty: Type, // Ident to use for the context type, passed to the reduce() method
-    context_param_ident: Ident, // Ident to use for the context arg, passed to the reduce() method
 ) -> TokenStream {
-    assert!(blocks.len() == gram.nrules);
+    assert_eq!(gram.rule_blocks.len(), gram.nrules);
 
     let grammar_span = Span::call_site();
+    let context_param_ident = Ident::new("context", Span::call_site());
 
     let mut items: TokenStream = TokenStream::new();
 
@@ -65,7 +61,7 @@ pub(crate) fn output_parser_to_token_stream(
 
     // Build up actions
     let mut action_arms: TokenStream = TokenStream::new();
-    for (rule_i, block) in blocks.iter().enumerate() {
+    for (rule_i, block) in gram.rule_blocks.iter().enumerate() {
         if rule_i < 3 {
             continue;
         }
@@ -93,6 +89,8 @@ pub(crate) fn output_parser_to_token_stream(
                 let rhs_syms = gram.rule_rhs_syms(rule);
 
                 let mut t = TokenStream::new();
+
+                // This adds an expression that will be ignored. It is effectively a comment.
                 t.extend(quote! {
                     let _ = #rule_string;
                 });
@@ -114,15 +112,18 @@ pub(crate) fn output_parser_to_token_stream(
                     });
                 }
 
+                // Iterate the rhs symbols and generate code that pops the values for each rhs
+                // symbol from the stack. If the value is used by the rule, then verify that it
+                // has the expected type.
                 for (rhs_sym_or_rule, rhs_binding) in rhs_syms
                     .iter()
                     .rev()
-                    .zip(rhs_bindings[rhs_index..][..num_rhs].iter().rev())
+                    .zip(gram.rhs_binding[rhs_index..][..num_rhs].iter().rev())
                 {
                     assert!(rhs_sym_or_rule.is_symbol());
                     let rhs_sym = rhs_sym_or_rule.as_symbol();
                     let rhs_ident = gram.name(rhs_sym);
-                    let rhs_sym_ty_opt: &Option<syn::Type> = &gram.sym_type[rhs_sym.index()];
+                    let rhs_sym_ty_opt = gram.sym_type[rhs_sym.index()].as_ref();
 
                     t.extend(match rhs_binding {
                         Some(ref rbind) => {
@@ -209,9 +210,10 @@ pub(crate) fn output_parser_to_token_stream(
             #pat_value => {
                 #stmts
             }
-
         });
     }
+
+    let context_ty = &gram.context_ty;
 
     items.extend(quote! {
         #[allow(unused_braces)]
@@ -316,7 +318,7 @@ fn output_token_to_i16(gram: &Grammar) -> TokenStream {
     }
 }
 
-fn output_gen_methods(context_ty: Type) -> TokenStream {
+fn output_gen_methods(context_ty: &Type) -> TokenStream {
     quote! {
         /// An active instance of a parser.  This structure contains the state of a parsing state
         /// machine, including the state stack and the value stack.
@@ -430,7 +432,6 @@ fn output_gen_methods(context_ty: Type) -> TokenStream {
             fn try_reduce(&mut self, ctx: &mut #context_ty, token: i16)
                 -> Result<bool, racc_runtime::Error>
             {
-
                 assert_eq!(YYTABLE.len(), YYCHECK.len());
 
                 assert!(

@@ -43,7 +43,7 @@ use std::rc::Rc;
 use syn::parse::{Parse, ParseStream};
 use syn::parse_quote;
 use syn::spanned::Spanned;
-use syn::{Block, Ident, Token, Type};
+use syn::{Ident, Token, Type};
 
 const PREDEFINED_RULES: usize = 3;
 const PREDEFINED_ITEMS: usize = 4;
@@ -225,10 +225,16 @@ impl ReaderState {
         let mut bpp = self.pitem.len();
         self.pitem.push(NO_ITEM);
         self.pitem.push(sym_index);
+        self.rhs_binding.push(None);
+        self.rhs_binding.push(None);
 
         loop {
             let b = self.pitem[bpp - 1];
             self.pitem[bpp] = b;
+
+            let bi = self.rhs_binding[bpp - 1].take();
+            self.rhs_binding[bpp] = bi;
+
             if b == NO_ITEM {
                 break;
             }
@@ -263,7 +269,7 @@ impl ReaderState {
 
     /// "Packs" the symbol table and the grammar definition.  In the packed form, the
     /// tokens are numbered sequentially, and are followed by the non-terminals.
-    pub fn pack_symbols_and_grammar(&self, goal_symbol: usize) -> Grammar {
+    fn pack_symbols_and_grammar(self, goal_symbol: usize, context_ty: syn::Type) -> Grammar {
         debug!("pack_symbols");
 
         assert!(goal_symbol < self.symbols.len());
@@ -543,6 +549,9 @@ impl ReaderState {
             rrhs,
             rprec: gram_rprec,
             rassoc: gram_rassoc,
+            rhs_binding: self.rhs_binding,
+            rule_blocks: self.rule_blocks,
+            context_ty: context_ty,
         }
     }
 
@@ -622,15 +631,8 @@ impl Errors {
     }
 }
 
-pub(crate) struct GrammarDef {
-    pub grammar: Grammar,
-    pub context_ty: Type,
-    pub rule_blocks: Vec<Option<Block>>,
-    pub rhs_bindings: Vec<Option<Ident>>,
-}
-
-impl Parse for GrammarDef {
-    fn parse(input: ParseStream<'_>) -> syn::Result<GrammarDef> {
+impl Parse for Grammar {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Grammar> {
         let mut reader: ReaderState = ReaderState::new();
         let mut context_ty: Option<Type> = None;
         let mut value_ty: Option<Type> = None;
@@ -976,9 +978,6 @@ impl Parse for GrammarDef {
             }
         }
 
-        let gram = reader.pack_symbols_and_grammar(goal_symbol);
-        ReaderState::print_grammar(&gram);
-
         let context_ty = context_ty.ok_or_else(|| {
             syn::Error::new(
                 Span::call_site(),
@@ -990,14 +989,12 @@ impl Parse for GrammarDef {
             )
         })?;
 
+        let gram = reader.pack_symbols_and_grammar(goal_symbol, context_ty);
+        ReaderState::print_grammar(&gram);
+
         errors.into_result()?;
 
-        Ok(GrammarDef {
-            grammar: gram,
-            rule_blocks: reader.rule_blocks,
-            rhs_bindings: reader.rhs_binding,
-            context_ty,
-        })
+        Ok(gram)
     }
 }
 
@@ -1024,10 +1021,10 @@ fn test_foo() {
 
     fn case(description: &str, tokens: proc_macro2::TokenStream) {
         println!("parsing grammar: {} -----", description);
-        match syn::parse2::<GrammarDef>(tokens.clone()) {
+        match syn::parse2::<Grammar>(tokens.clone()) {
             Ok(g) => {
                 // println!("replacement: {:#?}", replacement);
-                println!("parsed grammar: nrules={}", g.grammar.nrules);
+                println!("parsed grammar: nrules={}", g.nrules);
             }
             Err(e) => {
                 println!("error: {:?}", e);
@@ -1120,7 +1117,7 @@ fn test_foo() {
                         None
                     }
                 }
-                | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+                | IF Expr=predicate THEN Expr=true_value { println!() } ELSE Expr=false_value {
                     if let Some(p) = predicate {
                         if p > 0 {
                             true_value

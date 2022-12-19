@@ -59,6 +59,17 @@ pub(crate) struct Grammar {
 
     /// Rule -> associativity
     pub rassoc: Vec<u8>,
+
+    /// The actions (code blocks) provided by the grammar author, if any.
+    /// index = rule index
+    /// len = nrules
+    pub rule_blocks: Vec<Option<syn::Block>>,
+
+    /// identifier used by grammar for a RHS value, given by =foo
+    /// indices are same as rrhs
+    pub rhs_binding: Vec<Option<Ident>>,
+
+    pub context_ty: syn::Type,
 }
 
 impl Grammar {
