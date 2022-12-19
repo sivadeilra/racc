@@ -60,10 +60,10 @@ racc::racc_grammar! {
     | Let=e { e }
     ;
 
-    Let -> i32 : LET IDENT=id EQ Expr=e {
+    Let -> i32 : LET IDENT=id EQ Expr=e /*{
         println!("setting e = {:?}", e);
         e
-    } IN Expr=body {
+    }*/ IN Expr=body {
         println!("popping: id: {:?}, e {:?}, body: {:?}", id, e, body);
         0
     };

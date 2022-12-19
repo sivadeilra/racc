@@ -67,13 +67,111 @@ pub(crate) fn output_parser_to_token_stream(
         }
         let rule = Rule(rule_i as i16);
 
+        let mut stmts = TokenStream::new();
+
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
 
-        let rule_string = gram.rule_to_str(rule);
+        let rhs_index = gram.rrhs(rule).index();
+        let num_rhs = gram.get_rhs_items(rule).len();
+        let rhs_syms = gram.rule_rhs_syms(rule);
+
+        // Look up the LHS of the rule. Find the value type for that variable.
+        let lhs = gram.rlhs(rule);
+        let lhs_ident = gram.name(lhs);
+        let lhs_sym_type_opt = gram.sym_type[lhs.index()].as_ref();
 
         let block_span: Span;
-        let stmts: TokenStream = match block {
+
+        // This adds an expression that will be ignored. It is effectively a comment.
+        let rule_string = gram.rule_to_str(rule);
+        stmts.extend(quote! {
+            let _ = #rule_string;
+        });
+
+        // We insert this assertion check so that the optimizer can eliminate some redundant
+        // range checks. If we call Vec::pop() repeatedly, we get one range check (one
+        // unwrap call) in the generated code, for each value that we pop. But if we
+        // assert that the Vec has enough items, the optimizer is smart enough to see that
+        // all of the unwrap() calls can be eliminated. For this reason, the assert has
+        // to be a release-mode assert, not just a debug-only assert.
+        if num_rhs > 0 {
+            // TODO: re-enable this. it will require emitting separate asserts for values vs. token_stack
+            if false {
+                stmts.extend(quote! {
+                    assert!(values.len() >= #num_rhs);
+                });
+            }
+        }
+
+        // Iterate the rhs symbols and generate code that pops the values for each rhs
+        // symbol from the stack. If the value is used by the rule, then verify that it
+        // has the expected type.
+        for (rhs_sym_or_rule, rhs_binding) in rhs_syms
+            .iter()
+            .rev()
+            .zip(gram.rhs_binding[rhs_index..][..num_rhs].iter().rev())
+        {
+            assert!(rhs_sym_or_rule.is_symbol());
+            let rhs_sym = rhs_sym_or_rule.as_symbol();
+            let rhs_ident = gram.name(rhs_sym);
+            let rhs_sym_ty_opt = gram.sym_type[rhs_sym.index()].as_ref();
+
+            stmts.extend(if let Some(rbind) = rhs_binding {
+                if let Some(rhs_sym_ty) = rhs_sym_ty_opt {
+                    // Is the symbol a token or a value produced by a rule?
+                    if gram.is_var(rhs_sym) {
+                        // The rhs symbol is a var. Verify that the item popped from the
+                        // stack has the right type (right enum variant). As long as
+                        // the grammar tables are correctly constructed, this should
+                        // always be true.
+                        quote! {
+                            let mut #rbind: #rhs_sym_ty = match values.pop().unwrap().value {
+                                VarValue::#rhs_ident(rhs_value) => rhs_value,
+                                unrecognized => error_invalid_value_in_values_stack(&unrecognized),
+                            };
+                        }
+                    } else {
+                        // The rhs symbol is a token. Verify that we were given the
+                        // right kind of token.
+                        quote! {
+                            let mut #rbind: #rhs_sym_ty = match token_stack.pop().unwrap() {
+                                Token::#rhs_ident(rhs_value) => rhs_value,
+                                unrecognized => error_invalid_token_in_token_stack(&unrecognized),
+                            };
+                        }
+                    }
+                } else {
+                    // This is not good. The grammar has a binding for this value,
+                    // but the symbol that the value should come from does not have
+                    // a type.
+
+                    syn::Error::new(
+                        rhs_binding.span(),
+                        format!(
+                            "the symbol '{}' does not have a type specified",
+                            gram.name[rhs_sym.index()]
+                        ),
+                    )
+                    .to_compile_error()
+                    .to_token_stream()
+                }
+            } else {
+                // The rule has no binding for this value.  Pop it from the stack and
+                // discard it.
+                if gram.is_var(rhs_sym) {
+                    quote! {
+                        let _ = values.pop();
+                    }
+                } else {
+                    quote! {
+                        let _ = token_stack.pop();
+                    }
+                }
+            })
+        }
+
+        stmts.extend(match block {
             Some(block) => {
                 // We need to pop items off the stack and associate them with variables from right
                 // to left. The bindings are listed in the order that they are declared in, from
@@ -84,112 +182,19 @@ pub(crate) fn output_parser_to_token_stream(
                 // `pop()`, which will produce the values in reverse order. To account for this,
                 // we reverse the RHS items and use `pop()`. This gives us the order that we want.
                 block_span = block.span();
-                let rhs_index = gram.rrhs(rule).index();
-                let num_rhs = gram.get_rhs_items(rule).len();
-                let rhs_syms = gram.rule_rhs_syms(rule);
 
                 let mut t = TokenStream::new();
-
-                // This adds an expression that will be ignored. It is effectively a comment.
-                t.extend(quote! {
-                    let _ = #rule_string;
-                });
-
-                // Look up the LHS of the rule. Find the value type for that variable.
-                let lhs = gram.rlhs(rule);
-                let lhs_ident = gram.name(lhs);
-                let lhs_sym_type_opt = gram.sym_type[lhs.index()].as_ref();
-
-                // We insert this assertion check so that the optimizer can eliminate some redundant
-                // range checks. If we call Vec::pop() repeatedly, we get one range check (one
-                // unwrap call) in the generated code, for each value that we pop. But if we
-                // assert that the Vec has enough items, the optimizer is smart enough to see that
-                // all of the unwrap() calls can be eliminated. For this reason, the assert has
-                // to be a release-mode assert, not just a debug-only assert.
-                if num_rhs > 0 {
-                    t.extend(quote! {
-                        assert!(values.len() >= #num_rhs);
-                    });
-                }
-
-                // Iterate the rhs symbols and generate code that pops the values for each rhs
-                // symbol from the stack. If the value is used by the rule, then verify that it
-                // has the expected type.
-                for (rhs_sym_or_rule, rhs_binding) in rhs_syms
-                    .iter()
-                    .rev()
-                    .zip(gram.rhs_binding[rhs_index..][..num_rhs].iter().rev())
-                {
-                    assert!(rhs_sym_or_rule.is_symbol());
-                    let rhs_sym = rhs_sym_or_rule.as_symbol();
-                    let rhs_ident = gram.name(rhs_sym);
-                    let rhs_sym_ty_opt = gram.sym_type[rhs_sym.index()].as_ref();
-
-                    t.extend(match rhs_binding {
-                        Some(ref rbind) => {
-                            if let Some(rhs_sym_ty) = rhs_sym_ty_opt {
-                                // Is the symbol a token or a value produced by a rule?
-                                if gram.is_var(rhs_sym) {
-                                    // The rhs symbol is a var. Verify that the item popped from the
-                                    // stack has the right type (right enum variant). As long as
-                                    // the grammar tables are correctly constructed, this should
-                                    // always be true.
-                                    quote! {
-                                        let mut #rbind: #rhs_sym_ty = match values.pop().unwrap().value {
-                                            StackValue::Var(VarValue::#rhs_ident(rhs_value)) => rhs_value,
-                                            unrecognized => {
-                                                panic!("unexpected value in value stack: {:?}", unrecognized);
-                                            }
-                                        };
-                                    }
-                                } else {
-                                    // The rhs symbol is a token. Verify that we were given the
-                                    // right kind of token.
-                                    quote! {
-                                        let mut #rbind: #rhs_sym_ty = match values.pop().unwrap().value {
-                                            StackValue::Token(Token::#rhs_ident(rhs_value)) => rhs_value,
-                                            unrecognized => {
-                                                panic!("unexpected token in value stack: {:?}", unrecognized);
-                                            }
-                                        };
-                                    }
-                                }
-                            } else {
-                                // This is not good. The grammar has a binding for this value,
-                                // but the symbol that the value should come from does not have
-                                // a type.
-
-                                syn::Error::new(
-                                    rhs_binding.span(),
-                                    format!(
-                                        "the symbol '{}' does not have a type specified",
-                                        gram.name[rhs_sym.index()]
-                                    ),
-                                )
-                                .to_compile_error()
-                                .to_token_stream()
-                            }
-                        }
-                        None => {
-                            // The rule has no binding for this value.  Pop it from the stack and
-                            // discard it.
-                            quote! {
-                                let _ = values.pop();
-                            }
-                        }
-                    })
-                }
 
                 if let Some(sym_type) = lhs_sym_type_opt {
                     t.extend(quote! {
                         let result: #sym_type = #block;
-                        StackValue::Var(VarValue::#lhs_ident(result))
+                        VarValue::#lhs_ident(result)
                     });
                 } else {
                     // This rule does not produce a value.
                     t.extend(quote! {
                         let _result: () = #block;
-                        StackValue::Var(VarValue::#lhs_ident)
+                        VarValue::#lhs_ident
                     });
                 }
 
@@ -201,7 +206,7 @@ pub(crate) fn output_parser_to_token_stream(
                 block_span = gram.rule_span(Rule(rule_i as i16));
                 TokenStream::new()
             }
-        };
+        });
 
         let pat_value: u16 = rule_i as u16 - 2;
 
@@ -218,15 +223,27 @@ pub(crate) fn output_parser_to_token_stream(
     items.extend(quote! {
         #[allow(unused_braces)]
         #[allow(unused_mut)]
+        #[inline(never)]
         fn reduce_actions(
-            mut values: &mut Vec<ValueEntry>,
+            values: &mut Vec<ValueEntry>,
+            token_stack: &mut Vec<Token>,
             reduction: u16,
-            #context_param_ident: &mut #context_ty) -> Result<StackValue, racc_runtime::Error> {
-
+            #context_param_ident: &mut #context_ty,
+        ) -> Result<VarValue, racc_runtime::Error> {
             Ok(match reduction {
                 #action_arms
                 _ => unreachable!()
             })
+        }
+
+        #[inline(never)]
+        fn error_invalid_token_in_token_stack(t: &Token) -> ! {
+            panic!("unexpected token in token stack: {:?}", t);
+        }
+
+        #[inline(never)]
+        fn error_invalid_value_in_values_stack(v: &VarValue) -> ! {
+            panic!("unexpected value in value stack: {:?}", v);
         }
     });
 
@@ -329,12 +346,13 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
             /// Contains (symbol, value), where symbol is either the token that gave us a value,
             /// or a variable that produced a value.
             value_stack: Vec<ValueEntry>,
+            token_stack: Vec<Token>,
             state_stack: Vec<u16>,
         }
 
         struct ValueEntry {
             origin: ValueOrigin,
-            value: StackValue,
+            value: VarValue,
         }
 
         impl core::fmt::Debug for ValueEntry {
@@ -383,11 +401,8 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 Parser {
                     yystate: INITIAL_STATE,
                     value_stack: Vec::new(),
-                    state_stack: {
-                        let mut v = Vec::with_capacity(20);
-                        // v.push(INITIAL_STATE);
-                        v
-                    },
+                    token_stack: Vec::new(),
+                    state_stack: Vec::with_capacity(20),
                 }
             }
         }
@@ -407,6 +422,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
             pub fn reset(&mut self) {
                 self.yystate = INITIAL_STATE;
                 self.value_stack.clear();
+                self.token_stack.clear();
                 self.state_stack.clear();
                 // self.state_stack.push(INITIAL_STATE);
             }
@@ -469,24 +485,29 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                     "yyreduce: reducing: r{} (lhs {}, len {}) {}",
                     reduction + 2, lhs, len, YYRULES[reduction as usize]
                 );
-                assert!(self.value_stack.len() >= len);
-                // assert!(self.state_stack.len() >= len, "state stack is too small. needed {}, stack has {}", len, self.state_stack.len());
+
+                // assert!(self.value_stack.len() >= len);
 
                 // Invoke the generated "reduce" method.  This method handles popping values from
                 // parser.values_stack, and then executing the app-supplied code for this reduction.
                 // Because the generated code handles popping items from the stack, it is not
                 // necessary for us to consult a 'yylen' table here; that information is implicit.
-                let old_values_len = self.value_stack.len();
+                // let old_values_len = self.value_stack.len();
                 let reduce_value = reduce_actions(
                     &mut self.value_stack,
+                    &mut self.token_stack,
                     reduction,
                     ctx)?;
+
+                // TODO: re-enable this. it will require dealing with tokens vs. vars
+                /*
                 assert!(self.value_stack.len() + len == old_values_len);
                 log::trace!(
                     "yyreduce: generated code popped {} values from value stack, new len = {}",
                     len,
                     self.value_stack.len()
                 );
+                */
 
                 // Push the value that represents the reduction of this rule (the LHS).
                 log::debug!("yyreduce: action produced value: {:?}", reduce_value);
@@ -584,10 +605,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 // log::debug!("try_shift: shifted state: {:?} {}", self.state_stack, self.yystate);
 
                 log::debug!("try_shift: pushed value: {:?}", token);
-                self.value_stack.push(ValueEntry {
-                    origin: ValueOrigin::Token(token_num),
-                    value: StackValue::Token(token), // <-- token is moved
-                });
+                self.token_stack.push(token); // <-- token is moved
                 true
             }
 
@@ -628,6 +646,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 // log::debug!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
                 log::debug!("states: {:?} {}", self.state_stack, self.yystate);
                 log::debug!("values: {:?}", self.value_stack);
+                log::debug!("tokens: {:?}", self.token_stack);
 
                 let mut any_reduce = false;
 
@@ -652,10 +671,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                             // log::debug!("try_shift: shifted state: {:?} {}", self.state_stack, self.yystate);
 
                             log::debug!("try_shift: pushed value: {:?}", token);
-                            self.value_stack.push(ValueEntry {
-                                origin: ValueOrigin::Token(token_num),
-                                value: StackValue::Token(token), // <-- token is moved
-                            });
+                            self.token_stack.push(token); // <-- token is moved
 
                             self.do_defreds(ctx)?;
                             break;
@@ -681,6 +697,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
 
                 log::debug!("states: {:?} {}", self.state_stack, self.yystate);
                 log::debug!("values: {:?}", self.value_stack);
+                log::debug!("tokens: {:?}", self.token_stack);
                 Ok(())
             }
 
@@ -695,6 +712,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 log::debug!("------------- finish -------------");
                 log::debug!("states: {:?} {}", self.state_stack, self.yystate);
                 log::debug!("values: {:?}", self.value_stack);
+                log::debug!("tokens: {:?}", self.token_stack);
 
                 let mut any_reduce = false;
 
@@ -709,14 +727,10 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
 
                 self.do_defreds(ctx)?;
 
-                if self.value_stack.len() == 1 {
-                    log::debug!("accept");
-                    match self.value_stack.pop().unwrap().value {
-                        StackValue::Var(v) => return Ok(v),
-                        unrecognized => {
-                            panic!("unrecognized value in value stack: {:?}", unrecognized);
-                        }
-                    }
+                if self.value_stack.len() == 1 && self.token_stack.is_empty() {
+                    let accept_value = self.value_stack.pop().unwrap().value;
+                    log::debug!("accept: {:?}", accept_value);
+                    return Ok(accept_value);
                 }
 
                 log::debug!(
@@ -729,6 +743,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
 
                 log::debug!("syntax error!  token is not recognized in this state.");
                 log::debug!("values: {:?}", self.value_stack);
+                log::debug!("tokens: {:?}", self.token_stack);
                 Err(racc_runtime::Error::SyntaxError)
             }
         }

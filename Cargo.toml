@@ -4,3 +4,6 @@ members = [
     "racc_runtime",
     "racc_orig",
 ]
+
+[profile.release]
+debug = 2
