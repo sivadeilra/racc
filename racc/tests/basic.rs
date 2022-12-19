@@ -1,3 +1,5 @@
+#![cfg(nope)]
+
 racc::racc_grammar! {
 
     type Context = ();

@@ -247,6 +247,7 @@ use log::debug;
 use proc_macro2::Span;
 use syn::spanned::Spanned;
 use syn::Ident;
+use quote::ToTokens;
 
 macro_rules! int_alias {
     (type $name:ident = $int:ty;) => {
@@ -377,7 +378,6 @@ fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::T
         &grammar_def.rhs_bindings,
         grammar_def.context_ty,
         context_param_ident,
-        grammar_def.value_ty,
     ))
 }
 

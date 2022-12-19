@@ -12,3 +12,5 @@
 Cargo.lock
 /racc/target/
 /racc_runtime/target/
+.vscode/
+.vs/

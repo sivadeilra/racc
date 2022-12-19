@@ -65,6 +65,7 @@ struct SymbolDef {
     prec: i16,
     class: SymClass,
     assoc: u8,
+    value_type: Option<syn::Type>,
 }
 
 fn make_symbol(name: Ident) -> SymbolDef {
@@ -74,6 +75,7 @@ fn make_symbol(name: Ident) -> SymbolDef {
         prec: 0,
         class: SymClass::Unknown,
         assoc: TOKEN,
+        value_type: None,
     }
 }
 
@@ -181,8 +183,8 @@ impl ReaderState {
             && self.symbols[self.lhs[rule]].tag.is_some()
             && self.pitem[self.pitem.len() - 1] != NO_ITEM
         {
-            let mut i: usize = self.pitem.len() - 1;
-            while (i > 0) && self.pitem[i] != NO_ITEM {
+            let mut i = self.pitem.len() - 1;
+            while i > 0 && self.pitem[i] != NO_ITEM {
                 i -= 1;
             }
             if self.pitem[i + 1] == NO_ITEM
@@ -272,7 +274,7 @@ impl ReaderState {
 
         // Count the number of tokens.
         for sym in self.symbols.iter() {
-            if sym.class == SymClass::Terminal {
+            if matches!(sym.class, SymClass::Terminal | SymClass::Unknown) {
                 ntokens += 1;
             }
         }
@@ -306,7 +308,11 @@ impl ReaderState {
                         j += 1;
                     }
                     SymClass::Unknown => {
-                        panic!("symbol {} has no defined class", self.symbols[s].name);
+                        // We can only get here if a previous error occured.
+                        // We're trying to get as far as we can, so we can report as many
+                        // useful errors to the user. Treat this like a Terminal, for now.
+                        v[i] = s;
+                        i += 1;
                     }
                 }
             }
@@ -343,6 +349,7 @@ impl ReaderState {
         let mut gram_value: Vec<i16> = vec![0; nsyms];
         let mut gram_prec: Vec<i16> = Vec::with_capacity(nsyms);
         let mut gram_assoc: Vec<u8> = Vec::with_capacity(nsyms);
+        let mut gram_sym_type: Vec<Option<syn::Type>> = Vec::with_capacity(nsyms);
         let mut gram_rprec = self.rprec.clone();
         let mut gram_rassoc = self.rassoc.clone();
 
@@ -400,6 +407,7 @@ impl ReaderState {
 
         // Propagate $end token
         gram_name.push(Ident::new("__end", Span::call_site()));
+        gram_sym_type.push(None);
         gram_value[0] = 0;
         gram_prec.push(0);
         gram_assoc.push(TOKEN);
@@ -408,6 +416,7 @@ impl ReaderState {
         for i in 1..ntokens {
             let from = &self.symbols[v[i]];
             gram_name.push(from.name.clone());
+            gram_sym_type.push(from.value_type.clone());
             gram_value[i] = symbols_value[v[i]];
             gram_prec.push(from.prec);
             gram_assoc.push(from.assoc);
@@ -416,6 +425,7 @@ impl ReaderState {
         // Set up the start (accept) symbol
         assert!(start_symbol == ntokens);
         gram_name.push(Ident::new("__accept", Span::call_site()));
+        gram_sym_type.push(None); // TODO: need to get this from the grammar
         gram_value[start_symbol] = -1;
         gram_prec.push(0);
         gram_assoc.push(TOKEN);
@@ -424,6 +434,7 @@ impl ReaderState {
         for i in start_symbol + 1..nsyms {
             let from = &self.symbols[v[i]];
             gram_name.push(from.name.clone());
+            gram_sym_type.push(from.value_type.clone());
             gram_value[i] = symbols_value[v[i]];
             gram_prec.push(from.prec);
             gram_assoc.push(from.assoc);
@@ -525,6 +536,7 @@ impl ReaderState {
             value: gram_value,
             prec: gram_prec,
             assoc: gram_assoc,
+            sym_type: gram_sym_type,
             nrules,
             ritem,
             rlhs,
@@ -613,7 +625,6 @@ impl Errors {
 pub(crate) struct GrammarDef {
     pub grammar: Grammar,
     pub context_ty: Type,
-    pub value_ty: Type,
     pub rule_blocks: Vec<Option<Block>>,
     pub rhs_bindings: Vec<Option<Ident>>,
 }
@@ -680,7 +691,19 @@ impl Parse for GrammarDef {
                 let name_def_span = id.span();
                 let lhs = reader.lookup(&id);
 
-                let la = input.lookahead1();
+                let mut la = input.lookahead1();
+
+                //
+                let mut var_return_type: Option<syn::Type> = None;
+                if la.peek(Token![->]) {
+                    input.parse::<Token![->]>().unwrap();
+                    match input.parse::<syn::Type>() {
+                        Ok(t) => var_return_type = Some(t),
+                        Err(e) => errors.push(e),
+                    }
+                    la = input.lookahead1();
+                }
+
                 if la.peek(syn::token::Colon) {
                     input.parse::<syn::token::Colon>()?;
                     match reader.symbols[lhs].class {
@@ -698,6 +721,22 @@ impl Parse for GrammarDef {
                         SymClass::Unknown => {
                             reader.symbols[lhs].class = SymClass::NonTerminal;
                         }
+                    }
+
+                    if let Some(rt) = var_return_type {
+                        let sym_rt = &mut reader.symbols[lhs].value_type;
+                        if let Some(existing_rt) = &*sym_rt {
+                            errors.push(syn::Error::new(
+                                sym_rt.span(),
+                                "conflicting definition for type of non-terminal",
+                            ));
+                            errors.push(syn::Error::new(
+                                existing_rt.span(),
+                                "conflicting definition for type of non-terminal",
+                            ));
+                        }
+
+                        *sym_rt = Some(rt);
                     }
 
                     reader.start_rule(lhs);
@@ -776,6 +815,13 @@ impl Parse for GrammarDef {
                         }
                     }
                 } else if la.peek(Token![=]) || la.peek(Token![;]) {
+                    if let Some(rt) = var_return_type {
+                        errors.push(syn::Error::new(
+                            rt.span(),
+                            "tokens cannot use this syntax for return types",
+                        ));
+                    }
+
                     let has_value = la.peek(Token![=]);
                     if la.peek(Token![=]) {
                         input.parse::<Token![=]>()?;
@@ -786,7 +832,7 @@ impl Parse for GrammarDef {
                     match reader.symbols[lhs].class {
                         SymClass::Terminal => {
                             // symbol class is already known, but this means user has defined same symbol twice
-                            return Err(syn::Error::new(
+                            errors.push(syn::Error::new(
                                 name_def_span,
                                 "token is defined more than once",
                             ));
@@ -794,7 +840,7 @@ impl Parse for GrammarDef {
                         }
                         SymClass::NonTerminal => {
                             // this name is defined inconsistently -- as both a variable and a token
-                            return Err(syn::Error::new(
+                            errors.push(syn::Error::new(
                                 name_def_span,
                                 "token was previously used as a variable",
                             ));
@@ -821,7 +867,88 @@ impl Parse for GrammarDef {
                 } else {
                     return Err(la.error());
                 }
+            } else if la.peek(Token![enum]) {
+                let en_ty = input.parse::<syn::ItemEnum>()?;
+
+                generics_are_not_allowed_here(&mut errors, &en_ty.generics);
+
+                if en_ty.ident == "Token" {
+                    attrs_are_not_allowed_here(&mut errors, &en_ty.attrs);
+
+                    for var in en_ty.variants.iter() {
+                        if let Some(disc) = &var.discriminant {
+                            errors.push(syn::Error::new(
+                                disc.1.span(),
+                                "tokens may not specify a discriminant (vlaue)",
+                            ));
+                        } else {
+                            // The grammar does not define a value for the token.
+                            // That's fine, we supply the values.
+                        }
+
+                        // TODO: match on #[left] attribute
+
+                        let id = &var.ident;
+                        // let name_def_str = id.to_string();
+                        // let name_def_span = id.span();
+                        let lhs = reader.lookup(&id);
+
+                        let sym = &mut reader.symbols[lhs];
+                        match sym.class {
+                            SymClass::NonTerminal => {
+                                errors.push(syn::Error::new(
+                                    var.span(),
+                                    "This name has a conflicting definition. It is defined as both a token and variable."
+                                ));
+                                continue;
+                            }
+                            SymClass::Terminal => {
+                                // Hmmm, it was already defined.
+                                // That's ok for now, but if we eliminate the old form, this should
+                                // become an error.
+                            }
+                            SymClass::Unknown => {
+                                sym.class = SymClass::Terminal;
+
+                                match &var.fields {
+                                    syn::Fields::Named(_) => {
+                                        errors.push(syn::Error::new(var.fields.span(), "named fields are not supported; use a single-value tuple"));
+                                    }
+
+                                    syn::Fields::Unnamed(fields) => {
+                                        // This token provides a value. Only a single value is allowed.
+                                        if fields.unnamed.len() != 1 {
+                                            errors.push(syn::Error::new(
+                                                var.fields.span(),
+                                                "token enums may only contain a single vlaue",
+                                            ));
+                                        }
+
+                                        if let Some(f0) = fields.unnamed.first() {
+                                            attrs_are_not_allowed_here(&mut errors, &f0.attrs);
+                                            sym.value_type = Some(f0.ty.clone());
+                                        }
+                                    }
+
+                                    syn::Fields::Unit => {
+                                        // This token does not have a value.
+                                        // The value_type field is already None, so we don't need to do anything.
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    errors.push(syn::Error::new(
+                        en_ty.ident.span(),
+                        "The name of the enum being defined is not recognized. \
+                         The only allowed value is 'Token', which defines the set of tokens \
+                         defined by your grammar.",
+                    ));
+                }
             } else {
+                // If we can't recognize the next token at all, then we cannot continue parsing
+                // the macro invocation.
                 errors.push(la.error());
                 break;
             }
@@ -842,7 +969,7 @@ impl Parse for GrammarDef {
         // Check for any symbols that were not defined.
         for sym in reader.symbols.iter() {
             if sym.class == SymClass::Unknown {
-                return Err(syn::Error::new(
+                errors.push(syn::Error::new(
                     sym.name.span(),
                     format!("symbol '{}' was used but never defined", sym.name),
                 ));
@@ -852,14 +979,6 @@ impl Parse for GrammarDef {
         let gram = reader.pack_symbols_and_grammar(goal_symbol);
         ReaderState::print_grammar(&gram);
 
-        let value_ty = value_ty.ok_or_else(|| {
-            syn::Error::new(
-                Span::call_site(),
-                "The grammar did not specify the value type. \
-                 Please add 'type Value = <your type>;' to the grammar. \
-                 This type is used for the results of rules, and is often an enum.",
-            )
-        })?;
         let context_ty = context_ty.ok_or_else(|| {
             syn::Error::new(
                 Span::call_site(),
@@ -878,8 +997,22 @@ impl Parse for GrammarDef {
             rule_blocks: reader.rule_blocks,
             rhs_bindings: reader.rhs_binding,
             context_ty,
-            value_ty,
         })
+    }
+}
+
+fn attrs_are_not_allowed_here(errors: &mut Errors, attrs: &[syn::Attribute]) {
+    for a in attrs.iter() {
+        errors.push(syn::Error::new(a.span(), "attributes are not allowed here"));
+    }
+}
+
+fn generics_are_not_allowed_here(errors: &mut Errors, generics: &syn::Generics) {
+    if !generics.params.is_empty() {
+        errors.push(syn::Error::new(
+            generics.span(),
+            "generics are not allowed here",
+        ));
     }
 }
 
@@ -938,6 +1071,11 @@ fn test_foo() {
         quote! {
             type Context = ();
             type Value = Option<i16>;
+
+            enum Token {
+                PLUS,
+                MINUS,
+            }
 
             PLUS;
             MINUS;

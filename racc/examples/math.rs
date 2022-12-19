@@ -1,93 +1,111 @@
+
 pub trait GrammarToken {
     fn token_value(&self) -> usize;
 }
 
 racc::racc_grammar! {
     type Context = ();
-    type Value = Option<i16>;
+    // type Value = Option<i16>;
 
-    PLUS;
-    MINUS;
-    LPAREN;
-    RPAREN;
-    NUM;
-    IF;
-    ELSE;
-    COMMA;
-    THEN;
-    WHILE;
-    DO;
-    DIVIDE;
+    enum Token {
+        PLUS,
+        MINUS,
+        LPAREN,
+        RPAREN,
+        NUM(i32),
+        IF,
+        ELSE,
+        COMMA,
+        THEN,
+        WHILE,
+        DO,
+        DIVIDE,
+        IDENT(String),
+        LET,
+        EQ,
+        IN,
+    }
 
-    Expr : NUM=x {
+    Expr -> i32 : NUM=x {
         println!("NUM={:?}", x);
         x
     }
-        | Expr=a PLUS Expr=b {
-            Some(a.unwrap() + b.unwrap())
+    | Expr=a PLUS Expr=b {
+        a + b
+    }
+    | Expr=a MINUS Expr=b {
+        a - b
+    }
+    | Expr=a DIVIDE Expr=b {
+        println!("{} / {}", a, b);
+        if b == 0 {
+            return Err(racc_runtime::Error::AppError);
         }
-        | Expr=a MINUS Expr=b {
-            Some(a.unwrap() - b.unwrap())
+        a / b
+    }
+    | LPAREN Expr=inner RPAREN { inner }
+    | IF Expr=predicate THEN Expr=true_value {
+        if predicate != 0 {
+            true_value
+        } else {
+            0
         }
-        | Expr=a DIVIDE Expr=b {
-            let a = a.unwrap();
-            let b = b.unwrap();
-            println!("{} / {}", a, b);
-            if b == 0 {
-                return Err(racc_runtime::Error::AppError);
-            }
-            Some(a / b)
+    }
+    | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+        if predicate != 0 {
+            true_value
+        } else {
+            false_value
         }
-        | LPAREN Expr=inner RPAREN { inner }
-        | IF Expr=predicate THEN Expr=true_value {
-            if let Some(p) = predicate {
-                if p > 0 {
-                    true_value
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-        | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
-            if let Some(p) = predicate {
-                if p > 0 {
-                    true_value
-                } else {
-                    false_value
-                }
-            } else {
-                false_value
-            }
-        };
+    }
+    | Let=e { e }
+    ;
+
+    Let -> i32 : LET IDENT=id EQ Expr=e
+    // TODO: this is broken
+    /*{
+        println!("setting e = {:?}", e);
+        e
+    }*/
+     IN Expr=body {
+        println!("popping: id: {:?}, e {:?}, body: {:?}", id, e, body);
+        0
+    };
 
 }
 
+#[cfg(nope)]
 fn err_test() {
-    let toks = vec![(NUM, Some(100)), (DIVIDE, None), (NUM, Some(0))];
-    let result = ParserState::parse(toks.into_iter(), &mut ());
+    let toks = vec![Token::NUM(100), Token::DIVIDE, Token::NUM(0)];
+    let result = Parser::parse(toks.into_iter(), &mut ());
     assert_eq!(result, Err(racc_runtime::Error::AppError));
 }
 
 fn main() {
     env_logger::builder().default_format_timestamp(false).init();
 
-    err_test();
+    // err_test();
     basic_test();
 }
 
 fn basic_test() {
     let toks = vec![
-        (LPAREN, None),
-        (NUM, Some(42)),
-        (PLUS, None),
-        (NUM, Some(24)),
-        (RPAREN, None),
-        (DIVIDE, None),
-        (NUM, Some(2)),
+        Token::LPAREN,
+        Token::NUM(42),
+        Token::PLUS,
+        Token::NUM(24),
+        Token::RPAREN,
+        Token::DIVIDE,
+        Token::NUM(2),
     ];
 
-    let result = ParserState::parse(toks.iter().cloned(), &mut ());
-    assert_eq!(result, Ok(Some(33)));
+    let result = Parser::parse(toks.into_iter(), &mut ()).expect("expected parsing to succeed");
+    match result {
+        VarValue::Expr(e) => {
+            assert_eq!(e, 33);
+        }
+        unrecognized => {
+            panic!("unrecognized output: {:?}", unrecognized);
+        }
+    }
 }

@@ -1,3 +1,5 @@
+#![cfg(nope)]
+
 /*
 %pure-parser
 

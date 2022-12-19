@@ -33,6 +33,9 @@ pub(crate) struct Grammar {
     /// len = nsyms
     pub value: Vec<i16>,
 
+    /// len = nsyms
+    pub sym_type: Vec<Option<syn::Type>>,
+
     // these two are managed differently
     pub prec: Vec<i16>,
     pub assoc: Vec<u8>,
