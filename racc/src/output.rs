@@ -183,7 +183,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
         if false {
             let rule_string = gram.rule_to_str(rule);
             stmts0.extend(quote_spanned! { rule_span =>
-                log::debug!("yyreduce: reducing: {}", #rule_string);
+                racc_log!("yyreduce: reducing: {}", #rule_string);
             });
         }
 
@@ -340,7 +340,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
 
                 // This rule does not produce a value, so we do not push a value onto value_stack.
                 quote! {
-                    // log::debug!("yyreduce: this reduction did not produce a value");
+                    // racc_log!("yyreduce: this reduction did not produce a value");
                 }
             }
         });
@@ -363,7 +363,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
         fn yyreduce(&mut self, reduction: u16, #context_param)
             -> Result<(), racc_runtime::Error>
         {
-            // log::debug!(
+            // racc_log!(
             //     "yyreduce: reducing: r{} (lhs {}) {}",
             //     reduction + 2,
             //     YYLHS[reduction as usize],
@@ -371,7 +371,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
             // );
 
             if self.accepted {
-                log::debug!("yyreduce: cannot push more tokens after EOF has been accepted");
+                racc_log!("yyreduce: cannot push more tokens after EOF has been accepted");
                 return Err(racc_runtime::Error::SyntaxError);
             }
 
@@ -396,24 +396,24 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
             if len > 0 {
                 for _ in 0..len - 1 {
                     let discard_state = self.state_stack.pop().unwrap();
-                    log::debug!("yyreduce: popped state: s{} (discarded)", discard_state);
+                    racc_log!("yyreduce: popped state: s{} (discarded)", discard_state);
                 }
                 self.yystate = if let Some(s) = self.state_stack.pop() {
-                    log::debug!("yyreduce: popped state: s{}", s);
+                    racc_log!("yyreduce: popped state: s{}", s);
                     s
                 } else {
-                    log::debug!("yyreduce: stack is empty, using s0");
+                    racc_log!("yyreduce: stack is empty, using s0");
                     0
                 };
             } else {
-                log::debug!("yyreduce: rule has no rhs symbols (epsilon rule)");
+                racc_log!("yyreduce: rule has no rhs symbols (epsilon rule)");
             }
 
-            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
 
             let lhs = YYLHS[reduction as usize];
             if self.yystate == 0 && lhs == 0 {
-                log::debug!(
+                racc_log!(
                     "yyreduce: after reduction, shifting to state {} (0/0 case). setting accepted = true.",
                     YYFINAL
                 );
@@ -426,23 +426,23 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
                     let yyn_1: i32 = yyn_0 as i32 + self.yystate as i32;
                     if yyn_1 >= 0 && YYCHECK[yyn_1 as usize] as u16 == self.yystate {
                         let s = YYTABLE[yyn_1 as usize] as u16;
-                        log::debug!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
+                        racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
                         s
                     } else {
                         let s = YYDGOTO[lhs as usize] as u16;
-                        log::debug!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
+                        racc_log!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
                         s
                     }
                 } else {
                     let s = YYDGOTO[lhs as usize] as u16;
-                    log::debug!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
+                    racc_log!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
                     s
                 };
 
                 self.state_stack.push(self.yystate);
                 self.yystate = next_state;
 
-                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                racc_log!("states: {:?} {}", self.state_stack, self.yystate);
             }
 
             Ok(())
@@ -558,24 +558,24 @@ fn output_push_token(
             // dynamic check for whether the token has a value or not.
             quote! {
                 if token_has_value(&token) {
-                    log::debug!("shifted token: {:?}", token);
+                    racc_log!("shifted token: {:?}", token);
                     self.token_stack.push(token);
                 } else {
-                    log::debug!("shifted token: {:?} (not really -- it has no value)", token);
+                    racc_log!("shifted token: {:?} (not really -- it has no value)", token);
                 }
             }
         } else {
             // All of the tokens carry a value. We do not need a dynamic check, we simply
             // unconditionally insert the token.
             quote! {
-                log::debug!("shifted token: {:?}", token);
+                racc_log!("shifted token: {:?}", token);
                 self.token_stack.push(token);
             }
         }
     } else {
         quote! {
             // None of the tokens carries a value; we don't have a token stack at all.
-            log::debug!("shifted token: {:?} (not really -- it has no value)", token);
+            racc_log!("shifted token: {:?} (not really -- it has no value)", token);
         }
     };
 
@@ -591,14 +591,14 @@ fn output_push_token(
         ) -> Result<(), racc_runtime::Error> {
             let token_num = token_to_i16(&token);
 
-            log::debug!(
+            racc_log!(
                 "------------- push_token: reading {} ({}) lval {:?} -------------",
                 token_num, YYNAME[token_num as usize], token
             );
-            // log::debug!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
-            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-            log::debug!("values: {:?}", self.value_stack);
-            log::debug!("tokens: {:?}", self.token_stack);
+            // racc_log!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
+            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            racc_log!("values: {:?}", self.value_stack);
+            racc_log!("tokens: {:?}", self.token_stack);
 
             let mut any_reduce = false;
 
@@ -622,7 +622,7 @@ fn output_push_token(
 
                             self.state_stack.push(self.yystate);
                             self.yystate = next_state;
-                            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+                            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
 
                             // Token is moved by the statement following this.
                             #push_token_stmt
@@ -644,15 +644,15 @@ fn output_push_token(
                 if !any_reduce {
                     // If there is neither a shift nor a reduce action defined for this (state, token),
                     // then we have encountered a syntax error.
-                    log::debug!("syntax error!  token is not recognized in this state.");
+                    racc_log!("syntax error!  token is not recognized in this state.");
                     return Err(racc_runtime::Error::SyntaxError);
                 }
 
             }
 
-            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-            log::debug!("values: {:?}", self.value_stack);
-            log::debug!("tokens: {:?}", self.token_stack);
+            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            racc_log!("values: {:?}", self.value_stack);
+            racc_log!("tokens: {:?}", self.token_stack);
             Ok(())
         }
     })
@@ -692,6 +692,9 @@ fn output_gen_methods(
     parser_methods.extend(output_yyreduce(gram, &context_param));
 
     quote! {
+
+        use racc_runtime::racc_log;
+
         /// An active instance of a parser.  This structure contains the state of a parsing state
         /// machine, including the state stack and the value stack.
         ///
@@ -756,7 +759,7 @@ fn output_gen_methods(
                     if defred == 0 {
                         return Ok(());
                     }
-                    log::debug!("do_default_reductions: s{} has default reduction r{}", self.yystate, defred + 2);
+                    racc_log!("do_default_reductions: s{} has default reduction r{}", self.yystate, defred + 2);
                     self.yyreduce(defred, #context_arg)?;
                 }
             }
@@ -769,14 +772,14 @@ fn output_gen_methods(
 
                 let red = YYRINDEX[self.yystate as usize];
                 if red == 0 {
-                    log::debug!("try_reduce: s{} has no reductions", self.yystate);
+                    racc_log!("try_reduce: s{} has no reductions", self.yystate);
                     return Ok(false);
                 }
 
                 let yyn = red as i32 + token as i32;
-                log::debug!("try_reduce: red = {}, yyn = {}", red, yyn);
+                racc_log!("try_reduce: red = {}, yyn = {}", red, yyn);
                 if yyn < 0 || yyn as usize >= YYCHECK.len() || YYCHECK[yyn as usize] != token {
-                    log::debug!("try_reduce: s{} has no reduction for token {}", self.yystate, YYNAME[token as usize]);
+                    racc_log!("try_reduce: s{} has no reduction for token {}", self.yystate, YYNAME[token as usize]);
                     return Ok(false);
                 }
 
@@ -800,21 +803,21 @@ fn output_finish(
     needs_token_stack: bool,
 ) -> TokenStream {
     let mut stmts = quote! {
-        log::debug!("------------- finish -------------");
-        log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-        log::debug!("values: {:?}", self.value_stack);
-        log::debug!("tokens: {:?}", self.token_stack);
+        racc_log!("------------- finish -------------");
+        racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+        racc_log!("values: {:?}", self.value_stack);
+        racc_log!("tokens: {:?}", self.token_stack);
 
         // Drive reductions using the special 0 token, which is the EOF ($end) token.
         while self.try_reduce(#context_arg 0)? {
             self.do_default_reductions(#context_arg)?;
         }
 
-        log::debug!("values: {:?}", self.value_stack);
-        log::debug!("tokens: {:?}", self.token_stack);
+        racc_log!("values: {:?}", self.value_stack);
+        racc_log!("tokens: {:?}", self.token_stack);
 
         if !self.accepted {
-            log::debug!("finish: there was no transition to 'accepted' state");
+            racc_log!("finish: there was no transition to 'accepted' state");
             return Err(racc_runtime::Error::SyntaxError);
         }
     };
@@ -839,7 +842,7 @@ fn output_finish(
                 VarValue::#accept_ident(v) => v,
                 unrecognized => error_invalid_value_in_values_stack(unrecognized),
             };
-            log::debug!("accept: {:?}", accept_value);
+            racc_log!("accept: {:?}", accept_value);
             return Ok(accept_value);
         });
     } else {
@@ -848,7 +851,7 @@ fn output_finish(
         stmts.extend(quote! {
             // The value stack should be empty.
             assert!(self.value_stack.is_empty());
-            log::debug!("accept:");
+            racc_log!("accept:");
             return Ok(());
         });
     }

@@ -9,3 +9,11 @@ pub enum Error {
     /// TODO: Find some better way.
     AppError,
 }
+
+#[macro_export]
+macro_rules! racc_log {
+    (
+        $($t:tt)*
+    ) => {
+    }
+}
