@@ -1,10 +1,5 @@
-pub trait GrammarToken {
-    fn token_value(&self) -> usize;
-}
-
 racc::racc_grammar! {
     type Context = ();
-    // type Value = Option<i16>;
 
     enum Token {
         PLUS,
@@ -188,13 +183,6 @@ use Token::*;
 fn basic_test() {
     let toks = vec![LPAREN, NUM(42), PLUS, NUM(24), RPAREN, DIVIDE, NUM(2)];
 
-    let result = Parser::parse(toks.into_iter(), &mut ()).expect("expected parsing to succeed");
-    match result {
-        VarValue::Expr(e) => {
-            assert_eq!(e, 33);
-        }
-        unrecognized => {
-            panic!("unrecognized output: {:?}", unrecognized);
-        }
-    }
+    let result: i32 = Parser::parse(toks.into_iter(), &mut ()).expect("expected parsing to succeed");
+    assert_eq!(result, 33);
 }

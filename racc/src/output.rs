@@ -21,7 +21,6 @@ pub(crate) fn output_parser_to_token_stream(
     assert_eq!(gram.rule_blocks.len(), gram.nrules);
 
     let grammar_span = Span::call_site();
-    let context_param_ident = Ident::new("context", Span::call_site());
 
     let mut items: TokenStream = TokenStream::new();
 
@@ -37,6 +36,17 @@ pub(crate) fn output_parser_to_token_stream(
         &yydefred,
     ));
 
+    // Create fragments for passing context through.
+    let context_param: TokenStream;
+    let context_arg: TokenStream;
+    if let Some(context_ty) = &gram.context_ty {
+        context_param = quote!(context: &mut #context_ty,);
+        context_arg = quote!(context,);
+    } else {
+        context_param = quote!();
+        context_arg = quote!();
+    }
+
     items.extend(output_actions(
         grammar_span,
         gram,
@@ -45,13 +55,28 @@ pub(crate) fn output_parser_to_token_stream(
         &default_reductions,
     ));
 
+    // Scan the tokens to see whether none/some/all carry values.
+    // We use this to decide whether to emit a token stack or not.
+
+    let mut any_token_has_value = false;
+    let mut any_token_no_value = false;
+
     for t in 1..gram.ntokens {
+        if gram.sym_type[t].is_some() {
+            any_token_has_value = true;
+        } else {
+            any_token_no_value = true;
+        }
+
+        /*
         let tokvalue = gram.value[t] as u16;
         let tok_ident = &gram.name[t];
         if false {
             items.extend(quote!(pub const #tok_ident: u16 = #tokvalue;));
         }
+        */
     }
+    let needs_token_stack = any_token_has_value;
 
     // Generate YYFINAL constant.
     let yyfinal = parser.final_state.0 as u16;
@@ -164,8 +189,14 @@ pub(crate) fn output_parser_to_token_stream(
                         let _ = values.pop();
                     }
                 } else {
-                    quote! {
-                        let _ = token_stack.pop();
+                    if rhs_sym_ty_opt.is_some() {
+                        quote! {
+                            let _ = token_stack.pop();
+                        }
+                    } else {
+                        // For tokens that do not have values, we never even push them on the stack,
+                        // so there is no need to pop them.
+                        quote!()
                     }
                 }
             })
@@ -201,10 +232,23 @@ pub(crate) fn output_parser_to_token_stream(
                 t
             }
             None => {
-                // This reduction does not have any code to execute.  Still, we need to
-                // remove items from the value stack. Vec::drain() handles this for us, implicitly.
+                // This reduction does not have any code to execute.  We still need to remove values
+                // from the stack, but this has already been done, above. We do need to provide a
+                // value for this rule, though.
                 block_span = gram.rule_span(Rule(rule_i as i16));
-                TokenStream::new()
+
+                if lhs_sym_type_opt.is_some() {
+                    return syn::Error::new(
+                        block_span,
+                        "the result of this rule is required to provide a value; provide a { ... } block which computes that value.",
+                    )
+                        .to_compile_error()
+                        .to_token_stream()
+                }
+
+                quote! {
+                    VarValue::#lhs_ident
+                }
             }
         });
 
@@ -218,7 +262,11 @@ pub(crate) fn output_parser_to_token_stream(
         });
     }
 
-    let context_ty = &gram.context_ty;
+    let token_stack_arg = if needs_token_stack {
+        quote!(token_stack: &mut Vec<Token>,)
+    } else {
+        quote!()
+    };
 
     items.extend(quote! {
         #[allow(unused_braces)]
@@ -226,9 +274,9 @@ pub(crate) fn output_parser_to_token_stream(
         #[inline(never)]
         fn reduce_actions(
             values: &mut Vec<ValueEntry>,
-            token_stack: &mut Vec<Token>,
+            #token_stack_arg // no comma
             reduction: u16,
-            #context_param_ident: &mut #context_ty,
+            #context_param // no comma
         ) -> Result<VarValue, racc_runtime::Error> {
             Ok(match reduction {
                 #action_arms
@@ -263,9 +311,21 @@ pub(crate) fn output_parser_to_token_stream(
     items.extend(make_symbol_names_table(grammar_span, gram));
     items.extend(make_rule_text_table(grammar_span, gram));
     items.extend(make_states_text_table(grammar_span, gram, parser));
-    items.extend(output_gen_methods(context_ty));
+    items.extend(output_gen_methods(
+        gram,
+        needs_token_stack,
+        any_token_no_value,
+        &context_param,
+        &context_arg,
+    ));
 
     items.extend(output_token_to_i16(gram));
+
+    // We only need the token_has_value() function is there are both tokens
+    // that have a value and tokens that don't.
+    if any_token_has_value && any_token_no_value {
+        items.extend(output_token_has_value(gram));
+    }
 
     items
 }
@@ -335,7 +395,177 @@ fn output_token_to_i16(gram: &Grammar) -> TokenStream {
     }
 }
 
-fn output_gen_methods(context_ty: &Type) -> TokenStream {
+/// Generates the `token_has_value` function. This function consumes a token, and if it has
+/// a value, it pushes it to the token stack.
+///
+/// This should only be called if the grammar has at least one token that carries a value and at
+/// least one token that does not.  Otherwise, the decision is static.
+fn output_token_has_value(gram: &Grammar) -> TokenStream {
+    let mut pats = TokenStream::new();
+    for i in gram.iter_token_syms() {
+        let token_name = gram.name(i);
+        if gram.sym_type[i.index()].is_some() {
+            pats.extend(quote! {
+                | Token::#token_name(..)
+            });
+        }
+    }
+
+    quote! {
+        fn token_has_value(t: &Token) -> bool {
+            match t {
+                #pats => true,
+                _ => false,
+            }
+        }
+    }
+}
+
+/// Generates the `push_token` method. The `push_token` function is the main driver for the parser
+/// state machine.
+fn output_push_token(
+    _gram: &Grammar,
+    needs_token_stack: bool,
+    any_token_no_value: bool,
+    context_param: &TokenStream,
+    context_arg: &TokenStream,
+) -> TokenStream {
+    let push_token_stmt = if needs_token_stack {
+        if any_token_no_value {
+            // At least one token does not have a value. This means that we need to insert a
+            // dynamic check for whether the token has a value or not.
+            quote! {
+                if token_has_value(&token) {
+                    log::debug!("shifted token: {:?}", token);
+                    self.token_stack.push(token);
+                } else {
+                    log::debug!("shifted token: {:?} (not really -- it has no value)", token);
+                }
+            }
+        } else {
+            // All of the tokens carry a value. We do not need a dynamic check, we simply
+            // unconditionally insert the token.
+            quote! {
+                log::debug!("shifted token: {:?}", token);
+                self.token_stack.push(token);
+            }
+        }
+    } else {
+        quote! {
+            // None of the tokens carries a value; we don't have a token stack at all.
+            log::debug!("shifted token: {:?} (not really -- it has no value)", token);
+        }
+    };
+
+    verify_parse::<syn::ImplItemMethod>(quote! {
+        /// Advances the state of the parser by reporting a new token to the parser.
+        ///
+        /// Calling this method is the equivalent of returning a token (other than `YYEOF`)
+        /// from a `yylex()` function in a YACC parser.
+        pub fn push_token(
+            &mut self,
+            #context_param // no comma
+            token: Token,
+        ) -> Result<(), racc_runtime::Error> {
+            let token_num = token_to_i16(&token);
+
+            log::debug!(
+                "------------- push_token: reading {} ({}) lval {:?} -------------",
+                token_num, YYNAME[token_num as usize], token
+            );
+            // log::debug!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
+            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+            log::debug!("values: {:?}", self.value_stack);
+            log::debug!("tokens: {:?}", self.token_stack);
+
+            let mut any_reduce = false;
+
+            loop {
+                // Check to see if there is a SHIFT action for this (state, token).
+                // All of the values in YYSINDEX are either 0 (meaning no shift) or negative.
+                // If YYSINDEX[state] is non-zero, then (token + YYSINDEX[state]) gives yyn.
+
+                // Check to see whether we can shift this token. This used to be in a separate
+                // function, try_shift. It has been inlined here, so that the borrow checker
+                // can verify that we're using Token correctly.
+
+                let shift: i16 = YYSINDEX[self.yystate as usize];
+                if shift != 0 {
+                    let yyn_i32 = shift as i32 + (token_num as i32);
+                    assert!(yyn_i32 >= 0);
+                    let yyn = yyn_i32 as usize;
+
+                    if yyn < YYCHECK.len() && YYCHECK[yyn] == token_num {
+                        let next_state = YYTABLE[yyn] as u16;
+
+                        self.state_stack.push(self.yystate);
+                        self.yystate = next_state;
+                        log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+
+                        // Token is moved by the statement following this.
+                        #push_token_stmt
+
+                        self.do_defreds(#context_arg)?;
+                        break;
+                    }
+                }
+
+                // We could not shift the token. Check to see whether we can apply any
+                // reductions.
+
+                while self.try_reduce(#context_arg token_num)? {
+                    any_reduce = true;
+                    self.do_defreds(#context_arg)?;
+                }
+
+                if !any_reduce {
+                    // If there is neither a shift nor a reduce action defined for this (state, token),
+                    // then we have encountered a syntax error.
+                    log::debug!("syntax error!  token is not recognized in this state.");
+                    return Err(racc_runtime::Error::SyntaxError);
+                }
+
+            }
+
+            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+            log::debug!("values: {:?}", self.value_stack);
+            log::debug!("tokens: {:?}", self.token_stack);
+            Ok(())
+        }
+    })
+}
+
+fn output_gen_methods(
+    gram: &Grammar,
+    needs_token_stack: bool,
+    any_token_no_value: bool,
+    context_param: &TokenStream,
+    context_arg: &TokenStream,
+) -> TokenStream {
+    let token_stack_field = if needs_token_stack {
+        quote!(token_stack: Vec<Token>,)
+    } else {
+        quote!(token_stack: (),)
+    };
+
+    // Things that go inside the `impl Parser` block.
+    let mut parser_methods = TokenStream::new();
+
+    parser_methods.extend(output_push_token(
+        gram,
+        needs_token_stack,
+        any_token_no_value,
+        &context_param,
+        &context_arg,
+    ));
+    parser_methods.extend(output_finish(gram, &context_param, &context_arg, needs_token_stack));
+
+    let reduce_actions_token_stack_arg = if needs_token_stack {
+        quote!(&mut self.token_stack,)
+    } else {
+        quote!()
+    };
+
     quote! {
         /// An active instance of a parser.  This structure contains the state of a parsing state
         /// machine, including the state stack and the value stack.
@@ -346,7 +576,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
             /// Contains (symbol, value), where symbol is either the token that gave us a value,
             /// or a variable that produced a value.
             value_stack: Vec<ValueEntry>,
-            token_stack: Vec<Token>,
+            #token_stack_field // token_stack: Vec<Token>,
             state_stack: Vec<u16>,
         }
 
@@ -401,7 +631,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 Parser {
                     yystate: INITIAL_STATE,
                     value_stack: Vec::new(),
-                    token_stack: Vec::new(),
+                    token_stack: Default::default(),
                     state_stack: Vec::with_capacity(20),
                 }
             }
@@ -422,14 +652,15 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
             pub fn reset(&mut self) {
                 self.yystate = INITIAL_STATE;
                 self.value_stack.clear();
-                self.token_stack.clear();
+                // self.token_stack.clear();
+                self.token_stack = Default::default();
                 self.state_stack.clear();
                 // self.state_stack.push(INITIAL_STATE);
             }
 
             // Do default reductions, as long as there are any default reductions.
             // Returns true if we performed at least one default reduction.
-            fn do_defreds(&mut self, ctx: &mut #context_ty) -> Result<(), racc_runtime::Error> {
+            fn do_defreds(&mut self, #context_param) -> Result<(), racc_runtime::Error> {
                 // Check for default reductions.
                 loop {
                     // Keep in mind that the values in YYDEFRED are biased by 2, in order to save
@@ -437,7 +668,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                     let defred = YYDEFRED[self.yystate as usize];
                     if defred != 0 {
                         log::debug!("do_defreds: s{} has default reduction r{}", self.yystate, defred + 2);
-                        self.yyreduce(defred, ctx)?;
+                        self.yyreduce(defred, #context_arg)?;
                     } else {
                         return Ok(());
                     }
@@ -445,7 +676,7 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
             }
 
             // Check to see if there is a REDUCE action for this (state, token).
-            fn try_reduce(&mut self, ctx: &mut #context_ty, token: i16)
+            fn try_reduce(&mut self, #context_param token: i16)
                 -> Result<bool, racc_runtime::Error>
             {
                 assert_eq!(YYTABLE.len(), YYCHECK.len());
@@ -470,12 +701,12 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 }
 
                 let rr = YYTABLE[yyn as usize] as u16;
-                self.yyreduce(rr, ctx)?;
+                self.yyreduce(rr, #context_arg)?;
                 Ok(true)
             }
 
             // Performs a reduction.
-            fn yyreduce(&mut self, reduction: u16, ctx: &mut #context_ty)
+            fn yyreduce(&mut self, reduction: u16, #context_param)
                 -> Result<(), racc_runtime::Error>
             {
                 let len = YYLEN[reduction as usize] as usize;
@@ -495,9 +726,9 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 // let old_values_len = self.value_stack.len();
                 let reduce_value = reduce_actions(
                     &mut self.value_stack,
-                    &mut self.token_stack,
+                    #reduce_actions_token_stack_arg
                     reduction,
-                    ctx)?;
+                    #context_arg)?;
 
                 // TODO: re-enable this. it will require dealing with tokens vs. vars
                 /*
@@ -577,176 +808,106 @@ fn output_gen_methods(context_ty: &Type) -> TokenStream {
                 Ok(())
             }
 
-            // Check to see if there is a SHIFT action for this (state, token).
-            // All of the values in YYSINDEX are either 0 (meaning no shift) or negative.
-            // If YYSINDEX[state] is non-zero, then (token + YYSINDEX[state]) gives yyn.
-            fn try_shift(&mut self, token: Token, token_num: i16) -> bool {
-                let shift: i16 = YYSINDEX[self.yystate as usize];
-                if shift == 0 {
-                    // log::debug!("try_shift: no shift");
-                    return false;
-                }
-
-                let yyn_i32 = shift as i32 + (token_num as i32);
-                assert!(yyn_i32 >= 0);
-                let yyn = yyn_i32 as usize;
-
-                if YYCHECK[yyn] != token_num {
-                    // log::debug!("try_shift: no shift (yycheck failed)");
-                    return false;
-                }
-
-                let next_state = YYTABLE[yyn] as u16;
-
-                self.state_stack.push(self.yystate);
-                self.yystate = next_state;
-                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-
-                // log::debug!("try_shift: shifted state: {:?} {}", self.state_stack, self.yystate);
-
-                log::debug!("try_shift: pushed value: {:?}", token);
-                self.token_stack.push(token); // <-- token is moved
-                true
-            }
-
-            /// Parses an input stream of tokens and returns the result value.
-            ///
-            /// This provides an interface that is similar to the `yyparse()` function generated by
-            /// YACC. It handles creating a parser, pushing tokens into it, and getting the final
-            /// value that was produced by the parser.
-            #[allow(dead_code)]
-            pub fn parse<TI>(tokens: TI, ctx: &mut #context_ty) -> Result<VarValue, racc_runtime::Error>
-            where
-                TI: Iterator<Item = Token>
-            {
-                let mut parser = Self::default();
-
-                for t in tokens {
-                    parser.push_token(ctx, t)?;
-                }
-
-                parser.finish(ctx)
-            }
-
-            /// Advances the state of the parser by reporting a new token to the parser.
-            ///
-            /// Calling this method is the equivalent of returning a token (other than `YYEOF`)
-            /// from a `yylex()` function in a YACC parser.
-            pub fn push_token(
-                &mut self,
-                ctx: &mut #context_ty,
-                token: Token,
-            ) -> Result<(), racc_runtime::Error> {
-                let token_num = token_to_i16(&token);
-
-                log::debug!(
-                    "------------- push_token: reading {} ({}) lval {:?} -------------",
-                    token_num, YYNAME[token_num as usize], token
-                );
-                // log::debug!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
-                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-                log::debug!("values: {:?}", self.value_stack);
-                log::debug!("tokens: {:?}", self.token_stack);
-
-                let mut any_reduce = false;
-
-                loop {
-                    // Check to see whether we can shift this token. This used to be in a separate
-                    // function, try_shift. It has been inlined here, so that the borrow checker
-                    // can verify that we're using Token correctly.
-
-                    let shift: i16 = YYSINDEX[self.yystate as usize];
-                    if shift != 0 {
-                        let yyn_i32 = shift as i32 + (token_num as i32);
-                        assert!(yyn_i32 >= 0);
-                        let yyn = yyn_i32 as usize;
-
-                        if yyn < YYCHECK.len() && YYCHECK[yyn] == token_num {
-                            let next_state = YYTABLE[yyn] as u16;
-
-                            self.state_stack.push(self.yystate);
-                            self.yystate = next_state;
-                            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-
-                            // log::debug!("try_shift: shifted state: {:?} {}", self.state_stack, self.yystate);
-
-                            log::debug!("try_shift: pushed value: {:?}", token);
-                            self.token_stack.push(token); // <-- token is moved
-
-                            self.do_defreds(ctx)?;
-                            break;
-                        }
-                    }
-
-                    // We could not shift the token. Check to see whether we can apply any
-                    // reductions.
-
-                    while self.try_reduce(ctx, token_num)? {
-                        any_reduce = true;
-                        self.do_defreds(ctx)?;
-                    }
-
-                    if !any_reduce {
-                        // If there is neither a shift nor a reduce action defined for this (state, token),
-                        // then we have encountered a syntax error.
-                        log::debug!("syntax error!  token is not recognized in this state.");
-                        return Err(racc_runtime::Error::SyntaxError);
-                    }
-
-                }
-
-                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-                log::debug!("values: {:?}", self.value_stack);
-                log::debug!("tokens: {:?}", self.token_stack);
-                Ok(())
-            }
-
-            /// Pushes the final "end of input" token into the state machine, and checks whether the
-            /// grammar has accepted or rejected the sequence of tokens.
-            ///
-            /// Calling this method is the equivalent of returning `YYEOF` from a `yylex()` function
-            /// in a YACC parser.
-            pub fn finish(&mut self, ctx: &mut #context_ty) -> Result<VarValue, racc_runtime::Error> {
-                // assert!(!self.state_stack.is_empty());
-
-                log::debug!("------------- finish -------------");
-                log::debug!("states: {:?} {}", self.state_stack, self.yystate);
-                log::debug!("values: {:?}", self.value_stack);
-                log::debug!("tokens: {:?}", self.token_stack);
-
-                let mut any_reduce = false;
-
-                loop {
-                    if self.try_reduce(ctx, 0)? {
-                        self.do_defreds(ctx)?;
-                        any_reduce = true;
-                    } else {
-                        break;
-                    }
-                }
-
-                self.do_defreds(ctx)?;
-
-                if self.value_stack.len() == 1 && self.token_stack.is_empty() {
-                    let accept_value = self.value_stack.pop().unwrap().value;
-                    log::debug!("accept: {:?}", accept_value);
-                    return Ok(accept_value);
-                }
-
-                log::debug!(
-                    "done with all reductions.  yystate={:?}  state_stack={:?}",
-                    self.yystate, self.state_stack
-                );
-
-                // If there is neither a shift nor a reduce action defined for this (state, token),
-                // then we have encountered a syntax error.
-
-                log::debug!("syntax error!  token is not recognized in this state.");
-                log::debug!("values: {:?}", self.value_stack);
-                log::debug!("tokens: {:?}", self.token_stack);
-                Err(racc_runtime::Error::SyntaxError)
-            }
+            #parser_methods
         }
+    }
+}
+
+/// Generates the `finish` method.
+fn output_finish(
+    gram: &Grammar,
+    context_param: &TokenStream,
+    context_arg: &TokenStream,
+    needs_token_stack: bool,
+) -> TokenStream {
+    let accept_sym = gram.top();
+    let accept_ident = gram.name(accept_sym);
+
+    let return_ty: TokenStream;
+    let return_accept_value =
+        if let Some(accept_var_type) = gram.sym_type[accept_sym.index()].as_ref() {
+            return_ty = quote!(#accept_var_type);
+            quote! {
+                let accept_value = match self.value_stack.pop().unwrap().value {
+                    VarValue::#accept_ident(v) => v,
+                    unrecognized => panic!("unrecognized var on stack: {:?}", unrecognized),
+                };
+                log::debug!("accept: {:?}", accept_value);
+            }
+        } else {
+            return_ty = quote!(());
+            quote! {
+                match self.value_stack.pop().unwrap().value {
+                    VarValue::#accept_ident => {}
+                    unrecognized => panic!("unrecognized var on stack: {:?}", unrecognized),
+                };
+                log::debug!("accept: ()");
+                let accept_value = ();
+            }
+        };
+
+    let token_stack_is_empty = if needs_token_stack {
+        quote!(self.token_stack.is_empty())
+    } else {
+        quote!(true)
+    };
+
+    let finish = verify_parse::<syn::ImplItemMethod>(quote! {
+        /// Pushes the final "end of input" token into the state machine, and checks whether the
+        /// grammar has accepted or rejected the sequence of tokens.
+        ///
+        /// Calling this method is the equivalent of returning `YYEOF` from a `yylex()` function
+        /// in a YACC parser.
+        pub fn finish(&mut self, #context_param) -> Result<#return_ty, racc_runtime::Error> {
+            log::debug!("------------- finish -------------");
+            log::debug!("states: {:?} {}", self.state_stack, self.yystate);
+            log::debug!("values: {:?}", self.value_stack);
+            log::debug!("tokens: {:?}", self.token_stack);
+
+            // Drive reductions using the special 0 token, which is the EOF token.
+            while self.try_reduce(#context_arg 0)? {
+                self.do_defreds(#context_arg)?;
+            }
+
+            if self.value_stack.len() == 1 && #token_stack_is_empty {
+                #return_accept_value
+                return Ok(accept_value);
+            }
+
+            // If there is neither a shift nor a reduce action defined for this (state, token),
+            // then we have encountered a syntax error.
+
+            log::debug!("syntax error!  token is not recognized in this state.");
+            log::debug!("values: {:?}", self.value_stack);
+            log::debug!("tokens: {:?}", self.token_stack);
+            Err(racc_runtime::Error::SyntaxError)
+        }
+    });
+
+    let parse = verify_parse::<syn::ImplItemMethod>(quote! {
+        /// Parses an input stream of tokens and returns the result value.
+        ///
+        /// This provides an interface that is similar to the `yyparse()` function generated by
+        /// YACC. It handles creating a parser, pushing tokens into it, and getting the final
+        /// value that was produced by the parser.
+        #[allow(dead_code)]
+        pub fn parse<TI>(tokens: TI, #context_param) -> Result<#return_ty, racc_runtime::Error>
+        where
+            TI: Iterator<Item = Token>
+        {
+            let mut parser = Self::default();
+
+            for t in tokens {
+                parser.push_token(#context_arg t)?;
+            }
+
+            parser.finish(#context_arg)
+        }
+    });
+
+    quote! {
+        #finish
+        #parse
     }
 }
 
@@ -893,7 +1054,7 @@ fn output_actions(
         &mut act.tos,
     );
     let order = sort_actions(&act);
-    let packed = packing::pack_table(parser.nstates(), &order, &act);
+    let packed = crate::packing::pack_table(parser.nstates(), &order, &act);
 
     let mut items = TokenStream::new();
 
@@ -942,9 +1103,9 @@ fn output_actions(
 /// nvectors = sum of the lengths of these regions = 2 * nstates + gram.nvars
 pub struct ActionsTable {
     /// nvectors = 2 * nstates + gram.nvars
-    nvectors: usize,
-    froms: Vec<Vec<StateOrRule>>,
-    tos: Vec<Vec<StateOrRule>>,
+    pub nvectors: usize,
+    pub froms: Vec<Vec<StateOrRule>>,
+    pub tos: Vec<Vec<StateOrRule>>,
 }
 impl ActionsTable {
     pub fn new(nstates: usize, nvars: usize) -> Self {
@@ -1118,165 +1279,13 @@ fn sort_actions(act: &ActionsTable) -> Vec<usize> {
     order
 }
 
-mod packing {
-    use super::ActionsTable;
-    use log::debug;
+mod packing {}
 
-    /// The function matching_vector determines if the vector specified by
-    /// the input parameter matches a previously considered vector. The
-    /// test at the start of the function checks if the vector represents
-    /// a row of shifts over terminal symbols or a row of reductions, or a
-    /// column of shifts over a nonterminal symbol.  Berkeley Yacc does not
-    /// check if a column of shifts over a nonterminal symbols matches a
-    /// previously considered vector.  Because of the nature of LR parsing
-    /// tables, no two columns can match.  Therefore, the only possible
-    /// match would be between a row and a column.  Such matches are
-    /// unlikely.  Therefore, to save time, no attempt is made to see if a
-    /// column matches a previously considered vector.
-    ///
-    /// Matching_vector is poorly designed.  The test could easily be made
-    /// faster.  Also, it depends on the vectors being in a specific
-    /// order.
-    fn matching_vector(pack: &PackState<'_>, vector: usize) -> Option<usize> {
-        let i = pack.order[vector];
-        if i >= 2 * pack.nstates {
-            // Never match among variable gotos.
-            return None;
-        }
-
-        let act = pack.act;
-        let t = act.tally(i);
-        let w = act.width(i);
-        for &j in pack.order[0..vector].iter().rev() {
-            if act.width(j) != w || act.tally(j) != t {
-                return None;
-            }
-            if act.tos[i] == act.tos[j] && act.froms[i] == act.froms[j] {
-                return Some(j);
-            }
-        }
-        None
-    }
-
-    fn pack_vector(pack: &mut PackState<'_>, vector: usize) -> i16 {
-        // log::debug!("pack_vector: vector={} lowzero={}", vector, pack.lowzero);
-        let act = pack.act;
-        let i = pack.order[vector];
-        let from = &act.froms[i];
-        let to = &act.tos[i];
-        let t = from.len();
-        assert!(t != 0);
-
-        let mut j: i16 = pack.lowzero - from[0];
-        for &f in from[1..t].iter() {
-            if pack.lowzero - f > j {
-                j = pack.lowzero - f;
-            }
-        }
-
-        loop {
-            if j == 0 {
-                j = 1;
-                continue;
-            }
-
-            let mut ok = true;
-            for &f in &from[0..t] {
-                let loc = (j + f) as usize;
-
-                // make sure we can read/write table[loc] and table[check]
-                if loc >= pack.table.len() {
-                    assert!(pack.table.len() == pack.check.len());
-                    pack.table.resize(loc + 1, 0);
-                    pack.check.resize(loc + 1, -1);
-                }
-
-                if pack.check[loc] != -1 {
-                    ok = false;
-                    break;
-                }
-            }
-            if !ok {
-                j += 1;
-                continue;
-            }
-            if pack.pos[0..vector].iter().any(|&p| p == j) {
-                j += 1;
-                continue;
-            }
-
-            for (&f, &t) in from[0..t].iter().zip(to[0..t].iter()) {
-                let loc = (j + f) as usize;
-                pack.table[loc] = t;
-                pack.check[loc] = f;
-                if loc > pack.high {
-                    pack.high = loc;
-                }
-            }
-
-            while pack.check[pack.lowzero as usize] != -1 {
-                pack.lowzero += 1;
-            }
-
-            return j;
-        }
-    }
-
-    struct PackState<'a> {
-        base: Vec<i16>,
-        pos: Vec<i16>,
-        table: Vec<i16>, // table and check always have same len
-        check: Vec<i16>, // table is 0-filled, check is -1-filled
-        lowzero: i16,
-        high: usize,
-
-        order: &'a [usize],
-        nstates: usize,
-        act: &'a ActionsTable,
-    }
-
-    pub struct PackedTables {
-        pub base: Vec<i16>,
-        pub table: Vec<i16>,
-        pub check: Vec<i16>,
-        pub high: usize,
-    }
-
-    pub fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) -> PackedTables {
-        debug!("pack_table: nentries={}", order.len());
-
-        let initial_maxtable = 1000;
-
-        let mut pack = PackState {
-            base: vec![0; act.nvectors],
-            pos: vec![0; order.len()],
-            table: vec![0; initial_maxtable],
-            check: vec![-1; initial_maxtable],
-            lowzero: 0,
-            high: 0,
-            order,
-            nstates,
-            act,
-        };
-
-        for (i, o) in order.iter().enumerate() {
-            let place = match matching_vector(&pack, i) {
-                Some(state) => pack.base[state],
-                None => pack_vector(&mut pack, i),
-            };
-
-            pack.pos[i] = place;
-            pack.base[*o] = place;
-        }
-
-        pack.check.truncate(pack.high + 1);
-        pack.table.truncate(pack.high + 1);
-
-        PackedTables {
-            base: pack.base,
-            table: pack.table,
-            check: pack.check,
-            high: pack.high,
+fn verify_parse<T: syn::parse::Parse>(tokens: TokenStream) -> TokenStream {
+    match syn::parse2::<T>(tokens.clone()) {
+        Ok(_) => tokens,
+        Err(e) => {
+            panic!("failed to parse tokens as expected:\n{:?}\n{}", e, tokens)
         }
     }
 }

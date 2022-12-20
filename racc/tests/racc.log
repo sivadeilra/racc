@@ -1,0 +1,528 @@
+
+
+   Compiling racc v0.0.3 (D:\racc\racc)
+    Finished test [unoptimized + debuginfo] target(s) in 1.14s
+     Running unittests src\lib.rs (D:\racc\target\debug\deps\racc-42f07ad938d4f349.exe)
+
+running 1 test
+parsing grammar: math -----
+[DEBUG racc::reader] using 'Expr' as start symbol
+[DEBUG racc::reader] goal symbol = Expr_13
+[DEBUG racc::reader] pack_symbols
+[DEBUG racc::reader] ntokens=14 nvars=2 nsyms=16
+[DEBUG racc::reader] packed symbol table:
+[DEBUG racc::reader]       0 token __end                value   0 prec  0 assoc  0
+[DEBUG racc::reader]       1 token error                value 256 prec  0 assoc  0
+[DEBUG racc::reader]       2 token PLUS                 value 257 prec  0 assoc  0
+[DEBUG racc::reader]       3 token MINUS                value 258 prec  0 assoc  0
+[DEBUG racc::reader]       4 token LPAREN               value 259 prec  0 assoc  0
+[DEBUG racc::reader]       5 token RPAREN               value 260 prec  0 assoc  0
+[DEBUG racc::reader]       6 token NUM                  value 261 prec  0 assoc  0
+[DEBUG racc::reader]       7 token IF                   value 262 prec  0 assoc  0
+[DEBUG racc::reader]       8 token ELSE                 value 263 prec  0 assoc  0
+[DEBUG racc::reader]       9 token COMMA                value 264 prec  0 assoc  0
+[DEBUG racc::reader]      10 token THEN                 value 265 prec  0 assoc  0
+[DEBUG racc::reader]      11 token WHILE                value 266 prec  0 assoc  0
+[DEBUG racc::reader]      12 token DO                   value 267 prec  0 assoc  0
+[DEBUG racc::reader]      13 token DIVIDE               value 268 prec  0 assoc  0
+[DEBUG racc::reader]      14 var   __accept             value  -1 prec  0 assoc  0
+[DEBUG racc::reader]      15 var   Expr                 value   0 prec  0 assoc  0
+[DEBUG racc::reader] symbols: ntokens=14 nvars=2 nsyms=16
+[DEBUG racc::reader]       0  token  __end
+[DEBUG racc::reader]       1  token  error
+[DEBUG racc::reader]       2  token  PLUS
+[DEBUG racc::reader]       3  token  MINUS
+[DEBUG racc::reader]       4  token  LPAREN
+[DEBUG racc::reader]       5  token  RPAREN
+[DEBUG racc::reader]       6  token  NUM
+[DEBUG racc::reader]       7  token  IF
+[DEBUG racc::reader]       8  token  ELSE
+[DEBUG racc::reader]       9  token  COMMA
+[DEBUG racc::reader]      10  token  THEN
+[DEBUG racc::reader]      11  token  WHILE
+[DEBUG racc::reader]      12  token  DO
+[DEBUG racc::reader]      13  token  DIVIDE
+[DEBUG racc::reader]      14  var    __accept
+[DEBUG racc::reader]      15  var    Expr
+[DEBUG racc::reader] 
+[DEBUG racc::reader] raw items:
+[DEBUG racc::reader]       0 --> r  1
+[DEBUG racc::reader]       1 -->  15 Expr
+[DEBUG racc::reader]       2 -->   0 __end
+[DEBUG racc::reader]       3 --> r  2
+[DEBUG racc::reader]       4 -->   6 NUM
+[DEBUG racc::reader]       5 --> r  3
+[DEBUG racc::reader]       6 -->  15 Expr
+[DEBUG racc::reader]       7 -->   2 PLUS
+[DEBUG racc::reader]       8 -->  15 Expr
+[DEBUG racc::reader]       9 --> r  4
+[DEBUG racc::reader]      10 -->  15 Expr
+[DEBUG racc::reader]      11 -->   3 MINUS
+[DEBUG racc::reader]      12 -->  15 Expr
+[DEBUG racc::reader]      13 --> r  5
+[DEBUG racc::reader]      14 -->  15 Expr
+[DEBUG racc::reader]      15 -->  13 DIVIDE
+[DEBUG racc::reader]      16 -->  15 Expr
+[DEBUG racc::reader]      17 --> r  6
+[DEBUG racc::reader]      18 -->   4 LPAREN
+[DEBUG racc::reader]      19 -->  15 Expr
+[DEBUG racc::reader]      20 -->   5 RPAREN
+[DEBUG racc::reader]      21 --> r  7
+[DEBUG racc::reader]      22 -->   7 IF
+[DEBUG racc::reader]      23 -->  15 Expr
+[DEBUG racc::reader]      24 -->  10 THEN
+[DEBUG racc::reader]      25 -->  15 Expr
+[DEBUG racc::reader]      26 --> r  8
+[DEBUG racc::reader]      27 -->   7 IF
+[DEBUG racc::reader]      28 -->  15 Expr
+[DEBUG racc::reader]      29 -->  10 THEN
+[DEBUG racc::reader]      30 -->  15 Expr
+[DEBUG racc::reader]      31 -->   8 ELSE
+[DEBUG racc::reader]      32 -->  15 Expr
+[DEBUG racc::reader]      33 --> r  9
+[DEBUG racc::reader] 
+[DEBUG racc::reader] rules:
+[DEBUG racc::reader]     [r  2 ]   __accept   :  Expr __end
+[DEBUG racc::reader]     [r  3 ]   Expr       :  NUM
+[DEBUG racc::reader]     [r  4 ]   Expr       :  Expr PLUS Expr
+[DEBUG racc::reader]     [r  5 ]   Expr       :  Expr MINUS Expr
+[DEBUG racc::reader]     [r  6 ]   Expr       :  Expr DIVIDE Expr
+[DEBUG racc::reader]     [r  7 ]   Expr       :  LPAREN Expr RPAREN
+[DEBUG racc::reader]     [r  8 ]   Expr       :  IF Expr THEN Expr
+[DEBUG racc::reader]     [r  9 ]   Expr       :  IF Expr THEN Expr ELSE Expr
+[DEBUG racc::reader] 
+parsed grammar: nrules=10
+[DEBUG racc::reader] using 'Expr' as start symbol
+[DEBUG racc::reader] goal symbol = Expr_13
+[DEBUG racc::reader] pack_symbols
+[DEBUG racc::reader] ntokens=14 nvars=2 nsyms=16
+[DEBUG racc::reader] packed symbol table:
+[DEBUG racc::reader]       0 token __end                value   0 prec  0 assoc  0
+[DEBUG racc::reader]       1 token error                value 256 prec  0 assoc  0
+[DEBUG racc::reader]       2 token PLUS                 value 257 prec  0 assoc  0
+[DEBUG racc::reader]       3 token MINUS                value 258 prec  0 assoc  0
+[DEBUG racc::reader]       4 token LPAREN               value 259 prec  0 assoc  0
+[DEBUG racc::reader]       5 token RPAREN               value 260 prec  0 assoc  0
+[DEBUG racc::reader]       6 token NUM                  value 261 prec  0 assoc  0
+[DEBUG racc::reader]       7 token IF                   value 262 prec  0 assoc  0
+[DEBUG racc::reader]       8 token ELSE                 value 263 prec  0 assoc  0
+[DEBUG racc::reader]       9 token COMMA                value 264 prec  0 assoc  0
+[DEBUG racc::reader]      10 token THEN                 value 265 prec  0 assoc  0
+[DEBUG racc::reader]      11 token WHILE                value 266 prec  0 assoc  0
+[DEBUG racc::reader]      12 token DO                   value 267 prec  0 assoc  0
+[DEBUG racc::reader]      13 token DIVIDE               value 268 prec  0 assoc  0
+[DEBUG racc::reader]      14 var   __accept             value  -1 prec  0 assoc  0
+[DEBUG racc::reader]      15 var   Expr                 value   0 prec  0 assoc  0
+[DEBUG racc::reader] symbols: ntokens=14 nvars=2 nsyms=16
+[DEBUG racc::reader]       0  token  __end
+[DEBUG racc::reader]       1  token  error
+[DEBUG racc::reader]       2  token  PLUS
+[DEBUG racc::reader]       3  token  MINUS
+[DEBUG racc::reader]       4  token  LPAREN
+[DEBUG racc::reader]       5  token  RPAREN
+[DEBUG racc::reader]       6  token  NUM
+[DEBUG racc::reader]       7  token  IF
+[DEBUG racc::reader]       8  token  ELSE
+[DEBUG racc::reader]       9  token  COMMA
+[DEBUG racc::reader]      10  token  THEN
+[DEBUG racc::reader]      11  token  WHILE
+[DEBUG racc::reader]      12  token  DO
+[DEBUG racc::reader]      13  token  DIVIDE
+[DEBUG racc::reader]      14  var    __accept
+[DEBUG racc::reader]      15  var    Expr
+[DEBUG racc::reader] 
+[DEBUG racc::reader] raw items:
+[DEBUG racc::reader]       0 --> r  1
+[DEBUG racc::reader]       1 -->  15 Expr
+[DEBUG racc::reader]       2 -->   0 __end
+[DEBUG racc::reader]       3 --> r  2
+[DEBUG racc::reader]       4 -->   6 NUM
+[DEBUG racc::reader]       5 --> r  3
+[DEBUG racc::reader]       6 -->  15 Expr
+[DEBUG racc::reader]       7 -->   2 PLUS
+[DEBUG racc::reader]       8 -->  15 Expr
+[DEBUG racc::reader]       9 --> r  4
+[DEBUG racc::reader]      10 -->  15 Expr
+[DEBUG racc::reader]      11 -->   3 MINUS
+[DEBUG racc::reader]      12 -->  15 Expr
+[DEBUG racc::reader]      13 --> r  5
+[DEBUG racc::reader]      14 -->  15 Expr
+[DEBUG racc::reader]      15 -->  13 DIVIDE
+[DEBUG racc::reader]      16 -->  15 Expr
+[DEBUG racc::reader]      17 --> r  6
+[DEBUG racc::reader]      18 -->   4 LPAREN
+[DEBUG racc::reader]      19 -->  15 Expr
+[DEBUG racc::reader]      20 -->   5 RPAREN
+[DEBUG racc::reader]      21 --> r  7
+[DEBUG racc::reader]      22 -->   7 IF
+[DEBUG racc::reader]      23 -->  15 Expr
+[DEBUG racc::reader]      24 -->  10 THEN
+[DEBUG racc::reader]      25 -->  15 Expr
+[DEBUG racc::reader]      26 --> r  8
+[DEBUG racc::reader]      27 -->   7 IF
+[DEBUG racc::reader]      28 -->  15 Expr
+[DEBUG racc::reader]      29 -->  10 THEN
+[DEBUG racc::reader]      30 -->  15 Expr
+[DEBUG racc::reader]      31 -->   8 ELSE
+[DEBUG racc::reader]      32 -->  15 Expr
+[DEBUG racc::reader]      33 --> r  9
+[DEBUG racc::reader] 
+[DEBUG racc::reader] rules:
+[DEBUG racc::reader]     [r  2 ]   __accept   :  Expr __end
+[DEBUG racc::reader]     [r  3 ]   Expr       :  NUM
+[DEBUG racc::reader]     [r  4 ]   Expr       :  Expr PLUS Expr
+[DEBUG racc::reader]     [r  5 ]   Expr       :  Expr MINUS Expr
+[DEBUG racc::reader]     [r  6 ]   Expr       :  Expr DIVIDE Expr
+[DEBUG racc::reader]     [r  7 ]   Expr       :  LPAREN Expr RPAREN
+[DEBUG racc::reader]     [r  8 ]   Expr       :  IF Expr THEN Expr
+[DEBUG racc::reader]     [r  9 ]   Expr       :  IF Expr THEN Expr ELSE Expr
+[DEBUG racc::reader] 
+[DEBUG racc::lr0] DERIVES:
+[DEBUG racc::lr0]     __accept derives rules: 
+[DEBUG racc::lr0]         (r2) __accept : Expr __end
+[DEBUG racc::lr0]     Expr derives rules: 
+[DEBUG racc::lr0]         (r3) Expr : NUM
+[DEBUG racc::lr0]         (r4) Expr : Expr PLUS Expr
+[DEBUG racc::lr0]         (r5) Expr : Expr MINUS Expr
+[DEBUG racc::lr0]         (r6) Expr : Expr DIVIDE Expr
+[DEBUG racc::lr0]         (r7) Expr : LPAREN Expr RPAREN
+[DEBUG racc::lr0]         (r8) Expr : IF Expr THEN Expr
+[DEBUG racc::lr0]         (r9) Expr : IF Expr THEN Expr ELSE Expr
+[DEBUG racc::lr0] set_EFF: nvars = 2
+[DEBUG racc::lr0] setting eff: row 0, col 1
+[DEBUG racc::lr0] setting eff: row 1, col 1
+[DEBUG racc::lr0] setting eff: row 1, col 1
+[DEBUG racc::lr0] setting eff: row 1, col 1
+[DEBUG racc::lr0] eff (before reflexive transitive closure):
+Bitmat {
+    rows: 2,
+    cols: 2,
+    values: [
+        (
+            0,
+            1,
+        ),
+        (
+            1,
+            1,
+        ),
+    ],
+}
+[
+    2,
+    2,
+]
+[DEBUG racc::warshall] reflexive_transitive_closure
+[DEBUG racc::lr0] eff (after reflexive transitive closure):
+Bitmat {
+    rows: 2,
+    cols: 2,
+    values: [
+        (
+            0,
+            0,
+        ),
+        (
+            0,
+            1,
+        ),
+        (
+            1,
+            1,
+        ),
+    ],
+}
+[
+    3,
+    2,
+]
+[DEBUG racc::lr0] Epsilon Free Firsts
+[DEBUG racc::lr0] Bitmat { rows: 2, cols: 2, values: [(0, 0), (0, 1), (1, 1)] }
+[3, 2]
+[DEBUG racc::lr0] __accept
+[DEBUG racc::lr0]   __accept
+[DEBUG racc::lr0]   Expr
+[DEBUG racc::lr0] Expr
+[DEBUG racc::lr0]   Expr
+[DEBUG racc::lr0] 
+[DEBUG racc::lr0] First Derives
+[DEBUG racc::lr0] 
+[DEBUG racc::lr0] __accept derives:
+[DEBUG racc::lr0]     (r2) __accept : Expr __end
+[DEBUG racc::lr0]     (r3) Expr : NUM
+[DEBUG racc::lr0]     (r4) Expr : Expr PLUS Expr
+[DEBUG racc::lr0]     (r5) Expr : Expr MINUS Expr
+[DEBUG racc::lr0]     (r6) Expr : Expr DIVIDE Expr
+[DEBUG racc::lr0]     (r7) Expr : LPAREN Expr RPAREN
+[DEBUG racc::lr0]     (r8) Expr : IF Expr THEN Expr
+[DEBUG racc::lr0]     (r9) Expr : IF Expr THEN Expr ELSE Expr
+[DEBUG racc::lr0] Expr derives:
+[DEBUG racc::lr0]     (r3) Expr : NUM
+[DEBUG racc::lr0]     (r4) Expr : Expr PLUS Expr
+[DEBUG racc::lr0]     (r5) Expr : Expr MINUS Expr
+[DEBUG racc::lr0]     (r6) Expr : Expr DIVIDE Expr
+[DEBUG racc::lr0]     (r7) Expr : LPAREN Expr RPAREN
+[DEBUG racc::lr0]     (r8) Expr : IF Expr THEN Expr
+[DEBUG racc::lr0]     (r9) Expr : IF Expr THEN Expr ELSE Expr
+[DEBUG racc::lr0] States:  (nstates: 19)
+[DEBUG racc::lr0] s0:   (accessing_symbol __end)
+[DEBUG racc::lr0]     item    1 :  . Expr __end
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s4
+[DEBUG racc::lr0] s1:   (accessing_symbol LPAREN)
+[DEBUG racc::lr0]     item   19 :  LPAREN . Expr RPAREN
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s5
+[DEBUG racc::lr0] s2:   (accessing_symbol NUM)
+[DEBUG racc::lr0]     item    5 :  NUM .    -> reduction (r3) Expr
+[DEBUG racc::lr0]     reduction: (r3) Expr : NUM
+[DEBUG racc::lr0] s3:   (accessing_symbol IF)
+[DEBUG racc::lr0]     item   23 :  IF . Expr THEN Expr
+[DEBUG racc::lr0]     item   28 :  IF . Expr THEN Expr ELSE Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s6
+[DEBUG racc::lr0] s4:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    2 :  Expr . __end
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     shift: __end                --> s7
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s5:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     item   20 :  LPAREN Expr . RPAREN
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: RPAREN               --> s11
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s6:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     item   24 :  IF Expr . THEN Expr
+[DEBUG racc::lr0]     item   29 :  IF Expr . THEN Expr ELSE Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: THEN                 --> s12
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s7:   (accessing_symbol __end)
+[DEBUG racc::lr0]     item    3 :  Expr __end .    -> reduction (r2) __accept
+[DEBUG racc::lr0]     reduction: (r2) __accept : Expr __end
+[DEBUG racc::lr0] s8:   (accessing_symbol PLUS)
+[DEBUG racc::lr0]     item    8 :  Expr PLUS . Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s13
+[DEBUG racc::lr0] s9:   (accessing_symbol MINUS)
+[DEBUG racc::lr0]     item   12 :  Expr MINUS . Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s14
+[DEBUG racc::lr0] s10:   (accessing_symbol DIVIDE)
+[DEBUG racc::lr0]     item   16 :  Expr DIVIDE . Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s15
+[DEBUG racc::lr0] s11:   (accessing_symbol RPAREN)
+[DEBUG racc::lr0]     item   21 :  LPAREN Expr RPAREN .    -> reduction (r7) Expr
+[DEBUG racc::lr0]     reduction: (r7) Expr : LPAREN Expr RPAREN
+[DEBUG racc::lr0] s12:   (accessing_symbol THEN)
+[DEBUG racc::lr0]     item   25 :  IF Expr THEN . Expr
+[DEBUG racc::lr0]     item   30 :  IF Expr THEN . Expr ELSE Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s16
+[DEBUG racc::lr0] s13:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item    9 :  Expr PLUS Expr .    -> reduction (r4) Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     reduction: (r4) Expr : Expr PLUS Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s14:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   13 :  Expr MINUS Expr .    -> reduction (r5) Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     reduction: (r5) Expr : Expr MINUS Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s15:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     item   17 :  Expr DIVIDE Expr .    -> reduction (r6) Expr
+[DEBUG racc::lr0]     reduction: (r6) Expr : Expr DIVIDE Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s16:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     item   26 :  IF Expr THEN Expr .    -> reduction (r8) Expr
+[DEBUG racc::lr0]     item   31 :  IF Expr THEN Expr . ELSE Expr
+[DEBUG racc::lr0]     reduction: (r8) Expr : IF Expr THEN Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: ELSE                 --> s17
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lr0] s17:   (accessing_symbol ELSE)
+[DEBUG racc::lr0]     item   32 :  IF Expr THEN Expr ELSE . Expr
+[DEBUG racc::lr0]     shift: LPAREN               --> s1
+[DEBUG racc::lr0]     shift: NUM                  --> s2
+[DEBUG racc::lr0]     shift: IF                   --> s3
+[DEBUG racc::lr0]     shift: Expr                 --> s18
+[DEBUG racc::lr0] s18:   (accessing_symbol Expr)
+[DEBUG racc::lr0]     item    7 :  Expr . PLUS Expr
+[DEBUG racc::lr0]     item   11 :  Expr . MINUS Expr
+[DEBUG racc::lr0]     item   15 :  Expr . DIVIDE Expr
+[DEBUG racc::lr0]     item   33 :  IF Expr THEN Expr ELSE Expr .    -> reduction (r9) Expr
+[DEBUG racc::lr0]     reduction: (r9) Expr : IF Expr THEN Expr ELSE Expr
+[DEBUG racc::lr0]     shift: PLUS                 --> s8
+[DEBUG racc::lr0]     shift: MINUS                --> s9
+[DEBUG racc::lr0]     shift: DIVIDE               --> s10
+[DEBUG racc::lalr] Running LALR phase
+[DEBUG racc::lalr] set_goto_map
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s  0 --> s  4
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s  1 --> s  5
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s  3 --> s  6
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s  8 --> s 13
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s  9 --> s 14
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s 10 --> s 15
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s 12 --> s 16
+[DEBUG racc::lalr] goto[   0]  Expr                 causes s 17 --> s 18
+[DEBUG racc::lr0] Nullable symbols:
+[DEBUG racc::lalr] initialize_F
+[DEBUG racc::lalr] initialize_F: Relation F, state transitions caused-by token:
+[DEBUG racc::lalr]        0 -->    4   caused by   __end                  
+[DEBUG racc::lalr]        0 -->    4   caused by   PLUS                   
+[DEBUG racc::lalr]        0 -->    4   caused by   MINUS                  
+[DEBUG racc::lalr]        0 -->    4   caused by   DIVIDE                 
+[DEBUG racc::lalr]        1 -->    5   caused by   PLUS                   
+[DEBUG racc::lalr]        1 -->    5   caused by   MINUS                  
+[DEBUG racc::lalr]        1 -->    5   caused by   RPAREN                 
+[DEBUG racc::lalr]        1 -->    5   caused by   DIVIDE                 
+[DEBUG racc::lalr]        3 -->    6   caused by   PLUS                   
+[DEBUG racc::lalr]        3 -->    6   caused by   MINUS                  
+[DEBUG racc::lalr]        3 -->    6   caused by   THEN                   
+[DEBUG racc::lalr]        3 -->    6   caused by   DIVIDE                 
+[DEBUG racc::lalr]        8 -->   13   caused by   PLUS                   
+[DEBUG racc::lalr]        8 -->   13   caused by   MINUS                  
+[DEBUG racc::lalr]        8 -->   13   caused by   DIVIDE                 
+[DEBUG racc::lalr]        9 -->   14   caused by   PLUS                   
+[DEBUG racc::lalr]        9 -->   14   caused by   MINUS                  
+[DEBUG racc::lalr]        9 -->   14   caused by   DIVIDE                 
+[DEBUG racc::lalr]       10 -->   15   caused by   PLUS                   
+[DEBUG racc::lalr]       10 -->   15   caused by   MINUS                  
+[DEBUG racc::lalr]       10 -->   15   caused by   DIVIDE                 
+[DEBUG racc::lalr]       12 -->   16   caused by   PLUS                   
+[DEBUG racc::lalr]       12 -->   16   caused by   MINUS                  
+[DEBUG racc::lalr]       12 -->   16   caused by   ELSE                   
+[DEBUG racc::lalr]       12 -->   16   caused by   DIVIDE                 
+[DEBUG racc::lalr]       17 -->   18   caused by   PLUS                   
+[DEBUG racc::lalr]       17 -->   18   caused by   MINUS                  
+[DEBUG racc::lalr]       17 -->   18   caused by   DIVIDE                 
+[DEBUG racc::lalr] build_relations:
+[WARN  racc::mkpar] 16 shift/reduce conflict(s)
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 2
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 3
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 4
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 5
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 6
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 7
+[DEBUG racc::mkpar]     selecting rule 3
+[DEBUG racc::mkpar]     selected default reduction 3
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     did not find any reductions
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 2
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 3
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 4
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 5
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 6
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 7
+[DEBUG racc::mkpar]     selecting rule 7
+[DEBUG racc::mkpar]     selected default reduction 7
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 4
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 5
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 6
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 8
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::mkpar]     found unsuppressed reduce
+[DEBUG racc::mkpar]     count --> 1
+[DEBUG racc::mkpar]     selecting rule 9
+[DEBUG racc::mkpar]     found unsuppressed shift, returning 0
+[DEBUG racc::output] goto_actions:
+[DEBUG racc::output::packing] pack_table: nentries=22
+will it parse?
+parsed ok
+test reader::test_foo ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

@@ -60,6 +60,9 @@ pub(crate) struct Grammar {
     /// Rule -> associativity
     pub rassoc: Vec<u8>,
 
+    /// The ideal spans to use when reporting errors for a rule.  (len = nrules)
+    pub rule_span: Vec<proc_macro2::Span>,
+
     /// The actions (code blocks) provided by the grammar author, if any.
     /// index = rule index
     /// len = nrules
@@ -69,7 +72,7 @@ pub(crate) struct Grammar {
     /// indices are same as rrhs
     pub rhs_binding: Vec<Option<Ident>>,
 
-    pub context_ty: syn::Type,
+    pub context_ty: Option<syn::Type>,
 }
 
 impl Grammar {
@@ -83,6 +86,11 @@ impl Grammar {
 
     pub fn start(&self) -> Symbol {
         Symbol(self.ntokens as i16)
+    }
+
+    /// The "top-level" variable.
+    pub fn top(&self) -> Symbol {
+        Symbol(self.ntokens as i16 + 1)
     }
 
     pub fn nitems(&self) -> usize {
@@ -166,13 +174,6 @@ impl Grammar {
 
     /// Gets the best `Span` for this rule. Ideally, this is the definition of the rule.
     pub fn rule_span(&self, rule: Rule) -> proc_macro2::Span {
-        let rhs = self.rule_rhs_syms(rule);
-        if let Some(rhs0) = rhs.get(0) {
-            self.name(rhs0.as_symbol()).span()
-        } else {
-            // This rule has no rhs symbols (is an empty production).
-            // Use the lhs symbol for the span.
-            self.name(self.rlhs(rule)).span()
-        }
+        self.rule_span[rule.index()]
     }
 }

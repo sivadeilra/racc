@@ -107,6 +107,10 @@ struct ReaderState {
     /// len = nrules
     rassoc: Vec<u8>,
 
+    /// The ideal span to use when reporting errors for a rule.
+    /// (len = nrules)
+    rule_span: Vec<Span>,
+
     /// The actions (code blocks) provided by the grammar author, if any.
     /// index = rule index
     /// len = nrules
@@ -128,11 +132,12 @@ impl ReaderState {
         self.lhs.len()
     }
 
-    pub fn new() -> ReaderState {
-        ReaderState {
+    pub fn new() -> Self {
+        Self {
             pitem: vec![NO_ITEM; PREDEFINED_ITEMS],
             lhs: vec![NO_ITEM; PREDEFINED_RULES],
             rule_blocks: vec![None; PREDEFINED_RULES],
+            rule_span: vec![Span::call_site(); PREDEFINED_RULES],
             rhs_binding: vec![None; PREDEFINED_ITEMS],
             symbols: Vec::new(),
             symbol_table: HashMap::new(),
@@ -163,15 +168,20 @@ impl ReaderState {
         (index, &mut self.symbols[index])
     }
 
-    pub fn start_rule(&mut self, lhs: usize) {
+    pub fn start_rule(&mut self, lhs: usize, span: Span) {
+        assert_eq!(self.nrules(), self.rule_span.len(), "start of start_rule");
+
         assert!(self.symbols[lhs].class == SymClass::NonTerminal);
         self.lhs.push(lhs);
         self.rprec.push(UNDEFINED);
         self.rassoc.push(TOKEN);
+        self.rule_span.push(span);
+
+        assert_eq!(self.nrules(), self.rule_span.len(), "end of start_rule");
     }
 
     // Terminates the current rule.
-    pub fn end_rule(&mut self) {
+    pub fn end_rule(&mut self, _span: Span) {
         assert!(self.nrules() > 0);
         let rule = self.nrules() - 1;
 
@@ -204,6 +214,11 @@ impl ReaderState {
         self.rhs_binding.push(None);
 
         assert_eq!(self.rule_blocks.len(), self.nrules());
+        assert_eq!(
+            self.rule_span.len(),
+            self.nrules(),
+            "rule_span has wrong len, in end_rule"
+        );
     }
 
     /// Adds a new "empty" rule.  A new symbol name is generated, using the pattern "__gen_{}",
@@ -246,6 +261,7 @@ impl ReaderState {
         self.lhs.insert(rule, sym_index);
         self.rprec.insert(rule, 0);
         self.rassoc.insert(rule, TOKEN);
+        self.rule_span.insert(rule, span); // TODO: not sure about this
     }
 
     /// Adds a symbol to the RHS of the current rule being built.
@@ -269,7 +285,11 @@ impl ReaderState {
 
     /// "Packs" the symbol table and the grammar definition.  In the packed form, the
     /// tokens are numbered sequentially, and are followed by the non-terminals.
-    fn pack_symbols_and_grammar(self, goal_symbol: usize, context_ty: syn::Type) -> Grammar {
+    fn pack_symbols_and_grammar(
+        self,
+        goal_symbol: usize,
+        context_ty: Option<syn::Type>,
+    ) -> Grammar {
         debug!("pack_symbols");
 
         assert!(goal_symbol < self.symbols.len());
@@ -534,6 +554,15 @@ impl ReaderState {
         // Terminate the rrhs list
         rrhs.push(Item(j as i16));
 
+        assert_eq!(nrules, rlhs.len(), "blar");
+
+        assert_eq!(
+            nrules,
+            self.rule_span.len(),
+            "rule_span.len() is wrong, at end"
+        );
+        assert_eq!(nrules, self.rule_blocks.len());
+
         Grammar {
             nsyms,
             ntokens,
@@ -549,9 +578,10 @@ impl ReaderState {
             rrhs,
             rprec: gram_rprec,
             rassoc: gram_rassoc,
+            rule_span: self.rule_span,
             rhs_binding: self.rhs_binding,
             rule_blocks: self.rule_blocks,
-            context_ty: context_ty,
+            context_ty,
         }
     }
 
@@ -634,8 +664,12 @@ impl Errors {
 impl Parse for Grammar {
     fn parse(input: ParseStream<'_>) -> syn::Result<Grammar> {
         let mut reader: ReaderState = ReaderState::new();
+        assert_eq!(
+            reader.nrules(),
+            reader.rule_span.len(),
+            "at the very beginning"
+        );
         let mut context_ty: Option<Type> = None;
-        let mut value_ty: Option<Type> = None;
         let mut errors = Errors::default();
 
         // Add the well-known "error" symbol to the table.
@@ -648,6 +682,8 @@ impl Parse for Grammar {
 
         let mut goal_symbol: Option<usize> = None;
 
+        assert_eq!(reader.nrules(), reader.rule_span.len(), "at the beginning");
+
         while !input.is_empty() {
             let la = input.lookahead1();
             if la.peek(Token![type]) {
@@ -659,24 +695,17 @@ impl Parse for Grammar {
                 input.parse::<Token![;]>()?;
 
                 let keyword_string = keyword.to_string();
-                if keyword_string == "Value" {
-                    if value_ty.is_some() {
-                        return Err(syn::Error::new(
-                            keyword.span(),
-                            "The 'Value' type cannot be specified more than once.",
-                        ));
-                    }
-                    value_ty = Some(ty);
-                } else if keyword_string == "Context" {
+                if keyword_string == "Context" {
                     if context_ty.is_some() {
-                        return Err(syn::Error::new(
+                        errors.push(syn::Error::new(
                             keyword.span(),
                             "The 'Context' type cannot be specified more than once.",
                         ));
+                    } else {
+                        context_ty = Some(ty);
                     }
-                    context_ty = Some(ty);
                 } else {
-                    return Err(syn::Error::new(
+                    errors.push(syn::Error::new(
                         keyword.span(),
                         format!("The type '{}' is unrecognized.", keyword_string),
                     ));
@@ -710,7 +739,7 @@ impl Parse for Grammar {
                     input.parse::<syn::token::Colon>()?;
                     match reader.symbols[lhs].class {
                         SymClass::Terminal => {
-                            return Err(syn::Error::new(
+                            errors.push(syn::Error::new(
                                 name_def_span,
                                 "name has been defined as a token, and so cannot be on the \
                                  left-hand side of a rule",
@@ -741,7 +770,7 @@ impl Parse for Grammar {
                         *sym_rt = Some(rt);
                     }
 
-                    reader.start_rule(lhs);
+                    reader.start_rule(lhs, name_def_span);
 
                     if goal_symbol.is_none() {
                         debug!("using '{}' as start symbol", name_def_str);
@@ -775,9 +804,9 @@ impl Parse for Grammar {
                             }
                             reader.add_symbol(rhs, rhs_ident.span(), rbind);
                         } else if la.peek(syn::token::Or) {
-                            input.parse::<syn::token::Or>()?;
-                            reader.end_rule();
-                            reader.start_rule(lhs);
+                            let or_token = input.parse::<syn::token::Or>()?;
+                            reader.end_rule(name_def_span);
+                            reader.start_rule(lhs, or_token.span());
                         } else if la.peek(syn::token::Brace) {
                             let block: syn::Block = match input.parse::<syn::Block>() {
                                 Ok(block) => block,
@@ -795,7 +824,7 @@ impl Parse for Grammar {
                             reader.last_was_action = true;
                         } else if la.peek(Token![;]) {
                             input.parse::<Token![;]>()?;
-                            reader.end_rule();
+                            reader.end_rule(name_def_span);
                             break;
                         } else if la.peek(syn::LitChar) {
                             let char_token = input.parse::<syn::LitChar>()?;
@@ -977,17 +1006,6 @@ impl Parse for Grammar {
                 ));
             }
         }
-
-        let context_ty = context_ty.ok_or_else(|| {
-            syn::Error::new(
-                Span::call_site(),
-                "The grammar did not specify the 'Context' type. \
-                Please add 'type Context = <your type>;' to the grammar. \
-                This type stores 'global' data across all rules, and is accessible within rules \
-                as 'context'. \
-                Note that `()` is a valid type, if context is not needed. ",
-            )
-        })?;
 
         let gram = reader.pack_symbols_and_grammar(goal_symbol, context_ty);
         ReaderState::print_grammar(&gram);

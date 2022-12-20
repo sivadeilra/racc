@@ -231,12 +231,14 @@
 #![allow(clippy::cognitive_complexity)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::needless_range_loop)]
+#![allow(unused_imports)]
 
 mod grammar;
 mod lalr;
 mod lr0;
 mod mkpar;
 mod output;
+mod packing;
 mod reader;
 mod tvec;
 mod util;
@@ -246,6 +248,7 @@ mod warshall;
 use grammar::Grammar;
 use log::debug;
 use proc_macro2::Span;
+use proc_macro2::TokenTree;
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::Ident;

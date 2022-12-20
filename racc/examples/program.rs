@@ -1,7 +1,3 @@
-pub trait GrammarToken {
-    fn token_value(&self) -> usize;
-}
-
 #[derive(Debug)]
 pub enum Def {
     Expr(i32),
@@ -22,9 +18,6 @@ pub struct Program {
 use Token::*;
 
 racc::racc_grammar! {
-    type Context = ();
-    // type Value = Option<i16>;
-
     enum Token {
         PLUS,
         MINUS,
@@ -116,13 +109,13 @@ racc::racc_grammar! {
     | Let=e { e }
     ;
 
-    Let -> i32 : LET IDENT=id EQ Expr=e
+    Let -> i32 : LET IDENT=_id EQ Expr=e
     // TODO: this is broken
     /*{
         println!("setting e = {:?}", e);
         e
     }*/
-     IN Expr=f {
+     IN Expr=_f {
         println!("popping {:?}", e);
         0
     };
@@ -179,15 +172,6 @@ fn basic_test() {
         RBRACE,
     ];
 
-    let result = Parser::parse(toks.into_iter(), &mut ()).expect("parsing should succeed");
-    match result {
-        VarValue::Program(program) => {
-            println!("{:#?}", program);
-            // assert_eq!(result, Ok(VarValue::Expr(33)));
-        }
-
-        unrecognized => {
-            panic!("parse returned unexpected value: {:?}", unrecognized);
-        }
-    }
+    let program: Program = Parser::parse(toks.into_iter()).expect("parsing should succeed");
+    println!("{:#?}", program);
 }
