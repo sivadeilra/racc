@@ -39,6 +39,7 @@ racc::racc_grammar! {
         SEMI, // the semicolon
         LBRACE,
         RBRACE,
+        COMMENT,
     }
 
     Program -> Program
@@ -56,13 +57,19 @@ racc::racc_grammar! {
         }
     ;
 
+    CommentList
+        : // null
+        | Comment
+        | CommentList Comment
+        ;
+
     DefList -> Vec<Def>
         : DefList=list Def=item {
             list.push(item);
             list
         }
 
-        | Def=d {
+        | CommentList Def=d {
             println!("DefList: from single def");
             vec![d]
         }
@@ -127,6 +134,7 @@ racc::racc_grammar! {
         }
     };
 
+    Comment : COMMENT;
 }
 
 #[cfg(nope)]
@@ -174,4 +182,8 @@ fn basic_test() {
 
     let program: Program = Parser::parse(toks.into_iter()).expect("parsing should succeed");
     println!("{:#?}", program);
+
+    use core::mem::size_of;
+    println!("size_of Token = {}", size_of::<Token>());
+    println!("size_of VarValue = {}", size_of::<VarValue>());
 }
