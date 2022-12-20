@@ -363,12 +363,12 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
         fn yyreduce(&mut self, reduction: u16, #context_param)
             -> Result<(), racc_runtime::Error>
         {
-            // racc_log!(
-            //     "yyreduce: reducing: r{} (lhs {}) {}",
-            //     reduction + 2,
-            //     YYLHS[reduction as usize],
-            //     YYRULES[reduction as usize]
-            // );
+            racc_log!(
+                "yyreduce: reducing: r{} (lhs {}) {}",
+                reduction + 2,
+                YYLHS[reduction as usize],
+                YYRULES[reduction as usize]
+            );
 
             if self.accepted {
                 racc_log!("yyreduce: cannot push more tokens after EOF has been accepted");
@@ -552,7 +552,7 @@ fn output_push_token(
     context_param: &TokenStream,
     context_arg: &TokenStream,
 ) -> TokenStream {
-    let push_token_stmt = if needs_token_stack {
+    let shift_token_stmt = if needs_token_stack {
         if any_token_no_value {
             // At least one token does not have a value. This means that we need to insert a
             // dynamic check for whether the token has a value or not.
@@ -595,7 +595,7 @@ fn output_push_token(
                 "------------- push_token: reading {} ({}) lval {:?} -------------",
                 token_num, YYNAME[token_num as usize], token
             );
-            // racc_log!("state: s{} {}", self.yystate, YYSTATE_TEXT[self.yystate as usize]);
+
             racc_log!("states: {:?} {}", self.state_stack, self.yystate);
             racc_log!("values: {:?}", self.value_stack);
             racc_log!("tokens: {:?}", self.token_stack);
@@ -625,7 +625,7 @@ fn output_push_token(
                             racc_log!("states: {:?} {}", self.state_stack, self.yystate);
 
                             // Token is moved by the statement following this.
-                            #push_token_stmt
+                            #shift_token_stmt
 
                             self.do_default_reductions(#context_arg)?;
                             break;
@@ -638,7 +638,6 @@ fn output_push_token(
 
                 while self.try_reduce(#context_arg token_num)? {
                     any_reduce = true;
-                    self.do_default_reductions(#context_arg)?;
                 }
 
                 if !any_reduce {
@@ -682,6 +681,15 @@ fn output_gen_methods(
         &context_arg,
     ));
 
+    // Determine the return type for the finish() and parse() methods.
+    let top_sym = gram.top();
+    let return_ty: Option<&syn::Type> = gram.sym_type[top_sym.index()].as_ref();
+    let return_ty_tokens = if let Some(rt) = return_ty {
+        rt.to_token_stream()
+    } else {
+        quote!(())
+    };
+
     parser_methods.extend(output_finish(
         gram,
         &context_param,
@@ -689,10 +697,15 @@ fn output_gen_methods(
         needs_token_stack,
     ));
 
+    parser_methods.extend(output_parse(
+        &context_param,
+        &context_arg,
+        &return_ty_tokens,
+    ));
+
     parser_methods.extend(output_yyreduce(gram, &context_param));
 
     quote! {
-
         use racc_runtime::racc_log;
 
         /// An active instance of a parser.  This structure contains the state of a parsing state
@@ -742,10 +755,8 @@ fn output_gen_methods(
             pub fn reset(&mut self) {
                 self.yystate = INITIAL_STATE;
                 self.value_stack.clear();
-                // self.token_stack.clear();
                 self.token_stack = Default::default();
                 self.state_stack.clear();
-                // self.state_stack.push(INITIAL_STATE);
                 self.accepted = false;
             }
 
@@ -785,6 +796,9 @@ fn output_gen_methods(
 
                 let rr = YYTABLE[yyn as usize] as u16;
                 self.yyreduce(rr, #context_arg)?;
+
+                self.do_default_reductions(#context_arg)?;
+
                 Ok(true)
             }
 
@@ -810,7 +824,7 @@ fn output_finish(
 
         // Drive reductions using the special 0 token, which is the EOF ($end) token.
         while self.try_reduce(#context_arg 0)? {
-            self.do_default_reductions(#context_arg)?;
+            // nothing, just keep going
         }
 
         racc_log!("values: {:?}", self.value_stack);
@@ -856,7 +870,7 @@ fn output_finish(
         });
     }
 
-    let finish = verify_parse::<syn::ImplItemMethod>(quote! {
+    verify_parse::<syn::ImplItemMethod>(quote! {
         /// Pushes the final "end of input" token into the state machine, and checks whether the
         /// grammar has accepted or rejected the sequence of tokens.
         ///
@@ -865,9 +879,15 @@ fn output_finish(
         pub fn finish(&mut self, #context_param) -> Result<#return_ty, racc_runtime::Error> {
             #stmts
         }
-    });
+    })
+}
 
-    let parse = verify_parse::<syn::ImplItemMethod>(quote! {
+fn output_parse(
+    context_param: &TokenStream,
+    context_arg: &TokenStream,
+    return_ty: &TokenStream,
+) -> TokenStream {
+    verify_parse::<syn::ImplItemMethod>(quote! {
         /// Parses an input stream of tokens and returns the result value.
         ///
         /// This provides an interface that is similar to the `yyparse()` function generated by
@@ -886,12 +906,7 @@ fn output_finish(
 
             parser.finish(#context_arg)
         }
-    });
-
-    quote! {
-        #finish
-        #parse
-    }
+    })
 }
 
 // Generates the YYLHS table.

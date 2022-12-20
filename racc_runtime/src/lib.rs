@@ -15,5 +15,6 @@ macro_rules! racc_log {
     (
         $($t:tt)*
     ) => {
+        ::log::debug!( $($t)* )
     }
 }

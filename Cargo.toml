@@ -7,3 +7,6 @@ members = [
 
 [profile.release]
 debug = 2
+
+[workspace.dependencies]
+static_init = "1.0.3"
