@@ -30,6 +30,7 @@
 //! are quite different syntactically, the algorithms and (at a certain level of
 //! abstraction) the data structures are quite similar.
 //!
+use super::*;
 use crate::grammar::Grammar;
 use crate::grammar::{TOKEN, UNDEFINED};
 use crate::Rule;
@@ -40,7 +41,6 @@ use log::warn;
 use proc_macro2::Span;
 use std::collections::HashMap;
 use std::rc::Rc;
-use syn::parse::{Parse, ParseStream};
 use syn::parse_quote;
 use syn::spanned::Spanned;
 use syn::{Ident, Token, Type};
@@ -639,16 +639,16 @@ impl ReaderState {
 }
 
 #[derive(Default)]
-struct Errors {
-    errors: Vec<syn::Error>,
+pub(crate) struct Errors {
+    pub(crate) errors: Vec<syn::Error>,
 }
 
 impl Errors {
-    fn push(&mut self, e: syn::Error) {
+    pub(crate) fn push(&mut self, e: syn::Error) {
         self.errors.push(e);
     }
 
-    fn into_result(self) -> Result<(), syn::Error> {
+    pub(crate) fn into_result(self) -> Result<(), syn::Error> {
         let mut iter = self.errors.into_iter();
         if let Some(mut errors) = iter.next() {
             for e in iter {
@@ -659,16 +659,23 @@ impl Errors {
             Ok(())
         }
     }
+
+    pub(crate) fn into_token_stream(self) -> TokenStream {
+        if self.errors.is_empty() {
+            return TokenStream::new();
+        }
+
+        let mut t = TokenStream::new();
+        for e in self.errors.into_iter() {
+            t.extend(e.into_compile_error().into_token_stream());
+        }
+        t
+    }
 }
 
 impl Parse for Grammar {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Grammar> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut reader: ReaderState = ReaderState::new();
-        assert_eq!(
-            reader.nrules(),
-            reader.rule_span.len(),
-            "at the very beginning"
-        );
         let mut context_ty: Option<Type> = None;
         let mut errors = Errors::default();
 
@@ -678,11 +685,7 @@ impl Parse for Grammar {
             s.class = SymClass::Terminal;
         }
 
-        // first, parse all tokens.
-
         let mut goal_symbol: Option<usize> = None;
-
-        assert_eq!(reader.nrules(), reader.rule_span.len(), "at the beginning");
 
         while !input.is_empty() {
             let la = input.lookahead1();
@@ -724,7 +727,6 @@ impl Parse for Grammar {
 
                 let mut la = input.lookahead1();
 
-                //
                 let mut var_return_type: Option<syn::Type> = None;
                 if la.peek(Token![->]) {
                     input.parse::<Token![->]>().unwrap();
@@ -792,6 +794,8 @@ impl Parse for Grammar {
                             let rhs_ident = input.parse::<Ident>()?;
                             let rhs = reader.lookup(&rhs_ident);
                             let mut rbind: Option<Ident> = None;
+
+                            // TODO: Remove this, after converting all rhs bindings to use Foo(x).
                             if input.lookahead1().peek(syn::token::Eq) {
                                 input.parse::<syn::token::Eq>()?;
                                 let la = input.lookahead1();
@@ -802,6 +806,42 @@ impl Parse for Grammar {
                                     return Err(la.error());
                                 }
                             }
+
+                            // Check to see whether there is a name binding specified after this
+                            // variable, using Foo(x) syntax (a tuple pattern after the symbol).
+                            if input.lookahead1().peek(syn::token::Paren) {
+                                let pat = input.parse::<syn::Pat>()?;
+                                // println!("parsed pat");
+                                match &pat {
+                                    syn::Pat::Tuple(tuple) => {
+                                        // println!("it's a tuple, len = {}", tuple.elems.len());
+                                        if tuple.elems.len() == 1 {
+                                            match &tuple.elems[0] {
+                                                syn::Pat::Ident(pat_ident) => {
+                                                    // println!("pat_ident = {}", pat_ident.ident);
+                                                    rbind = Some(pat_ident.ident.clone());
+                                                }
+                                                _ => {
+                                                    errors.push(syn::Error::new(pat.span(),
+                                                    "the pattern must specify exactly one name binding"));
+                                                }
+                                            }
+                                        } else {
+                                            errors.push(syn::Error::new(
+                                                pat.span(),
+                                                "the pattern must specify exactly one name binding",
+                                            ));
+                                        }
+                                    }
+                                    _ => {
+                                        errors.push(syn::Error::new(
+                                            pat.span(),
+                                            "the pattern must be a tuple pattern, i.e. `(foo)`",
+                                        ));
+                                    }
+                                }
+                            }
+
                             reader.add_symbol(rhs, rhs_ident.span(), rbind);
                         } else if la.peek(syn::token::Or) {
                             let or_token = input.parse::<syn::token::Or>()?;
@@ -812,7 +852,7 @@ impl Parse for Grammar {
                                 Ok(block) => block,
                                 Err(e) => {
                                     errors.push(e);
-                                    parse_quote!({})
+                                    parse_quote!({ panic!() })
                                 }
                             };
 
@@ -827,20 +867,14 @@ impl Parse for Grammar {
                             reader.end_rule(name_def_span);
                             break;
                         } else if la.peek(syn::LitChar) {
+                            // Matching character tokens is not fully implemented.
                             let char_token = input.parse::<syn::LitChar>()?;
-                            // This is similar to la.peek(Ident).
                             let ch = char_token.value();
-                            let _s = ch.to_string();
-                            // It is never legal for this literal character to be followed by '=',
-                            // because that is used only for binding non-terminals.
-                            if input.lookahead1().peek(syn::token::Eq) {
-                                errors.push(syn::Error::new(
-                                    input.span(),
-                                    "you can't use = after a literal character",
-                                ));
-                            }
-
-                            // todo: finish implementing!
+                            log::debug!("char_token: {:?}", ch);
+                            errors.push(syn::Error::new(
+                                char_token.span(),
+                                "character tokens are not implemented",
+                            ));
                         } else {
                             return Err(la.error());
                         }
@@ -922,7 +956,7 @@ impl Parse for Grammar {
                         let id = &var.ident;
                         // let name_def_str = id.to_string();
                         // let name_def_span = id.span();
-                        let lhs = reader.lookup(&id);
+                        let lhs = reader.lookup(id);
 
                         let sym = &mut reader.symbols[lhs];
                         match sym.class {

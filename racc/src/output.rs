@@ -5,8 +5,6 @@ use crate::mkpar::{ActionCode, YaccParser};
 use crate::util::fill_copy;
 use crate::{Rule, State, StateOrRule};
 use log::debug;
-use proc_macro2::{Span, TokenStream};
-use quote::{quote, quote_spanned};
 use std::cmp;
 use std::iter::repeat;
 use syn::{Ident, Type};
@@ -145,7 +143,11 @@ pub(crate) fn output_parser_to_token_stream(
     items
 }
 
-fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
+fn output_yyreduce(
+    gram: &Grammar,
+    context_param: &TokenStream,
+    context_arg: &TokenStream,
+) -> TokenStream {
     // Build up actions for reductions. Each action handles popping token values and variable
     // values off the corresponding stacks (token_stack and value_stack), executing "action" code
     // that was provided in the grammar definition, and then pushing the resulting value onto
@@ -155,12 +157,17 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
     // and variables that do not have a value, we don't need to push or pop anything, because all
     // of the information that we need is encoded in the state number.
 
+    let mut all_action_funcs = TokenStream::new();
+
     let mut action_arms: TokenStream = TokenStream::new();
     for (rule_i, block) in gram.rule_blocks.iter().enumerate() {
         if rule_i < 3 {
             continue;
         }
         let rule = Rule(rule_i as i16);
+
+        // This is the value used in the match statement. It uses the +2 bias.
+        let pat_value: u16 = rule_i as u16 - 2;
 
         let mut stmts0 = TokenStream::new();
         let mut stmts1 = TokenStream::new();
@@ -194,13 +201,16 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
         let mut num_value_stack_pop: usize = 0;
         let mut num_token_stack_pop: usize = 0;
 
+        let mut action_func_params = TokenStream::new();
+        let mut action_func_call_args = TokenStream::new();
+
         for (rhs_sym_or_rule, rhs_binding) in rhs_syms.iter().rev().zip(rhs_bindings.iter().rev()) {
             assert!(rhs_sym_or_rule.is_symbol());
             let rhs_sym = rhs_sym_or_rule.as_symbol();
             let rhs_ident = gram.name(rhs_sym);
             let rhs_sym_ty_opt = gram.sym_type[rhs_sym.index()].as_ref();
 
-            stmts1.extend(if let Some(rbind) = rhs_binding {
+            if let Some(rbind) = rhs_binding {
                 if let Some(rhs_sym_ty) = rhs_sym_ty_opt {
                     // Is the symbol a token or a value produced by a rule?
                     if gram.is_var(rhs_sym) {
@@ -209,38 +219,42 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
                         // the grammar tables are correctly constructed, this should
                         // always be true.
                         num_value_stack_pop += 1;
-                        quote_spanned! {
+                        stmts1.extend(quote_spanned! {
                             rule_span =>
-                            let mut #rbind: #rhs_sym_ty = match self.value_stack.pop().unwrap() {
+                            let #rbind: #rhs_sym_ty = match self.value_stack.pop().unwrap() {
                                 VarValue::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_value_in_values_stack(unrecognized),
                             };
-                        }
+                        });
                     } else {
                         // The rhs symbol is a token. Verify that we were given the
                         // right kind of token.
                         num_token_stack_pop += 1;
-                        quote_spanned! {
+                        stmts1.extend(quote_spanned! {
                             rule_span =>
-                            let mut #rbind: #rhs_sym_ty = match self.token_stack.pop().unwrap() {
+                            let #rbind: #rhs_sym_ty = match self.token_stack.pop().unwrap() {
                                 Token::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_token_in_token_stack(unrecognized),
                             };
-                        }
+                        });
                     }
+                    action_func_params.extend(quote!(mut #rbind: #rhs_sym_ty,));
+                    action_func_call_args.extend(quote!(#rbind,));
                 } else {
                     // This is not good. The grammar has a binding for this value, but the symbol
                     // that the value should come from does not have a type. This is a grammar
                     // definition error.
-                    syn::Error::new(
-                        rhs_binding.span(),
-                        format!(
-                            "the symbol '{}' does not have a type specified",
-                            gram.name[rhs_sym.index()]
-                        ),
-                    )
-                    .to_compile_error()
-                    .to_token_stream()
+                    stmts1.extend(
+                        syn::Error::new(
+                            rhs_binding.span(),
+                            format!(
+                                "the symbol '{}' does not have a type specified",
+                                gram.name[rhs_sym.index()]
+                            ),
+                        )
+                        .to_compile_error()
+                        .to_token_stream(),
+                    );
                 }
             } else {
                 // The rule has no binding for this value.  Pop it from the stack and
@@ -248,28 +262,26 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
                 if gram.is_var(rhs_sym) {
                     if rhs_sym_ty_opt.is_some() {
                         num_value_stack_pop += 1;
-                        quote_spanned! {
+                        stmts1.extend(quote_spanned! {
                             rule_span =>
                             let _ = self.value_stack.pop();
-                        }
+                        });
                     } else {
                         // This variable does not have a value.
-                        quote!()
                     }
                 } else {
                     if rhs_sym_ty_opt.is_some() {
                         num_token_stack_pop += 1;
-                        quote_spanned! {
+                        stmts1.extend(quote_spanned! {
                             rule_span =>
                             let _ = self.token_stack.pop();
-                        }
+                        });
                     } else {
                         // For tokens that do not have values, we never even push them on the stack,
                         // so there is no need to pop them.
-                        quote!()
                     }
                 }
-            })
+            }
         }
 
         // Now that we know how many items we pop from the value_stack and token_stack, we can
@@ -301,8 +313,20 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
             });
         }
 
-        stmts1.extend(match block {
+        // Insert the action code, supplied by the grammar.
+
+        match block {
             Some(block) => {
+                let block_span = block.span();
+
+                let rule_func_id =
+                    Ident::new(&format!("action_{}_{}", pat_value, lhs_ident), rule_span);
+                let action_return_ty = if let Some(t) = lhs_sym_type_opt {
+                    quote!(#t)
+                } else {
+                    quote!(())
+                };
+
                 // We need to pop items off the stack and associate them with variables from right
                 // to left. The bindings are listed in the order that they are declared in, from
                 // left to right. The values are stored in 'value_stack' in the same order, with
@@ -311,43 +335,54 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
                 // Unfortunately, the most natural way to remove things from a `Vec` is to use
                 // `pop()`, which will produce the values in reverse order. To account for this,
                 // we reverse the RHS items and use `pop()`. This gives us the order that we want.
-                let mut t = TokenStream::new();
-
-                if let Some(_sym_type) = lhs_sym_type_opt {
-                    t.extend(quote_spanned! {
+                if let Some(sym_type) = lhs_sym_type_opt {
+                    stmts1.extend(quote_spanned! {
                         rule_span =>
-                        self.value_stack.push(VarValue::#lhs_ident(#block));
+                        let rule_output: #sym_type = #rule_func_id(#context_arg #action_func_call_args)?;
+                        self.value_stack.push(VarValue::#lhs_ident(rule_output));
                     });
                 } else {
                     // This rule does not produce a value, so we do not push a value onto value_stack.
-                    t.extend(block.to_token_stream());
+                    stmts1.extend(quote_spanned! {
+                        rule_span =>
+                        #rule_func_id(#context_arg #action_func_call_args)?;
+                    });
                 }
 
-                t
+                all_action_funcs.extend(quote_spanned! {
+                    block_span =>
+                    #[inline(always)]
+                    #[allow(non_snake_case)]
+                    #[allow(unused_mut)]
+                    fn #rule_func_id(#context_param #action_func_params) -> Result<#action_return_ty, racc_runtime::Error> {
+                        Ok(#block)
+                    }
+                });
             }
+
             None => {
                 // This reduction does not have any code to execute.  We still need to remove values
                 // from the stack, but this has already been done, above. We do need to provide a
                 // value for this rule, though.
                 if lhs_sym_type_opt.is_some() {
+                    // TODO: We could implement a rule where if a rule returns a value, and has
+                    // exactly one RHS symbol that returns a value, and the rule has no block, then
+                    // we use the RHS value for the return value. That would simplify the common
+                    // scenario of: Expr : LITERAL=value { value }.
                     return syn::Error::new(
                         rule_span,
                         "the result of this rule is required to provide a value; provide a { ... } block which computes that value.",
                     )
                         .to_compile_error()
-                        .to_token_stream()
-                }
-
-                // This rule does not produce a value, so we do not push a value onto value_stack.
-                quote! {
-                    // racc_log!("yyreduce: this reduction did not produce a value");
+                        .to_token_stream();
+                } else {
+                    // This rule does not produce a value, so we do not push a value onto value_stack.
                 }
             }
-        });
+        }
 
-        let pat_value: u16 = rule_i as u16 - 2;
-
-        action_arms.extend(quote_spanned! { rule_span =>
+        action_arms.extend(quote_spanned! {
+            rule_span =>
             #pat_value => {
                 #stmts0
                 #stmts1
@@ -355,25 +390,22 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
         });
     }
 
-    quote! {
+    verify_parse::<syn::ImplItemMethod>(quote! {
         // Performs a reduction.
         #[allow(unused_braces)]
-        #[allow(unused_mut)]
         #[inline(never)]
+        // #[allow(clippy::let_unit_value)]
         fn yyreduce(&mut self, reduction: u16, #context_param)
             -> Result<(), racc_runtime::Error>
         {
+            #all_action_funcs
+
             racc_log!(
                 "yyreduce: reducing: r{} (lhs {}) {}",
                 reduction + 2,
                 YYLHS[reduction as usize],
                 YYRULES[reduction as usize]
             );
-
-            if self.accepted {
-                racc_log!("yyreduce: cannot push more tokens after EOF has been accepted");
-                return Err(racc_runtime::Error::SyntaxError);
-            }
 
             // Invoke the generated "reduce" method.  This method handles popping values from
             // parser.values_stack, and then executing the app-supplied code for this reduction.
@@ -402,6 +434,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
                     racc_log!("yyreduce: popped state: s{}", s);
                     s
                 } else {
+                    // TODO: Is this right?
                     racc_log!("yyreduce: stack is empty, using s0");
                     0
                 };
@@ -414,11 +447,10 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
             let lhs = YYLHS[reduction as usize];
             if self.yystate == 0 && lhs == 0 {
                 racc_log!(
-                    "yyreduce: after reduction, shifting to state {} (0/0 case). setting accepted = true.",
+                    "yyreduce: after reduction, shifting to state {} (0/0 case). setting yystate = FINAL.",
                     YYFINAL
                 );
                 self.yystate = YYFINAL;
-                self.accepted = true;
             } else {
                 let yyn_0 = YYGINDEX[lhs as usize];
 
@@ -447,8 +479,7 @@ fn output_yyreduce(gram: &Grammar, context_param: &TokenStream) -> TokenStream {
 
             Ok(())
         }
-
-    }
+    })
 }
 
 fn output_token_to_i16(gram: &Grammar) -> TokenStream {
@@ -543,9 +574,9 @@ fn output_token_has_value(gram: &Grammar) -> TokenStream {
     }
 }
 
-/// Generates the `push_token` method. The `push_token` function is the main driver for the parser
+/// Generates the `push` method. The `push` function is the main driver for the parser
 /// state machine.
-fn output_push_token(
+fn output_push(
     _gram: &Grammar,
     needs_token_stack: bool,
     any_token_no_value: bool,
@@ -584,7 +615,7 @@ fn output_push_token(
         ///
         /// Calling this method is the equivalent of returning a token (other than `YYEOF`)
         /// from a `yylex()` function in a YACC parser.
-        pub fn push_token(
+        pub fn push(
             &mut self,
             #context_param // no comma
             token: Token,
@@ -592,7 +623,7 @@ fn output_push_token(
             let token_num = token_to_i16(&token);
 
             racc_log!(
-                "------------- push_token: reading {} ({}) lval {:?} -------------",
+                "------------- push: reading {} ({}) lval {:?} -------------",
                 token_num, YYNAME[token_num as usize], token
             );
 
@@ -673,12 +704,12 @@ fn output_gen_methods(
     // Things that go inside the `impl Parser` block.
     let mut parser_methods = TokenStream::new();
 
-    parser_methods.extend(output_push_token(
+    parser_methods.extend(output_push(
         gram,
         needs_token_stack,
         any_token_no_value,
-        &context_param,
-        &context_arg,
+        context_param,
+        context_arg,
     ));
 
     // Determine the return type for the finish() and parse() methods.
@@ -692,37 +723,30 @@ fn output_gen_methods(
 
     parser_methods.extend(output_finish(
         gram,
-        &context_param,
-        &context_arg,
+        context_param,
+        context_arg,
         needs_token_stack,
     ));
 
-    parser_methods.extend(output_parse(
-        &context_param,
-        &context_arg,
-        &return_ty_tokens,
-    ));
+    parser_methods.extend(output_parse(context_param, context_arg, &return_ty_tokens));
 
-    parser_methods.extend(output_yyreduce(gram, &context_param));
+    parser_methods.extend(output_yyreduce(gram, context_param, context_arg));
 
     quote! {
         use racc_runtime::racc_log;
 
-        /// An active instance of a parser.  This structure contains the state of a parsing state
-        /// machine, including the state stack and the value stack.
+        /// Parses the grammar that you have defined.
         ///
-        /// To create an instance of `Parser`, use `Parser::new`.
-        struct Parser {
+        /// This structure contains the state of a parsing state machine, including the state stack
+        /// and the value stack. If your grammar returns values from rules, then this parser
+        /// may hold instances of those values.
+        pub struct Parser {
             yystate: u16,
             /// Contains (symbol, value), where symbol is either the token that gave us a value,
             /// or a variable that produced a value.
             value_stack: Vec<VarValue>,
             #token_stack_field // token_stack: Vec<Token>,
             state_stack: Vec<u16>,
-
-            /// Indicates that the input sequence has been accepted. This transitions from false
-            /// to true when the EOF token is pushed into the parser.
-            accepted: bool,
         }
 
         // The initial state for all parsers.
@@ -735,14 +759,13 @@ fn output_gen_methods(
                     value_stack: Vec::new(),
                     token_stack: Default::default(),
                     state_stack: Vec::with_capacity(20),
-                    accepted: false,
                 }
             }
         }
 
         impl Parser {
             /// Initializes a new `Parser`, given the parsing tables that were generated by the
-            /// `grammar!` macro.  Use the `push_token` and `finish` methods to advance the state of
+            /// `grammar!` macro.  Use the `push` and `finish` methods to advance the state of
             ///  the parser.  Use the `reset` method to reset the parser to its initial state.
             pub fn new() -> Self {
                 Self::default()
@@ -757,7 +780,6 @@ fn output_gen_methods(
                 self.value_stack.clear();
                 self.token_stack = Default::default();
                 self.state_stack.clear();
-                self.accepted = false;
             }
 
             // Do default reductions, as long as there are any default reductions.
@@ -830,8 +852,8 @@ fn output_finish(
         racc_log!("values: {:?}", self.value_stack);
         racc_log!("tokens: {:?}", self.token_stack);
 
-        if !self.accepted {
-            racc_log!("finish: there was no transition to 'accepted' state");
+        if self.yystate != YYFINAL {
+            racc_log!("finish: yystate is not YYFINAL ({}); state is not accepted", YYFINAL);
             return Err(racc_runtime::Error::SyntaxError);
         }
     };
@@ -894,14 +916,14 @@ fn output_parse(
         /// YACC. It handles creating a parser, pushing tokens into it, and getting the final
         /// value that was produced by the parser.
         #[allow(dead_code)]
-        pub fn parse<TI>(tokens: TI, #context_param) -> Result<#return_ty, racc_runtime::Error>
+        pub fn parse<I>(#context_param tokens: I) -> Result<#return_ty, racc_runtime::Error>
         where
-            TI: Iterator<Item = Token>
+            I: IntoIterator<Item = Token>
         {
             let mut parser = Self::default();
 
             for t in tokens {
-                parser.push_token(#context_arg t)?;
+                parser.push(#context_arg t)?;
             }
 
             parser.finish(#context_arg)

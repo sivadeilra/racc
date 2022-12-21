@@ -1,6 +1,4 @@
 racc::racc_grammar! {
-    type Context = ();
-
     enum Token {
         PLUS,
         MINUS,
@@ -183,6 +181,6 @@ use Token::*;
 fn basic_test() {
     let toks = vec![LPAREN, NUM(42), PLUS, NUM(24), RPAREN, DIVIDE, NUM(2)];
 
-    let result: i32 = Parser::parse(toks.into_iter(), &mut ()).expect("expected parsing to succeed");
+    let result: i32 = Parser::parse(toks).expect("expected parsing to succeed");
     assert_eq!(result, 33);
 }

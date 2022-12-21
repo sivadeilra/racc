@@ -64,12 +64,12 @@ racc::racc_grammar! {
         ;
 
     DefList -> Vec<Def>
-        : DefList=list Def=item {
+        : DefList(list) Def(item) {
             list.push(item);
             list
         }
 
-        | CommentList Def=d {
+        | CommentList Def(d) {
             println!("DefList: from single def");
             vec![d]
         }
@@ -81,32 +81,32 @@ racc::racc_grammar! {
         ;
 
 
-    Expr -> i32 : NUM=x {
+    Expr -> i32 : NUM(x) {
         println!("NUM={:?}", x);
         x
     }
-    | Expr=a PLUS Expr=b {
+    | Expr(a) PLUS Expr(b) {
         a + b
     }
-    | Expr=a MINUS Expr=b {
+    | Expr(a) MINUS Expr(b) {
         a - b
     }
-    | Expr=a DIVIDE Expr=b {
+    | Expr(a) DIVIDE Expr(b) {
         println!("{} / {}", a, b);
         if b == 0 {
             return Err(racc_runtime::Error::AppError);
         }
         a / b
     }
-    | LPAREN Expr=inner RPAREN { inner }
-    | IF Expr=predicate THEN Expr=true_value {
+    | LPAREN Expr(inner) RPAREN { inner }
+    | IF Expr(predicate) THEN Expr(true_value) {
         if predicate != 0 {
             true_value
         } else {
             0
         }
     }
-    | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+    | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
         if predicate != 0 {
             true_value
         } else {
@@ -116,18 +116,18 @@ racc::racc_grammar! {
     | Let=e { e }
     ;
 
-    Let -> i32 : LET IDENT=_id EQ Expr=e
+    Let -> i32 : LET IDENT(_id) EQ Expr(e)
     // TODO: this is broken
     /*{
         println!("setting e = {:?}", e);
         e
     }*/
-     IN Expr=_f {
+    IN Expr(_f) {
         println!("popping {:?}", e);
         0
     };
 
-    FuncDef -> FuncDef : FN IDENT=name LPAREN RPAREN LBRACE Expr=body RBRACE {
+    FuncDef -> FuncDef : FN IDENT(name) LPAREN RPAREN LBRACE Expr(body) RBRACE {
         FuncDef {
             name,
             body,

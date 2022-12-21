@@ -6,7 +6,7 @@ racc::racc_grammar! {
         C(i32),
     }
 
-    Top : A B C {};
+    Top : A B C {println!("... wait, what?")};
 }
 
 use Token::*;
