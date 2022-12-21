@@ -5,8 +5,6 @@ use crate::Var;
 use crate::{Symbol, Token};
 use syn::Ident;
 
-pub const TOKEN: u8 = 0;
-
 // the undefined value
 pub const UNDEFINED: i16 = -1;
 
@@ -38,7 +36,7 @@ pub(crate) struct Grammar {
 
     // these two are managed differently
     pub prec: Vec<i16>,
-    pub assoc: Vec<u8>,
+    pub assoc: Vec<Assoc>,
 
     // the rules which describe the grammar
     pub nrules: usize,
@@ -58,7 +56,7 @@ pub(crate) struct Grammar {
     pub rprec: Vec<i16>,
 
     /// Rule -> associativity
-    pub rassoc: Vec<u8>,
+    pub rassoc: Vec<Assoc>,
 
     /// The ideal spans to use when reporting errors for a rule.  (len = nrules)
     pub rule_span: Vec<proc_macro2::Span>,
@@ -177,3 +175,17 @@ impl Grammar {
         self.rule_span[rule.index()]
     }
 }
+
+#[repr(u8)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub(crate) enum Assoc {
+    TOKEN = 0,
+    LEFT = 1,
+    RIGHT = 2,
+    // NONASSOC = 3,
+}
+
+// pub const TOKEN: u8 = 0;
+// pub(crate) const LEFT: u8 = 1;
+// pub(crate) const RIGHT: u8 = 2;
+

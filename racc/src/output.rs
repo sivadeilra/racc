@@ -161,9 +161,11 @@ fn output_yyreduce(
 
     let mut action_arms: TokenStream = TokenStream::new();
     for (rule_i, block) in gram.rule_blocks.iter().enumerate() {
+        // We process all rules defined by the grammar, but ignore the 3 predefined rules.
         if rule_i < 3 {
             continue;
         }
+
         let rule = Rule(rule_i as i16);
 
         // This is the value used in the match statement. It uses the +2 bias.
@@ -219,23 +221,35 @@ fn output_yyreduce(
                         // the grammar tables are correctly constructed, this should
                         // always be true.
                         num_value_stack_pop += 1;
+                        let log_msg = format!(
+                            "popped value {}({}) = {{:?}}",
+                            rhs_ident.to_string(),
+                            rbind.to_string()
+                        );
                         stmts1.extend(quote_spanned! {
                             rule_span =>
                             let #rbind: #rhs_sym_ty = match self.value_stack.pop().unwrap() {
                                 VarValue::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_value_in_values_stack(unrecognized),
                             };
+                            racc_log!(#log_msg, #rbind);
                         });
                     } else {
                         // The rhs symbol is a token. Verify that we were given the
                         // right kind of token.
                         num_token_stack_pop += 1;
+                        let log_msg = format!(
+                            "popped token {}({}) = {{:?}}",
+                            rhs_ident.to_string(),
+                            rbind.to_string()
+                        );
                         stmts1.extend(quote_spanned! {
                             rule_span =>
                             let #rbind: #rhs_sym_ty = match self.token_stack.pop().unwrap() {
                                 Token::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_token_in_token_stack(unrecognized),
                             };
+                            racc_log!(#log_msg, #rbind);
                         });
                     }
                     action_func_params.extend(quote!(mut #rbind: #rhs_sym_ty,));
@@ -262,9 +276,11 @@ fn output_yyreduce(
                 if gram.is_var(rhs_sym) {
                     if rhs_sym_ty_opt.is_some() {
                         num_value_stack_pop += 1;
+                        let log_msg = format!("popped value {}: {{:?}}", rhs_ident.to_string());
                         stmts1.extend(quote_spanned! {
                             rule_span =>
-                            let _ = self.value_stack.pop();
+                            let _unused_value = self.value_stack.pop();
+                            racc_log!(#log_msg, _unused_value);
                         });
                     } else {
                         // This variable does not have a value.
@@ -272,9 +288,11 @@ fn output_yyreduce(
                 } else {
                     if rhs_sym_ty_opt.is_some() {
                         num_token_stack_pop += 1;
+                        let log_msg = format!("popped token {}: {{:?}}", rhs_ident.to_string());
                         stmts1.extend(quote_spanned! {
                             rule_span =>
-                            let _ = self.token_stack.pop();
+                            let _unused_token = self.token_stack.pop();
+                            racc_log!(#log_msg, _unused_token);
                         });
                     } else {
                         // For tokens that do not have values, we never even push them on the stack,
@@ -313,14 +331,34 @@ fn output_yyreduce(
             });
         }
 
-        // Insert the action code, supplied by the grammar.
+        // Insert the action code, supplied by the grammar, if the grammar provided an action.
+        // We wrap the action in a separate function, even though that function will only be called
+        // once, so that action blocks can safely use "return".
+        //
+        // If we built a single function which directly contained all of the action blocks, then any
+        // action block that used "return" would silently break the state machine, because the work
+        // done after the action would be skipped. That work updates the state stack, token stack,
+        // etc., so the parser would be in a completely broken state if this code is skipped.
+        //
+        // The inliner folds the action functions into yyreduce(), so there is no perf cost.
 
         match block {
             Some(block) => {
                 let block_span = block.span();
 
-                let rule_func_id =
-                    Ident::new(&format!("action_{}_{}", pat_value, lhs_ident), rule_span);
+                // Make a name for the action function. It would suffice to use the action index
+                // but that makes debugging difficult, so we append the name of the LHS symbol.
+                // We also flatten it to lowercase, to meet Rust's naming convention requirements.
+                let rule_func_id = Ident::new(
+                    &format!(
+                        "action_{}_{}",
+                        pat_value,
+                        lhs_ident.to_string().to_ascii_lowercase()
+                    ),
+                    rule_span,
+                );
+
+                // Choose the return type for the action function. This will be wrapped in a Result.
                 let action_return_ty = if let Some(t) = lhs_sym_type_opt {
                     quote!(#t)
                 } else {
@@ -339,6 +377,7 @@ fn output_yyreduce(
                     stmts1.extend(quote_spanned! {
                         rule_span =>
                         let rule_output: #sym_type = #rule_func_id(#context_arg #action_func_call_args)?;
+                        racc_log!("action produced: {:?}", rule_output);
                         self.value_stack.push(VarValue::#lhs_ident(rule_output));
                     });
                 } else {
@@ -352,7 +391,6 @@ fn output_yyreduce(
                 all_action_funcs.extend(quote_spanned! {
                     block_span =>
                     #[inline(always)]
-                    #[allow(non_snake_case)]
                     #[allow(unused_mut)]
                     fn #rule_func_id(#context_param #action_func_params) -> Result<#action_return_ty, racc_runtime::Error> {
                         Ok(#block)
@@ -364,6 +402,7 @@ fn output_yyreduce(
                 // This reduction does not have any code to execute.  We still need to remove values
                 // from the stack, but this has already been done, above. We do need to provide a
                 // value for this rule, though.
+                // TODO: Move this code to the reader phase, and ignore it here.
                 if lhs_sym_type_opt.is_some() {
                     // TODO: We could implement a rule where if a rule returns a value, and has
                     // exactly one RHS symbol that returns a value, and the rule has no block, then
@@ -381,6 +420,11 @@ fn output_yyreduce(
             }
         }
 
+        // Now that the tokens/values have been popped, the action block (if any) has run, and the
+        // output value has been pushed, we need to update the state stack and yystate. In the
+        // original C code, this was driven by a table lookup. However, some of that information
+        // is easy to compute during parser generation.
+
         action_arms.extend(quote_spanned! {
             rule_span =>
             #pat_value => {
@@ -394,7 +438,6 @@ fn output_yyreduce(
         // Performs a reduction.
         #[allow(unused_braces)]
         #[inline(never)]
-        // #[allow(clippy::let_unit_value)]
         fn yyreduce(&mut self, reduction: u16, #context_param)
             -> Result<(), racc_runtime::Error>
         {
@@ -414,6 +457,12 @@ fn output_yyreduce(
             // let old_values_len = self.value_stack.len();
 
             match reduction {
+                0u16 => {
+                    // This is the rule for $accept : Goal EOF.
+                    // We never actually call yyreduce for this rule.
+                    unreachable!();
+                }
+
                 #action_arms
                 _ => unreachable!()
             }
@@ -458,16 +507,16 @@ fn output_yyreduce(
                     let yyn_1: i32 = yyn_0 as i32 + self.yystate as i32;
                     if yyn_1 >= 0 && YYCHECK[yyn_1 as usize] as u16 == self.yystate {
                         let s = YYTABLE[yyn_1 as usize] as u16;
-                        racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
+                        // racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
                         s
                     } else {
                         let s = YYDGOTO[lhs as usize] as u16;
-                        racc_log!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
+                        // racc_log!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
                         s
                     }
                 } else {
                     let s = YYDGOTO[lhs as usize] as u16;
-                    racc_log!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
+                    // racc_log!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
                     s
                 };
 

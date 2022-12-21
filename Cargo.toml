@@ -2,7 +2,6 @@
 members = [
     "racc",
     "racc_runtime",
-    "racc_orig",
 ]
 
 [profile.release]

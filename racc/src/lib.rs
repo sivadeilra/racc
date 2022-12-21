@@ -20,7 +20,7 @@ mod util;
 mod warshall;
 
 // use core::fmt::Write;
-use grammar::Grammar;
+use grammar::*;
 use log::debug;
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{quote, quote_spanned, ToTokens};

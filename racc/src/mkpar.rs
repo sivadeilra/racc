@@ -1,3 +1,4 @@
+use super::*;
 use crate::grammar::Grammar;
 use crate::lalr::LALROutput;
 use crate::lr0::LR0Output;
@@ -22,14 +23,11 @@ impl ActionCode {
     }
 }
 
-pub(crate) const LEFT: u8 = 1;
-pub(crate) const RIGHT: u8 = 2;
-
 pub(crate) struct ParserAction {
     pub symbol: Token,
     pub prec: i16,
     pub action_code: ActionCode,
-    pub assoc: u8,
+    pub assoc: Assoc,
     pub suppressed: u8,
 }
 
@@ -221,10 +219,10 @@ fn remove_conflicts_for_state(
                         pref = p;
                     } else if pref.prec > p.prec {
                         p.suppressed = 2;
-                    } else if pref.assoc == LEFT {
+                    } else if pref.assoc == Assoc::LEFT {
                         pref.suppressed = 2;
                         pref = p;
-                    } else if pref.assoc == RIGHT {
+                    } else if pref.assoc == Assoc::RIGHT {
                         p.suppressed = 2;
                     } else {
                         pref.suppressed = 2;

@@ -32,7 +32,7 @@
 //!
 use super::*;
 use crate::grammar::Grammar;
-use crate::grammar::{TOKEN, UNDEFINED};
+use crate::grammar::UNDEFINED;
 use crate::Rule;
 use crate::SymbolOrRule;
 use crate::{Item, Symbol};
@@ -64,7 +64,9 @@ struct SymbolDef {
     tag: Option<Rc<String>>,
     prec: i16,
     class: SymClass,
-    assoc: u8,
+    assoc: Assoc,
+    /// If Some, then this gives the span of where the assoc/prec was specified.
+    assoc_prec_specified: Option<Span>,
     value_type: Option<syn::Type>,
 }
 
@@ -74,7 +76,8 @@ fn make_symbol(name: Ident) -> SymbolDef {
         tag: None,
         prec: 0,
         class: SymClass::Unknown,
-        assoc: TOKEN,
+        assoc: Assoc::TOKEN,
+        assoc_prec_specified: None,
         value_type: None,
     }
 }
@@ -105,7 +108,7 @@ struct ReaderState {
 
     /// rule_associativity
     /// len = nrules
-    rassoc: Vec<u8>,
+    rassoc: Vec<Assoc>,
 
     /// The ideal span to use when reporting errors for a rule.
     /// (len = nrules)
@@ -144,7 +147,7 @@ impl ReaderState {
             gensym: 1,
             last_was_action: false,
             rprec: vec![0; PREDEFINED_RULES],
-            rassoc: vec![TOKEN; PREDEFINED_RULES],
+            rassoc: vec![Assoc::TOKEN; PREDEFINED_RULES],
         }
     }
 
@@ -174,7 +177,7 @@ impl ReaderState {
         assert!(self.symbols[lhs].class == SymClass::NonTerminal);
         self.lhs.push(lhs);
         self.rprec.push(UNDEFINED);
-        self.rassoc.push(TOKEN);
+        self.rassoc.push(Assoc::TOKEN);
         self.rule_span.push(span);
 
         assert_eq!(self.nrules(), self.rule_span.len(), "end of start_rule");
@@ -260,7 +263,7 @@ impl ReaderState {
         // written to self.{plhs,rprec,rassoc}[nrules].
         self.lhs.insert(rule, sym_index);
         self.rprec.insert(rule, 0);
-        self.rassoc.insert(rule, TOKEN);
+        self.rassoc.insert(rule, Assoc::TOKEN);
         self.rule_span.insert(rule, span); // TODO: not sure about this
     }
 
@@ -374,7 +377,7 @@ impl ReaderState {
         let mut gram_name: Vec<Ident> = Vec::with_capacity(nsyms);
         let mut gram_value: Vec<i16> = vec![0; nsyms];
         let mut gram_prec: Vec<i16> = Vec::with_capacity(nsyms);
-        let mut gram_assoc: Vec<u8> = Vec::with_capacity(nsyms);
+        let mut gram_assoc: Vec<Assoc> = Vec::with_capacity(nsyms);
         let mut gram_sym_type: Vec<Option<syn::Type>> = Vec::with_capacity(nsyms);
         let mut gram_rprec = self.rprec.clone();
         let mut gram_rassoc = self.rassoc.clone();
@@ -436,7 +439,7 @@ impl ReaderState {
         gram_sym_type.push(None);
         gram_value[0] = 0;
         gram_prec.push(0);
-        gram_assoc.push(TOKEN);
+        gram_assoc.push(Assoc::TOKEN);
 
         // Propagate token symbols
         for i in 1..ntokens {
@@ -454,7 +457,7 @@ impl ReaderState {
         gram_sym_type.push(None); // TODO: need to get this from the grammar
         gram_value[start_symbol] = -1;
         gram_prec.push(0);
-        gram_assoc.push(TOKEN);
+        gram_assoc.push(Assoc::TOKEN);
 
         // Propagate non-terminal symbols
         for i in start_symbol + 1..nsyms {
@@ -473,7 +476,7 @@ impl ReaderState {
         debug!("packed symbol table:");
         for i in 0..nsyms {
             debug!(
-                "    {:3} {} {:20} value {:3} prec {:2} assoc {:2}",
+                "    {:3} {} {:20} value {:3} prec {:2} assoc {:2?}",
                 i,
                 if i < ntokens { "token" } else { "var  " },
                 gram_name[i],
@@ -528,7 +531,7 @@ impl ReaderState {
         let symbols = &self.symbols;
         for i in PREDEFINED_RULES..nrules {
             rrhs.push(Item(j as i16));
-            let mut assoc = TOKEN;
+            let mut assoc = Assoc::TOKEN;
             let mut prec2: i16 = 0;
             while pitem[j] != NO_ITEM {
                 if symbols[pitem[j]].class == SymClass::Terminal {
@@ -686,6 +689,8 @@ impl Parse for Grammar {
         }
 
         let mut goal_symbol: Option<usize> = None;
+        let mut next_left_precedence: i16 = 0;
+        let mut next_right_precedence: i16 = 0;
 
         while !input.is_empty() {
             let la = input.lookahead1();
@@ -799,11 +804,14 @@ impl Parse for Grammar {
                             if input.lookahead1().peek(syn::token::Eq) {
                                 input.parse::<syn::token::Eq>()?;
 
-                                    let la = input.lookahead1();
+                                let la = input.lookahead1();
                                 if la.peek(Ident) {
                                     let rhs_bind_ident: Ident = input.parse()?;
 
-                                    errors.push(syn::Error::new(rhs_bind_ident.span(), "convert this to the new form"));
+                                    errors.push(syn::Error::new(
+                                        rhs_bind_ident.span(),
+                                        "convert this to the new form",
+                                    ));
 
                                     rbind = Some(rhs_bind_ident);
                                 } else {
@@ -939,12 +947,13 @@ impl Parse for Grammar {
             } else if la.peek(Token![enum]) {
                 let en_ty = input.parse::<syn::ItemEnum>()?;
 
-                generics_are_not_allowed_here(&mut errors, &en_ty.generics);
-
                 if en_ty.ident == "Token" {
+                    generics_are_not_allowed_here(&mut errors, &en_ty.generics);
                     attrs_are_not_allowed_here(&mut errors, &en_ty.attrs);
 
                     for var in en_ty.variants.iter() {
+                        // TODO: do something with assoc
+
                         if let Some(disc) = &var.discriminant {
                             errors.push(syn::Error::new(
                                 disc.1.span(),
@@ -1014,6 +1023,80 @@ impl Parse for Grammar {
                          The only allowed value is 'Token', which defines the set of tokens \
                          defined by your grammar.",
                     ));
+                }
+            } else if la.peek(Token![%]) {
+                // It's a directive, like %left and %right.
+                input.parse::<Token![%]>()?;
+
+                let la = input.lookahead1();
+                if la.peek(Ident) {
+                    let directive: Ident = input.parse::<Ident>()?;
+
+                    let assoc: Assoc;
+                    let precedence: i16;
+                    if directive == "left" {
+                        assoc = Assoc::LEFT;
+                        precedence = next_left_precedence;
+                        next_left_precedence += 1;
+                    } else if directive == "right" {
+                        assoc = Assoc::RIGHT;
+                        precedence = next_right_precedence;
+                        next_right_precedence += 1;
+                    } else {
+                        return Err(syn::Error::new(directive.span(), "unrecognized directive.  the only valid directives are `%left` and `%right`."));
+                    };
+
+                    // Consume identifiers, which are the names of tokens, until we reach ';'.
+                    loop {
+                        let la = input.lookahead1();
+                        if la.peek(Ident) {
+                            let token_ident: Ident = input.parse()?;
+                            println!("setting token associativity and precedence: {}: assoc {:?} prec {:?}", token_ident, precedence, assoc);
+
+                            // Look up the token. This implicitly creates a new token, if it has
+                            // not already been defined.
+                            let sym_index = reader.lookup(&token_ident);
+                            let sym = &mut reader.symbols[sym_index];
+
+                            match sym.class {
+                                SymClass::Unknown => {
+                                    errors.push(syn::Error::new(token_ident.span(),
+                                        "please define this token before declaring its associativity"));
+                                }
+                                SymClass::Terminal => {
+                                    if let Some(existing_span) = sym.assoc_prec_specified.as_ref() {
+                                        errors.push(syn::Error::new(
+                                            token_ident.span(),
+                                            "the associativity and precedence for this token has already been specified"
+                                        ));
+                                        errors.push(syn::Error::new(
+                                            existing_span.span(),
+                                            "location of conflicting definition",
+                                        ));
+                                    } else {
+                                        sym.assoc = assoc;
+                                        sym.prec = precedence;
+                                        sym.assoc_prec_specified = Some(token_ident.span());
+                                    }
+                                }
+                                SymClass::NonTerminal => {
+                                    errors.push(syn::Error::new(token_ident.span(),
+                                        "cannot set associativity for non-terminals, only for terminals (tokens)"
+                                    ));
+                                }
+                            }
+                        } else if la.peek(Token![;]) {
+                            input.parse::<Token![;]>()?;
+                            break;
+                        } else {
+                            return Err(syn::Error::new(
+                                input.span(),
+                                "expected only token identifiers and a `;` delimiter.",
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(la.error());
                 }
             } else {
                 // If we can't recognize the next token at all, then we cannot continue parsing
