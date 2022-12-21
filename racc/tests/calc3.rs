@@ -72,10 +72,7 @@ stat  :  expr
             }
       ;
 
-expr  :  '(' expr=a ')'
-            {
-                a
-            }
+    expr  :  '(' expr=a ')' { a }
       |  expr=a '+' expr=b { a + b }
       |  expr=a '-' expr=b { a - b }
       |  expr=a '*' expr=b { a * b }

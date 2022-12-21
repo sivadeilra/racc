@@ -1,4 +1,4 @@
-racc::racc_grammar! {
+racc::grammar! {
     enum Token {
         STRING(String),
         INT(i64),

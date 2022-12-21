@@ -141,7 +141,7 @@ impl Debug for SymbolOrRule {
 
 type StateOrRule = i16;
 
-fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+fn grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
     let gram: Grammar = syn::parse2::<Grammar>(tokens)?;
     let lr0 = lr0::compute_lr0(&gram);
     let lalr_out = lalr::run_lalr_phase(&gram, &lr0);
@@ -154,24 +154,23 @@ fn racc_grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::T
 }
 
 #[proc_macro]
-pub fn racc_grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let tokens2: proc_macro2::TokenStream = tokens.into();
 
-    match racc_grammar2(tokens2) {
+    match grammar2(tokens2) {
         Ok(result) => result.into(),
         Err(e) => e.into_compile_error().into(),
     }
 }
 
 #[proc_macro_attribute]
-pub fn racc_grammar_mod(
+pub fn grammar_mod(
     _attr: proc_macro::TokenStream,
     tokens: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     match syn::parse::<syn::Item>(tokens).unwrap() {
         syn::Item::Mod(input) => {
-            println!("successfully parsed input mod");
-            let output = do_racc_grammar_mod(input);
+            let output = do_grammar_mod(input);
             output.into()
         }
 
@@ -181,7 +180,7 @@ pub fn racc_grammar_mod(
     }
 }
 
-fn do_racc_grammar_mod(mut input: syn::ItemMod) -> TokenStream {
+fn do_grammar_mod(mut input: syn::ItemMod) -> TokenStream {
     let mut errors = Errors::default();
 
     let Some((_brace, content)) = input.content.as_mut() else {
@@ -206,7 +205,11 @@ fn do_racc_grammar_mod(mut input: syn::ItemMod) -> TokenStream {
             }
 
             unknown => {
-                println!("ignoring unrecognized item");
+                errors.push(syn::Error::new(
+                    unknown.span(),
+                    "unrecognized item. only rule! { ... }, enum Token { ... }, \
+                         and type Context = ...; are permitted",
+                ));
                 content.push(unknown);
             }
         }
@@ -214,6 +217,10 @@ fn do_racc_grammar_mod(mut input: syn::ItemMod) -> TokenStream {
 
     let mut output = input.into_token_stream();
     output.extend(errors.into_token_stream());
-    output
 
+    output.extend(quote! {
+        pub const FOO: u32 = 42;
+    });
+
+    output
 }

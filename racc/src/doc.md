@@ -19,7 +19,7 @@ In your code:
 
 ```rust
 
-racc::racc_grammar! {
+racc::grammar! {
     // This is the list of tokens defined for your grammar. The `Token` type defines the input
     // the generated parser.
     enum Token {
@@ -36,11 +36,11 @@ racc::racc_grammar! {
     // values for each symbol.  The values come from the value stack in the parser state machine.
     // When you call push_token(), you provide both the token code and the "value" for that token.
 
-    Expr -> i32 : NUM=x { x };
+    Expr -> i32 : NUM(x) { x };
 
-    Expr : LPAREN Expr=x RPAREN { x };
+    Expr : LPAREN Expr(x) RPAREN { x };
 
-    Expr : Expr=left PLUS Expr=right {
+    Expr : Expr(left) PLUS Expr(right) {
         // You can put arbitrary code here.
         println!("evaluating: {} + {}", left, right);
 
@@ -50,7 +50,7 @@ racc::racc_grammar! {
         left + right
     };
 
-    Expr : Expr=left MINUS Expr=right {
+    Expr : Expr(left) MINUS Expr(right) {
         println!("evaluating: {} - {}", left, right);
         left - right
     };
@@ -80,7 +80,7 @@ fn main() {
 
 ## Generating a parser
 
-The parser generator (the `racc::racc_grammar!` macro) analyzes your grammar definition and
+The parser generator (the `racc::grammar!` macro) analyzes your grammar definition and
 generates a parser for your grammar. The parser uses lookup tables and generated code. It also
 contains the "actions" that you define in your grammar. Actions are code blocks that you provide,
 which run when one of the rules defined in your grammar is matched (is "reduced").
@@ -145,7 +145,7 @@ For example:
 
 ```rust
 
-racc::racc_grammar! {
+racc::grammar! {
     type Context = MyContext;
 
     enum Token {
@@ -202,7 +202,7 @@ contains a literal numeric value.
 For example:
 
 ```rust
-racc::racc_grammar! {
+racc::grammar! {
     enum Token {
         LITERAL(f64),       // This specifies that LITERAL contains a value.
         PLUS,
@@ -212,10 +212,10 @@ racc::racc_grammar! {
     }
 
     // `Expr -> f64` specifies that `Expr` returns `f64`.
-    Expr -> f64 : LITERAL=lit { lit }
-         | Expr=a PLUS Expr=b { a + b }     // Expr=a and Expr=b specify bindings
-         | Expr=a MINUS Expr=b { a - b }
-         | LPAREN Expr=e RPAREN { e }
+    Expr -> f64 : LITERAL(lit) { lit }
+         | Expr(a) PLUS Expr(b) { a + b }     // Expr=a and Expr=b specify bindings
+         | Expr(a) MINUS Expr(b) { a - b }
+         | LPAREN Expr(e) RPAREN { e }
     ;
 }
 
@@ -228,7 +228,6 @@ let result: f64 = Parser::parse(
 ).unwrap();
 assert_eq!(result, 30.0);
 ```
-
 
 In this code, `Expr=left` means "match the symbol `Expr` and bind its value to the
 name `left` within the scope of the action," and similarly for `Expr=right`.

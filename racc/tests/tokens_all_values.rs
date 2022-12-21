@@ -1,4 +1,4 @@
-racc::racc_grammar! {
+racc::grammar! {
     enum Token {
         // All of these tokens carry any values
         A(i32),

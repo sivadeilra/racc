@@ -1,5 +1,6 @@
-/*
-#[racc::racc_grammar_mod]
+#![allow(dead_code)]
+
+#[racc::grammar_mod]
 mod grammar {
 
     #[derive(Clone, Debug)]
@@ -25,7 +26,7 @@ mod grammar {
     type Context = String;
 
     rules! {
-        Expr -> i32 : NUM=x {
+        Expr -> i32 : NUM(x) {
             println!("NUM={:?}", x);
             x
         }
@@ -70,35 +71,14 @@ mod grammar {
     }
 }
 
+/*
 use grammar::*;
 
 /*
-racc::racc_grammar! {
-
-}
 
 #[cfg(todo)]
 #[racc::racc_grammar_mod]
 mod parser {
-
-    enum Token {
-        PLUS,
-        MINUS,
-        LPAREN,
-        RPAREN,
-        NUM(i32),
-        IF,
-        ELSE,
-        COMMA,
-        THEN,
-        WHILE,
-        DO,
-        DIVIDE,
-        IDENT(String),
-        LET,
-        EQ,
-        IN,
-    }
 
     fn Expr() -> i32 {
         match .. {
@@ -203,4 +183,6 @@ fn basic_test() {
 }
 */
 
-fn main() {}
+fn main() {
+    println!("FOO = {}", FOO);
+}

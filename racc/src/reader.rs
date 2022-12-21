@@ -798,9 +798,13 @@ impl Parse for Grammar {
                             // TODO: Remove this, after converting all rhs bindings to use Foo(x).
                             if input.lookahead1().peek(syn::token::Eq) {
                                 input.parse::<syn::token::Eq>()?;
-                                let la = input.lookahead1();
+
+                                    let la = input.lookahead1();
                                 if la.peek(Ident) {
-                                    let rhs_bind_ident = input.parse()?;
+                                    let rhs_bind_ident: Ident = input.parse()?;
+
+                                    errors.push(syn::Error::new(rhs_bind_ident.span(), "convert this to the new form"));
+
                                     rbind = Some(rhs_bind_ident);
                                 } else {
                                     return Err(la.error());
@@ -1083,7 +1087,7 @@ fn test_foo() {
             }
         }
 
-        let r = crate::racc_grammar2(tokens);
+        let r = crate::grammar2(tokens);
         if let Ok(t) = &r {
             // will it parse?
             println!("will it parse?");

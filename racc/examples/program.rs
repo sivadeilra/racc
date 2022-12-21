@@ -17,7 +17,7 @@ pub struct Program {
 
 use Token::*;
 
-racc::racc_grammar! {
+racc::grammar! {
     enum Token {
         PLUS,
         MINUS,
@@ -43,16 +43,16 @@ racc::racc_grammar! {
     }
 
     Program -> Program
-        : DefList=defs {
+        : DefList(defs) {
             Program { defs }
         }
     ;
 
     Def -> Def
-        : Expr=e SEMI {
+        : Expr(e) SEMI {
             Def::Expr(e)
         }
-        | FuncDef=f {
+        | FuncDef(f) {
             Def::Func(f)
         }
     ;
@@ -113,7 +113,7 @@ racc::racc_grammar! {
             false_value
         }
     }
-    | Let=e { e }
+    | Let(e) { e }
     ;
 
     Let -> i32 : LET IDENT(_id) EQ Expr(e)

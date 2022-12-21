@@ -1,4 +1,4 @@
-racc::racc_grammar! {
+racc::grammar! {
     enum Token {
         PLUS,
         MINUS,
@@ -18,45 +18,45 @@ racc::racc_grammar! {
         IN,
     }
 
-    Expr -> i32 : NUM=x {
+    Expr -> i32 : NUM(x) {
         println!("NUM={:?}", x);
         x
     }
-    | Expr=a PLUS Expr=b {
+    | Expr(a) PLUS Expr(b) {
         a + b
     }
-    | Expr=a MINUS Expr=b {
+    | Expr(a) MINUS Expr(b) {
         a - b
     }
-    | Expr=a DIVIDE Expr=b {
+    | Expr(a) DIVIDE Expr(b) {
         println!("{} / {}", a, b);
         if b == 0 {
             return Err(racc_runtime::Error::AppError);
         }
         a / b
     }
-    | LPAREN Expr=inner RPAREN { inner }
-    | IF Expr=predicate THEN Expr=true_value {
+    | LPAREN Expr(inner) RPAREN { inner }
+    | IF Expr(predicate) THEN Expr(true_value) {
         if predicate != 0 {
             true_value
         } else {
             0
         }
     }
-    | IF Expr=predicate THEN Expr=true_value ELSE Expr=false_value {
+    | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
         if predicate != 0 {
             true_value
         } else {
             false_value
         }
     }
-    | Let=e { e }
+    | Let(e) { e }
     ;
 
-    Let -> i32 : LET IDENT=id EQ Expr=e /*{
+    Let -> i32 : LET IDENT(id) EQ Expr(e) /*{
         println!("setting e = {:?}", e);
         e
-    }*/ IN Expr=body {
+    }*/ IN Expr(body) {
         println!("popping: id: {:?}, e {:?}, body: {:?}", id, e, body);
         0
     };
