@@ -1,7 +1,5 @@
 use super::*;
-use crate::grammar::Grammar;
-use crate::lalr::GotoMap;
-use crate::mkpar::{ActionCode, YaccParser};
+use crate::lalr::LALROutput;
 use crate::util::fill_copy;
 use crate::{Rule, State, StateOrRule};
 use log::debug;
@@ -9,20 +7,19 @@ use std::cmp;
 use std::iter::repeat;
 use syn::{Ident, Type};
 
-/// Given a constructed parser (a description of a state machine which parses a given grammar),
-/// produces a TokenStream which implements the parser.
-pub(crate) fn output_parser_to_token_stream(
+pub(crate) fn output_parser(
     gram: &Grammar,
-    gotos: &GotoMap,
+    lr0: &LR0Output,
+    _lalr: &LALROutput,
+    default_reductions: &[Rule],
+    default_goto_table: &[State],
     parser: &YaccParser,
+    act: &ActionsTable,
+    packed: &PackedTables,
 ) -> TokenStream {
-    assert_eq!(gram.rule_blocks.len(), gram.nrules);
-
-    let grammar_span = Span::call_site();
+    let nstates = lr0.nstates();
 
     let mut items: TokenStream = TokenStream::new();
-
-    let default_reductions = crate::mkpar::default_reductions(&parser.actions);
 
     //  Generate YYDEFRED table.
     let yydefred: Vec<i16> = default_reductions
@@ -30,7 +27,7 @@ pub(crate) fn output_parser_to_token_stream(
         .map(|&s| if s != Rule(0) { s.0 - 2 } else { 0 })
         .collect();
     items.extend(make_table_i16(
-        Ident::new("YYDEFRED", grammar_span),
+        Ident::new("YYDEFRED", Span::call_site()),
         &yydefred,
     ));
 
@@ -45,12 +42,42 @@ pub(crate) fn output_parser_to_token_stream(
         context_arg = quote!();
     }
 
-    items.extend(output_actions(
-        grammar_span,
-        gram,
-        gotos,
-        parser,
-        &default_reductions,
+    // The YYDGOTO table contains a mapping from variables to states. However, the table does
+    // not include an entry for the 'start' symbol, so the length of YYDGOTO is `nvars - 1`, not
+    // `nvars`. See `goto_actions` in the C code. This is why we call skip(1), below.
+    let yydgoto_table: Vec<i16> = default_goto_table
+        .iter()
+        .skip(1)
+        .map(|s| s.0)
+        .collect::<Vec<i16>>();
+    items.extend(make_table_i16_signed(
+        Ident::new("YYDGOTO_UNUSED", Span::call_site()),
+        &yydgoto_table,
+    ));
+
+    items.extend(make_table_i16_signed(
+        Ident::new("YYSINDEX", Span::call_site()),
+        &packed.base[..nstates],
+    ));
+    items.extend(make_table_i16_signed(
+        Ident::new("YYRINDEX", Span::call_site()),
+        &packed.base[nstates..nstates * 2],
+    ));
+
+    let yygindex_table = &packed.base[nstates * 2..act.nvectors - 1];
+    if false {
+        items.extend(make_table_i16_signed(
+            Ident::new("YYGINDEX", Span::call_site()),
+            yygindex_table,
+        ));
+    }
+    items.extend(make_table_i16_signed(
+        Ident::new("YYTABLE", Span::call_site()),
+        &packed.table,
+    ));
+    items.extend(make_table_i16_signed(
+        Ident::new("YYCHECK", Span::call_site()),
+        &packed.check,
     ));
 
     // Scan the tokens to see whether none/some/all carry values.
@@ -111,21 +138,26 @@ pub(crate) fn output_parser_to_token_stream(
     items.extend(output_rule_data(gram));
 
     // Emit the YYLEN table.
-    items.extend(make_table_i16(
-        Ident::new("YYLEN", grammar_span),
-        &gram
-            .iter_rules()
-            .skip(2)
-            .map(|r| gram.rule_rhs_syms(r).len() as i16)
-            .collect::<Vec<i16>>(),
-    ));
+    if false {
+        // We no longer need this, but it might be good to emit this for diagnostics.
+        items.extend(make_table_i16(
+            Ident::new("YYLEN", Span::call_site()),
+            &gram
+                .iter_rules()
+                .skip(2)
+                .map(|r| gram.rule_rhs_syms(r).len() as i16)
+                .collect::<Vec<i16>>(),
+        ));
+    }
 
     // emit some tables just for debugging
-    items.extend(make_symbol_names_table(grammar_span, gram));
-    items.extend(make_rule_text_table(grammar_span, gram));
-    items.extend(make_states_text_table(grammar_span, gram, parser));
+    items.extend(make_symbol_names_table(Span::call_site(), gram));
+    items.extend(make_rule_text_table(Span::call_site(), gram));
+    items.extend(make_states_text_table(Span::call_site(), gram, parser));
     items.extend(output_gen_methods(
         gram,
+        yygindex_table,
+        &yydgoto_table,
         needs_token_stack,
         any_token_no_value,
         &context_param,
@@ -143,8 +175,23 @@ pub(crate) fn output_parser_to_token_stream(
     items
 }
 
+macro_rules! extend_stmt_parse_quote_spanned {
+    (
+        $block:expr,
+        $span:expr =>
+        $($t:tt)*
+    ) => {
+        {
+            let b: syn::Block = parse_quote_spanned!($span => { $($t)* });
+            $block.stmts.extend(b.stmts);
+        }
+    }
+}
+
 fn output_yyreduce(
     gram: &Grammar,
+    yygindex_table: &[i16],
+    yydgoto_table: &[i16],
     context_param: &TokenStream,
     context_arg: &TokenStream,
 ) -> TokenStream {
@@ -157,9 +204,18 @@ fn output_yyreduce(
     // and variables that do not have a value, we don't need to push or pop anything, because all
     // of the information that we need is encoded in the state number.
 
+    let mut reduction_match: syn::ExprMatch = parse_quote! {
+        match reduction {
+            0u16 => {
+                // This is the rule for $accept : Goal EOF.
+                // We never actually call yyreduce for this rule.
+                unreachable!();
+            }
+        }
+    };
+
     let mut all_action_funcs = TokenStream::new();
 
-    let mut action_arms: TokenStream = TokenStream::new();
     for (rule_i, block) in gram.rule_blocks.iter().enumerate() {
         // We process all rules defined by the grammar, but ignore the 3 predefined rules.
         if rule_i < 3 {
@@ -172,7 +228,7 @@ fn output_yyreduce(
         let pat_value: u16 = rule_i as u16 - 2;
 
         let mut stmts0 = TokenStream::new();
-        let mut stmts1 = TokenStream::new();
+        let mut stmts1: syn::Block = parse_quote! { { } };
 
         // Based on the rule we are reducing, get values from the value stack,
         // and bind them as a tuple named 'args'.
@@ -226,14 +282,14 @@ fn output_yyreduce(
                             rhs_ident.to_string(),
                             rbind.to_string()
                         );
-                        stmts1.extend(quote_spanned! {
-                            rule_span =>
+                        extend_stmt_parse_quote_spanned! {
+                            stmts1, rule_span =>
                             let #rbind: #rhs_sym_ty = match self.value_stack.pop().unwrap() {
                                 VarValue::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_value_in_values_stack(unrecognized),
                             };
                             racc_log!(#log_msg, #rbind);
-                        });
+                        }
                     } else {
                         // The rhs symbol is a token. Verify that we were given the
                         // right kind of token.
@@ -243,14 +299,15 @@ fn output_yyreduce(
                             rhs_ident.to_string(),
                             rbind.to_string()
                         );
-                        stmts1.extend(quote_spanned! {
+                        extend_stmt_parse_quote_spanned! {
+                            stmts1,
                             rule_span =>
                             let #rbind: #rhs_sym_ty = match self.token_stack.pop().unwrap() {
                                 Token::#rhs_ident(rhs_value) => rhs_value,
                                 unrecognized => error_invalid_token_in_token_stack(unrecognized),
                             };
                             racc_log!(#log_msg, #rbind);
-                        });
+                        }
                     }
                     action_func_params.extend(quote!(mut #rbind: #rhs_sym_ty,));
                     action_func_call_args.extend(quote!(#rbind,));
@@ -258,7 +315,8 @@ fn output_yyreduce(
                     // This is not good. The grammar has a binding for this value, but the symbol
                     // that the value should come from does not have a type. This is a grammar
                     // definition error.
-                    stmts1.extend(
+                    /*
+                    stmts1.stmts.push(
                         syn::Error::new(
                             rhs_binding.span(),
                             format!(
@@ -269,6 +327,11 @@ fn output_yyreduce(
                         .to_compile_error()
                         .to_token_stream(),
                     );
+                    */
+                    panic!(
+                        "symbol {} does not have a type specified",
+                        gram.name[rhs_sym.index()]
+                    );
                 }
             } else {
                 // The rule has no binding for this value.  Pop it from the stack and
@@ -277,9 +340,12 @@ fn output_yyreduce(
                     if rhs_sym_ty_opt.is_some() {
                         num_value_stack_pop += 1;
                         let log_msg = format!("popped value {}: {{:?}}", rhs_ident.to_string());
-                        stmts1.extend(quote_spanned! {
+                        stmts1.stmts.push(parse_quote_spanned! {
                             rule_span =>
                             let _unused_value = self.value_stack.pop();
+                        });
+                        stmts1.stmts.push(parse_quote_spanned! {
+                            rule_span =>
                             racc_log!(#log_msg, _unused_value);
                         });
                     } else {
@@ -289,9 +355,12 @@ fn output_yyreduce(
                     if rhs_sym_ty_opt.is_some() {
                         num_token_stack_pop += 1;
                         let log_msg = format!("popped token {}: {{:?}}", rhs_ident.to_string());
-                        stmts1.extend(quote_spanned! {
+                        stmts1.stmts.push(parse_quote_spanned! {
                             rule_span =>
                             let _unused_token = self.token_stack.pop();
+                        });
+                        stmts1.stmts.push(parse_quote_spanned! {
+                            rule_span =>
                             racc_log!(#log_msg, _unused_token);
                         });
                     } else {
@@ -374,18 +443,18 @@ fn output_yyreduce(
                 // `pop()`, which will produce the values in reverse order. To account for this,
                 // we reverse the RHS items and use `pop()`. This gives us the order that we want.
                 if let Some(sym_type) = lhs_sym_type_opt {
-                    stmts1.extend(quote_spanned! {
-                        rule_span =>
+                    extend_stmt_parse_quote_spanned! {
+                        stmts1, rule_span =>
                         let rule_output: #sym_type = #rule_func_id(#context_arg #action_func_call_args)?;
                         racc_log!("action produced: {:?}", rule_output);
                         self.value_stack.push(VarValue::#lhs_ident(rule_output));
-                    });
+                    };
                 } else {
                     // This rule does not produce a value, so we do not push a value onto value_stack.
-                    stmts1.extend(quote_spanned! {
-                        rule_span =>
+                    extend_stmt_parse_quote_spanned! {
+                        stmts1, rule_span =>
                         #rule_func_id(#context_arg #action_func_call_args)?;
-                    });
+                    };
                 }
 
                 all_action_funcs.extend(quote_spanned! {
@@ -425,7 +494,99 @@ fn output_yyreduce(
         // original C code, this was driven by a table lookup. However, some of that information
         // is easy to compute during parser generation.
 
-        action_arms.extend(quote_spanned! {
+        // Insert yylen, since we already know it.
+        // stmts1.extend(quote_spanned! {
+        //     rule_span =>
+        //     yylen = #num_rhs;
+        // });
+
+        // Update the state stack. We pop one state for every RHS symbol that we just reduced.
+        // It's slightly complicated by the fact that we do not store yystate on the top of the
+        // stack. So we special-case things with -1.
+        //
+        // Pop states. The number of states that we pop is equal to the number of symbols
+        // on the RHS of the current rule (which can be zero).  We treat yystate as one of
+        // the entries to be popped. This is why we pop `len - 1` items from the actual
+        // stack.  Then, if the stack is empty, we set the current state to zero (the
+        // initial state value).
+
+        if num_rhs > 0 {
+            let num_discard = num_rhs - 1;
+            if num_discard > 0 {
+                extend_stmt_parse_quote_spanned! {
+                    stmts1, rule_span =>
+                    // Discard yylen - 1 states from the state stack.
+                    self.state_stack.truncate(self.state_stack.len() - #num_discard);
+                };
+            }
+
+            extend_stmt_parse_quote_spanned! {
+                stmts1, rule_span =>
+                self.yystate = if let Some(s) = self.state_stack.pop() {
+                    racc_log!("yyreduce: popped state: s{}", s);
+                    s
+                } else {
+                    // TODO: Is this right?
+                    racc_log!("yyreduce: stack is empty, using s0");
+                    0
+                };
+            }
+        } else {
+            // This is an empty (epsilon) production. No need to adjust state_stack.
+        }
+
+        // yylhs is the symbol value, not our internal index for the symbol
+        let yylhs = gram.value[lhs.index()];
+
+        let yygindex = yygindex_table[yylhs as usize];
+        let yydgoto: u16 = yydgoto_table[yylhs as usize] as u16;
+
+        extend_stmt_parse_quote_spanned! {
+            stmts1,
+            rule_span =>
+
+            const YYLHS: i16 = #yylhs;
+            const YYGINDEX: i16 = #yygindex;
+            const YYDGOTO: u16 = #yydgoto;
+
+            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+
+            if self.yystate == 0 && YYLHS == 0 {
+                racc_log!(
+                    "yyreduce: after reduction, shifting to state {} (0/0 case). setting yystate = FINAL.",
+                    YYFINAL
+                );
+                self.yystate = YYFINAL;
+            } else {
+                let next_state: u16 = if YYGINDEX != 0 {
+                    let yyn_1: i32 = YYGINDEX as i32 + self.yystate as i32;
+                    if yyn_1 >= 0 && YYCHECK[yyn_1 as usize] as u16 == self.yystate {
+                        YYTABLE[yyn_1 as usize] as u16
+                        // racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, YYTABLE[yyn_1 as usize] as u16);
+                    } else {
+                        // let s = YYDGOTO[YYLHS as usize] as u16;
+                        // racc_log!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
+                        // s
+                        YYDGOTO
+                    }
+                } else {
+                    // let s = YYDGOTO[YYLHS as usize] as u16;
+                    // racc_log!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
+                    // s
+                    YYDGOTO
+                };
+
+                self.state_stack.push(self.yystate);
+                self.yystate = next_state;
+
+                racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            }
+        }
+
+        // We are done generating code for this rule. Add the code to the 'match' that we are
+        // building.
+
+        reduction_match.arms.push(parse_quote_spanned! {
             rule_span =>
             #pat_value => {
                 #stmts0
@@ -433,6 +594,11 @@ fn output_yyreduce(
             }
         });
     }
+
+    // Add the final unreachable!() to the reduction match statement.
+    reduction_match.arms.push(parse_quote! {
+        _ => unreachable!(),
+    });
 
     verify_parse::<syn::ImplItemMethod>(quote! {
         // Performs a reduction.
@@ -443,12 +609,7 @@ fn output_yyreduce(
         {
             #all_action_funcs
 
-            racc_log!(
-                "yyreduce: reducing: r{} (lhs {}) {}",
-                reduction + 2,
-                YYLHS[reduction as usize],
-                YYRULES[reduction as usize]
-            );
+            racc_log!("yyreduce: reducing: {}", YYRULES[reduction as usize]);
 
             // Invoke the generated "reduce" method.  This method handles popping values from
             // parser.values_stack, and then executing the app-supplied code for this reduction.
@@ -456,75 +617,7 @@ fn output_yyreduce(
             // necessary for us to consult a 'yylen' table here; that information is implicit.
             // let old_values_len = self.value_stack.len();
 
-            match reduction {
-                0u16 => {
-                    // This is the rule for $accept : Goal EOF.
-                    // We never actually call yyreduce for this rule.
-                    unreachable!();
-                }
-
-                #action_arms
-                _ => unreachable!()
-            }
-
-            // Pop states. The number of states that we pop is equal to the number of symbols
-            // on the RHS of the current rule (which can be zero).  We treat yystate as one of
-            // the entries to be popped. This is why we pop `len - 1` items from the actual
-            // stack.  Then, if the stack is empty, we set the current state to zero (the
-            // initial state value).
-            // TODO: Consider folding this into the per-reduction actions.
-            let len = YYLEN[reduction as usize] as usize;
-            if len > 0 {
-                for _ in 0..len - 1 {
-                    let discard_state = self.state_stack.pop().unwrap();
-                    racc_log!("yyreduce: popped state: s{} (discarded)", discard_state);
-                }
-                self.yystate = if let Some(s) = self.state_stack.pop() {
-                    racc_log!("yyreduce: popped state: s{}", s);
-                    s
-                } else {
-                    // TODO: Is this right?
-                    racc_log!("yyreduce: stack is empty, using s0");
-                    0
-                };
-            } else {
-                racc_log!("yyreduce: rule has no rhs symbols (epsilon rule)");
-            }
-
-            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
-
-            let lhs = YYLHS[reduction as usize];
-            if self.yystate == 0 && lhs == 0 {
-                racc_log!(
-                    "yyreduce: after reduction, shifting to state {} (0/0 case). setting yystate = FINAL.",
-                    YYFINAL
-                );
-                self.yystate = YYFINAL;
-            } else {
-                let yyn_0 = YYGINDEX[lhs as usize];
-
-                let next_state: u16 = if yyn_0 != 0 {
-                    let yyn_1: i32 = yyn_0 as i32 + self.yystate as i32;
-                    if yyn_1 >= 0 && YYCHECK[yyn_1 as usize] as u16 == self.yystate {
-                        let s = YYTABLE[yyn_1 as usize] as u16;
-                        // racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", yyn_1, s);
-                        s
-                    } else {
-                        let s = YYDGOTO[lhs as usize] as u16;
-                        // racc_log!("yyreduce: yycheck fails, yydgoto[{}] = s{}", lhs, s);
-                        s
-                    }
-                } else {
-                    let s = YYDGOTO[lhs as usize] as u16;
-                    // racc_log!("yyreduce: yygindex[] is zero, yydgoto[{}] = s{}", lhs, s);
-                    s
-                };
-
-                self.state_stack.push(self.yystate);
-                self.yystate = next_state;
-
-                racc_log!("states: {:?} {}", self.state_stack, self.yystate);
-            }
+            #reduction_match
 
             Ok(())
         }
@@ -739,6 +832,8 @@ fn output_push(
 
 fn output_gen_methods(
     gram: &Grammar,
+    yygindex_table: &[i16],
+    yydgoto_table: &[i16],
     needs_token_stack: bool,
     any_token_no_value: bool,
     context_param: &TokenStream,
@@ -779,7 +874,13 @@ fn output_gen_methods(
 
     parser_methods.extend(output_parse(context_param, context_arg, &return_ty_tokens));
 
-    parser_methods.extend(output_yyreduce(gram, context_param, context_arg));
+    parser_methods.extend(output_yyreduce(
+        gram,
+        yygindex_table,
+        yydgoto_table,
+        context_param,
+        context_arg,
+    ));
 
     quote! {
         use racc_runtime::racc_log;
@@ -1067,11 +1168,11 @@ fn make_states_text_table(span: Span, gram: &Grammar, parser: &YaccParser) -> To
     make_table_string(Ident::new("YYSTATE_TEXT", span), &ss)
 }
 
-fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
+pub fn make_table_i16(name: Ident, values: &[i16]) -> TokenStream {
     make_table_i16_as_u16(name, values)
 }
 
-fn make_table_i16_signed(name: Ident, values: &[i16]) -> TokenStream {
+pub fn make_table_i16_signed(name: Ident, values: &[i16]) -> TokenStream {
     let values_len = values.len();
     quote! {
         static #name: [i16; #values_len] = [
@@ -1093,259 +1194,6 @@ fn make_table_i16_as_u16(name: Ident, values: &[i16]) -> TokenStream {
             ),*
         ];
     }
-}
-
-fn output_actions(
-    span: Span,
-    gram: &Grammar,
-    gotos: &GotoMap,
-    parser: &YaccParser,
-    default_reductions: &[Rule],
-) -> TokenStream {
-    let nstates = parser.nstates();
-
-    let mut act = ActionsTable::new(nstates, gram.nvars);
-
-    token_actions(
-        gram,
-        parser,
-        default_reductions,
-        &mut act.froms,
-        &mut act.tos,
-    );
-    let default_goto_table = default_goto_table(nstates, gotos);
-    goto_actions(
-        gram,
-        nstates,
-        gotos,
-        &default_goto_table,
-        &mut act.froms,
-        &mut act.tos,
-    );
-    let order = sort_actions(&act);
-    let packed = crate::packing::pack_table(parser.nstates(), &order, &act);
-
-    let mut items = TokenStream::new();
-
-    // The YYDGOTO table contains a mapping from variables to states. However, the table does
-    // not include an entry for the 'start' symbol, so the length of YYDGOTO is `nvars - 1`, not
-    // `nvars`. See `goto_actions` in the C code. This is why we call skip(1), below.
-    items.extend(make_table_i16_signed(
-        Ident::new("YYDGOTO", span),
-        &default_goto_table
-            .iter()
-            .skip(1)
-            .map(|s| s.0)
-            .collect::<Vec<i16>>(),
-    ));
-
-    items.extend(make_table_i16_signed(
-        Ident::new("YYSINDEX", span),
-        &packed.base[..nstates],
-    ));
-    items.extend(make_table_i16_signed(
-        Ident::new("YYRINDEX", span),
-        &packed.base[nstates..nstates * 2],
-    ));
-    items.extend(make_table_i16_signed(
-        Ident::new("YYGINDEX", span),
-        &packed.base[nstates * 2..act.nvectors - 1],
-    ));
-    items.extend(make_table_i16_signed(
-        Ident::new("YYTABLE", span),
-        &packed.table,
-    ));
-    items.extend(make_table_i16_signed(
-        Ident::new("YYCHECK", span),
-        &packed.check,
-    ));
-    items
-}
-
-/// All of the vectors defined in ActionsTable have the same length (nvectors)
-/// and the indices are assigned in the same way.
-///
-/// * S: first region,  length = nstates, contains: shifts
-/// * R: second region, length = nstates, contains: reduces
-/// * V: third region,  length = nvars,   contains: var stuff
-///
-/// nvectors = sum of the lengths of these regions = 2 * nstates + gram.nvars
-pub struct ActionsTable {
-    /// nvectors = 2 * nstates + gram.nvars
-    pub nvectors: usize,
-    pub froms: Vec<Vec<StateOrRule>>,
-    pub tos: Vec<Vec<StateOrRule>>,
-}
-impl ActionsTable {
-    pub fn new(nstates: usize, nvars: usize) -> Self {
-        let nvectors = 2 * nstates + nvars;
-        Self {
-            nvectors,
-            froms: Vec::new(),
-            tos: Vec::new(),
-        }
-    }
-    pub fn tally(&self, i: usize) -> usize {
-        self.froms[i].len()
-    }
-    pub fn width(&self, i: usize) -> i16 {
-        let f = &self.froms[i];
-        if !f.is_empty() {
-            f[f.len() - 1] - f[0] + 1
-        } else {
-            0
-        }
-    }
-}
-
-/// This builds actions for tokens.
-///
-/// NOTE: In the original code, this function computed the 'tally' and 'width'
-/// tables. The 'tally' table is unnecessary in Rust, because the `len()` of
-/// the generated 'froms' and 'tos' table gives the same information. But the
-/// 'width' table is slightly more interesting. The 'width' table was computed
-/// as `max(j) - min(j) + 1`, where `j` was the token being considered.
-///
-/// The new code just computes it as `froms.last() - froms.first() + 1`, which
-/// should be the same value, as long as action.symbol is in increasing order.
-/// (See commit 1cc0a3174406eb28f767af0b91fc850e9364aaf2 for the last code
-/// based on the old algorithm.)
-fn token_actions(
-    gram: &Grammar,
-    parser: &YaccParser,
-    default_reductions: &[Rule],
-    froms: &mut Vec<Vec<i16>>,
-    tos: &mut Vec<Vec<StateOrRule>>,
-) {
-    // shifts
-    for actions in parser.actions.iter() {
-        let mut shift_r: Vec<i16> = Vec::new();
-        let mut shift_s: Vec<i16> = Vec::new();
-        for action in actions.iter() {
-            if action.suppressed == 0 {
-                match action.action_code {
-                    ActionCode::Shift(shift_to_state) => {
-                        let token = action.symbol.index();
-                        shift_r.push(gram.value[token]);
-                        shift_s.push(shift_to_state.0);
-                    }
-                    ActionCode::Reduce(_) => {}
-                }
-            }
-        }
-        froms.push(shift_r);
-        tos.push(shift_s);
-    }
-
-    // reduces
-    for (state, actions) in parser.actions.iter().enumerate() {
-        let mut reduce_r: Vec<i16> = Vec::new();
-        let mut reduce_s: Vec<i16> = Vec::new();
-        for action in actions.iter() {
-            if action.suppressed == 0 {
-                match action.action_code {
-                    ActionCode::Reduce(reduce_rule) => {
-                        if reduce_rule != default_reductions[state] {
-                            let token = action.symbol.index();
-                            reduce_r.push(gram.value[token]);
-                            reduce_s.push(reduce_rule.0 - 2);
-                        }
-                    }
-                    ActionCode::Shift(_) => {}
-                }
-            }
-        }
-        froms.push(reduce_r);
-        tos.push(reduce_s);
-    }
-}
-
-/// Build the "default_goto" table
-fn goto_actions(
-    gram: &Grammar,
-    nstates: usize,
-    gotos: &GotoMap,
-    default_goto_table: &[State],
-    froms: &mut Vec<Vec<i16>>,
-    tos: &mut Vec<Vec<StateOrRule>>,
-) {
-    debug!("goto_actions:");
-    let nvars = gotos.len();
-    assert_eq!(nvars, gram.nvars);
-    // Reserve area where we will write new entries.
-    // We do not write them sequentially, so we reserve space first, then write at indices.
-    froms.extend(repeat(Vec::new()).take(nvars));
-    tos.extend(repeat(Vec::new()).take(nvars));
-    let goto_froms = &mut froms[nstates * 2..];
-    let goto_tos = &mut tos[nstates * 2..];
-    for var in gram.iter_vars() {
-        if var.index() == 0 {
-            continue;
-        }
-        let symbol = gram.var_to_symbol(var);
-        let default_state = default_goto_table[var.index()];
-        let mut spf = Vec::new();
-        let mut spt = Vec::new();
-        for &entry in &gotos[var.index()] {
-            if entry.to_state != default_state {
-                spf.push(entry.from_state.0);
-                spt.push(entry.to_state.0);
-            }
-        }
-        let col = gram.value[symbol.index()] as usize;
-        goto_froms[col] = spf;
-        goto_tos[col] = spt;
-    }
-}
-
-/// Compute the default goto for a given symbol
-/// state_count - a temporary table that can be used by this fn. contents when the function
-/// is called are undefined. length  = nstates.
-///
-/// Returns: Var -> State
-fn default_goto_table(nstates: usize, gotos: &GotoMap) -> Vec<State> {
-    let mut state_count: Vec<i16> = vec![0; nstates]; // temporary data, used in default_goto()
-    gotos
-        .iter()
-        .map(move |var_gotos| {
-            if var_gotos.is_empty() {
-                State(0)
-            } else {
-                fill_copy(&mut state_count, 0);
-                for &entry in var_gotos.iter() {
-                    state_count[entry.to_state.0 as usize] += 1;
-                }
-                let mut max = 0;
-                let mut default_state = 0;
-                for (state, &count) in state_count.iter().enumerate() {
-                    if count > max {
-                        max = count;
-                        default_state = state;
-                    }
-                }
-                State(default_state as i16)
-            }
-        })
-        .collect()
-}
-
-/// Reads ActionTable.tally and width and produces a sorted index vector over
-/// those two parallel vectors. The vector is sorted in descending order of 'width',
-/// then descending order of tally.
-fn sort_actions(act: &ActionsTable) -> Vec<usize> {
-    use std::cmp::Ordering;
-    let mut order: Vec<usize> = Vec::with_capacity(act.nvectors);
-    for col in 0..act.nvectors {
-        let t = act.tally(col);
-        if t > 0 {
-            order.push(col);
-        }
-    }
-    order.sort_by(|&a, &b| match act.width(b).cmp(&act.width(a)) {
-        Ordering::Equal => act.tally(b).cmp(&act.tally(a)),
-        c => c,
-    });
-    order
 }
 
 fn verify_parse<T: syn::parse::Parse>(tokens: TokenStream) -> TokenStream {

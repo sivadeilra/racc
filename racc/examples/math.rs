@@ -200,17 +200,11 @@ mod tests {
 
     #[test]
     fn prec1() {
-        test_case(
-            50,
-            vec![NUM(10), PLUS, NUM(20), MUL, NUM(2)],
-        );
+        test_case(50, vec![NUM(10), PLUS, NUM(20), MUL, NUM(2)]);
     }
 
     #[test]
     fn prec2() {
-        test_case(
-            17,
-            vec![NUM(3), MUL, NUM(4), PLUS, NUM(5)],
-        );
+        test_case(17, vec![NUM(3), MUL, NUM(4), PLUS, NUM(5)]);
     }
 }

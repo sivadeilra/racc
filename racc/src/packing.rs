@@ -1,5 +1,4 @@
-use crate::output::ActionsTable;
-use log::debug;
+use super::*;
 
 /// The function matching_vector determines if the vector specified by
 /// the input parameter matches a previously considered vector. The
@@ -121,7 +120,7 @@ pub struct PackedTables {
     pub high: usize,
 }
 
-pub fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) -> PackedTables {
+pub(crate) fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) -> PackedTables {
     debug!("pack_table: nentries={}", order.len());
 
     let initial_maxtable = 1000;

@@ -89,7 +89,10 @@ fn do_err_case(tokens: Vec<Token>) {
 
     match Parser::parse(tokens.into_iter()) {
         Ok(()) => {
-            panic!("successfully parsed, which is not what we expected!  input:\n    {}", input);
+            panic!(
+                "successfully parsed, which is not what we expected!  input:\n    {}",
+                input
+            );
         }
         Err(e) => {
             println!("as expected, failed to parse: {:?}", e);
@@ -148,4 +151,3 @@ fn test_bad_object() {
     err_case!(LCURLY, COMMA, RCURLY);
     err_case!(LCURLY, INT(0), COLON, INT(0), COMMA, RCURLY);
 }
-
