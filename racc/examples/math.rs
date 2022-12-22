@@ -22,15 +22,11 @@ racc::grammar! {
     %left PLUS MINUS;
     %left MUL DIV;
 
-    Expr -> i32 : NUM(x) {
-        println!("NUM={:?}", x);
-        x
-    }
+    Expr -> i32 : NUM(x) { x }
     | Expr(a) PLUS Expr(b) { a + b }
     | Expr(a) MINUS Expr(b) { a - b }
     | Expr(a) MUL Expr(b) { a * b }
     | Expr(a) DIV Expr(b) {
-        println!("{} / {}", a, b);
         if b == 0 {
             return Err(racc_runtime::Error::AppError);
         }
@@ -50,16 +46,6 @@ racc::grammar! {
         } else {
             false_value
         }
-    }
-    | Let(e) { e }
-    ;
-
-    Let -> i32 : LET IDENT(id) EQ Expr(e) /*{
-        println!("setting e = {:?}", e);
-        e
-    }*/ IN Expr(body) {
-        println!("popping: id: {:?}, e {:?}, body: {:?}", id, e, body);
-        0
     };
 }
 

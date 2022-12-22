@@ -641,41 +641,6 @@ impl ReaderState {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct Errors {
-    pub(crate) errors: Vec<syn::Error>,
-}
-
-impl Errors {
-    pub(crate) fn push(&mut self, e: syn::Error) {
-        self.errors.push(e);
-    }
-
-    pub(crate) fn into_result(self) -> Result<(), syn::Error> {
-        let mut iter = self.errors.into_iter();
-        if let Some(mut errors) = iter.next() {
-            for e in iter {
-                errors.combine(e);
-            }
-            Err(errors)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub(crate) fn into_token_stream(self) -> TokenStream {
-        if self.errors.is_empty() {
-            return TokenStream::new();
-        }
-
-        let mut t = TokenStream::new();
-        for e in self.errors.into_iter() {
-            t.extend(e.into_compile_error().into_token_stream());
-        }
-        t
-    }
-}
-
 impl Parse for Grammar {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut reader: ReaderState = ReaderState::new();
@@ -1051,7 +1016,7 @@ impl Parse for Grammar {
                         let la = input.lookahead1();
                         if la.peek(Ident) {
                             let token_ident: Ident = input.parse()?;
-                            println!("setting token associativity and precedence: {}: assoc {:?} prec {:?}", token_ident, precedence, assoc);
+                            // println!("setting token associativity and precedence: {}: assoc {:?} prec {:?}", token_ident, precedence, assoc);
 
                             // Look up the token. This implicitly creates a new token, if it has
                             // not already been defined.

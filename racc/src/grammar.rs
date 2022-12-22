@@ -86,8 +86,8 @@ impl Grammar {
         Symbol(self.ntokens as i16)
     }
 
-    /// The "top-level" variable.
-    pub fn top(&self) -> Symbol {
+    /// The "goal" variable, as defined by the grammar. This is distinct from the `start` symbol.
+    pub fn goal(&self) -> Symbol {
         Symbol(self.ntokens as i16 + 1)
     }
 

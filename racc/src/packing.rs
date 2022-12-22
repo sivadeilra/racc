@@ -113,11 +113,25 @@ struct PackState<'a> {
     act: &'a ActionsTable,
 }
 
-pub struct PackedTables {
+pub(crate) struct PackedTables {
     pub base: Vec<i16>,
     pub table: Vec<i16>,
     pub check: Vec<i16>,
-    pub high: usize,
+    pub nstates: usize,
+}
+
+impl PackedTables {
+    pub(crate) fn rindex_table(&self) -> &[i16] {
+        &self.base[self.nstates..self.nstates * 2]
+    }
+
+    pub(crate) fn sindex_table(&self) -> &[i16] {
+        &self.base[..self.nstates]
+    }
+
+    pub(crate) fn gindex_table(&self) -> &[i16] {
+        &self.base[self.nstates * 2..self.base.len() - 1]
+    }
 }
 
 pub(crate) fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) -> PackedTables {
@@ -154,6 +168,6 @@ pub(crate) fn pack_table(nstates: usize, order: &[usize], act: &ActionsTable) ->
         base: pack.base,
         table: pack.table,
         check: pack.check,
-        high: pack.high,
+        nstates,
     }
 }

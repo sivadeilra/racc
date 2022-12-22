@@ -16,6 +16,7 @@ mod output;
 mod packing;
 mod reader;
 mod tvec;
+mod errors;
 mod util;
 mod warshall;
 
@@ -25,6 +26,7 @@ mod tests;
 // use core::fmt::Write;
 use core::iter::repeat;
 use grammar::*;
+use errors::*;
 use lalr::GotoMap;
 use lalr::LALROutput;
 use log::debug;
@@ -34,7 +36,6 @@ use output::*;
 use packing::*;
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{quote, quote_spanned, ToTokens};
-use reader::Errors;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::Ident;
@@ -453,7 +454,6 @@ fn grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenS
         &default_reductions,
         &default_goto_table,
         &parser,
-        &act,
         &packed,
     );
 

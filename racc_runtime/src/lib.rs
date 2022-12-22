@@ -10,11 +10,22 @@ pub enum Error {
     AppError,
 }
 
+#[cfg(feature = "racc_log")]
 #[macro_export]
 macro_rules! racc_log {
     (
         $($t:tt)*
     ) => {
         ::log::debug!( $($t)* )
+    }
+}
+
+#[cfg(not(feature = "racc_log"))]
+#[macro_export]
+macro_rules! racc_log {
+    (
+        $($t:tt)*
+    ) => {
+        // nothing
     }
 }
