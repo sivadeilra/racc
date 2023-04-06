@@ -109,7 +109,7 @@ pub(crate) fn output_parser(
 
     items.push(make_table_i16_signed(
         Ident::new("YYSINDEX", Span::call_site()),
-        &packed.sindex_table(),
+        packed.sindex_table(),
     ));
     items.push(make_table_i16_signed(
         Ident::new("YYRINDEX", Span::call_site()),
@@ -278,7 +278,7 @@ pub(crate) fn output_parser(
         &context_arg,
     )));
 
-    items.push(output_default_reductions_table(&default_reductions));
+    items.push(output_default_reductions_table(default_reductions));
 
     parser_methods.push(output_do_default_reductions(&context_param, &context_arg));
 
@@ -421,11 +421,7 @@ fn output_yyreduce(
                             }
                         }
 
-                        let log_msg = format!(
-                            "popped value {}({}) = {{:?}}",
-                            rhs_ident.to_string(),
-                            rbind.to_string()
-                        );
+                        let log_msg = format!("popped value {}({}) = {{:?}}", rhs_ident, rbind);
                         stmts1.push(parse_quote_spanned! {
                             rule_span =>
                             racc_log!(#log_msg, #rbind);
@@ -434,11 +430,7 @@ fn output_yyreduce(
                         // The rhs symbol is a token. Verify that we were given the
                         // right kind of token.
                         num_token_stack_pop += 1;
-                        let log_msg = format!(
-                            "popped token {}({}) = {{:?}}",
-                            rhs_ident.to_string(),
-                            rbind.to_string()
-                        );
+                        let log_msg = format!("popped token {}({}) = {{:?}}", rhs_ident, rbind);
                         extend_stmt_parse_quote_spanned! {
                             stmts1,
                             rule_span =>
@@ -469,7 +461,7 @@ fn output_yyreduce(
                 if gram.is_var(rhs_sym) {
                     if rhs_sym_ty_opt.is_some() {
                         num_value_stack_pop += 1;
-                        let log_msg = format!("popped value {}: {{:?}}", rhs_ident.to_string());
+                        let log_msg = format!("popped value {}: {{:?}}", rhs_ident);
                         stmts1.push(parse_quote_spanned! {
                             rule_span =>
                             let _unused_value = self.value_stack.pop();
@@ -484,7 +476,7 @@ fn output_yyreduce(
                 } else {
                     if rhs_sym_ty_opt.is_some() {
                         num_token_stack_pop += 1;
-                        let log_msg = format!("popped token {}: {{:?}}", rhs_ident.to_string());
+                        let log_msg = format!("popped token {}: {{:?}}", rhs_ident);
                         stmts1.push(parse_quote_spanned! {
                             rule_span =>
                             let _unused_token = self.token_stack.pop();

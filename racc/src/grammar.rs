@@ -178,6 +178,7 @@ impl Grammar {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) enum Assoc {
     TOKEN = 0,
     LEFT = 1,
