@@ -1,6 +1,6 @@
 [package]
 name = "racc"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 readme = "../README.md"
 license = "MIT"
