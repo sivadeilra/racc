@@ -17,7 +17,8 @@ pub struct Program {
 
 use Token::*;
 
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     enum Token {
         PLUS,
         MINUS,
@@ -35,106 +36,110 @@ racc::grammar! {
         LET,
         EQ,
         IN,
-        FN, // the fn keyword
+        FN,   // the fn keyword
         SEMI, // the semicolon
         LBRACE,
         RBRACE,
         COMMENT,
     }
 
-    Program -> Program
-        : DefList(defs) {
-            Program { defs }
-        }
-    ;
+    rules! {
 
-    Def -> Def
-        : Expr(e) SEMI {
-            Def::Expr(e)
-        }
-        | FuncDef(f) {
-            Def::Func(f)
-        }
-    ;
-
-    CommentList
-        : // null
-        | Comment
-        | CommentList Comment
+        Program -> Program
+            : DefList(defs) {
+                Program { defs }
+            }
         ;
 
-    DefList -> Vec<Def>
-        : DefList(list) Def(item) {
-            list.push(item);
-            list
-        }
-
-        | CommentList Def(d) {
-            println!("DefList: from single def");
-            vec![d]
-        }
-
-        | {
-            println!("DefList: from empty");
-            Vec::new()
-        }
+        Def -> Def
+            : Expr(e) SEMI {
+                Def::Expr(e)
+            }
+            | FuncDef(f) {
+                Def::Func(f)
+            }
         ;
 
+        CommentList
+            : // null
+            | Comment
+            | CommentList Comment
+            ;
 
-    Expr -> i32 : NUM(x) {
-        println!("NUM={:?}", x);
-        x
-    }
-    | Expr(a) PLUS Expr(b) {
-        a + b
-    }
-    | Expr(a) MINUS Expr(b) {
-        a - b
-    }
-    | Expr(a) DIVIDE Expr(b) {
-        println!("{} / {}", a, b);
-        if b == 0 {
-            return Err(racc_runtime::Error::AppError);
+        DefList -> Vec<Def>
+            : DefList(list) Def(item) {
+                list.push(item);
+                list
+            }
+
+            | CommentList Def(d) {
+                println!("DefList: from single def");
+                vec![d]
+            }
+
+            | nil {
+                println!("DefList: from empty");
+                Vec::new()
+            }
+            ;
+
+        nil : ;
+
+        Expr -> i32 : NUM(x) {
+            println!("NUM={:?}", x);
+            x
         }
-        a / b
-    }
-    | LPAREN Expr(inner) RPAREN { inner }
-    | IF Expr(predicate) THEN Expr(true_value) {
-        if predicate != 0 {
-            true_value
-        } else {
+        | Expr(a) PLUS Expr(b) {
+            a + b
+        }
+        | Expr(a) MINUS Expr(b) {
+            a - b
+        }
+        | Expr(a) DIVIDE Expr(b) {
+            println!("{} / {}", a, b);
+            if b == 0 {
+                return Err(racc_runtime::Error::AppError);
+            }
+            a / b
+        }
+        | LPAREN Expr(inner) RPAREN { inner }
+        | IF Expr(predicate) THEN Expr(true_value) {
+            if predicate != 0 {
+                true_value
+            } else {
+                0
+            }
+        }
+        | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
+            if predicate != 0 {
+                true_value
+            } else {
+                false_value
+            }
+        }
+        | Let(e) { e }
+        ;
+
+        Let -> i32 : LET IDENT(_id) EQ Expr(e)
+        // TODO: this is broken
+        /*{
+            println!("setting e = {:?}", e);
+            e
+        }*/
+        IN Expr(_f) {
+            println!("popping {:?}", e);
             0
-        }
+        };
+
+        FuncDef -> FuncDef : FN IDENT(name) LPAREN RPAREN LBRACE Expr(body) RBRACE {
+            FuncDef {
+                name,
+                body,
+            }
+        };
+
+        Comment : COMMENT;
     }
-    | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
-        if predicate != 0 {
-            true_value
-        } else {
-            false_value
-        }
-    }
-    | Let(e) { e }
-    ;
-
-    Let -> i32 : LET IDENT(_id) EQ Expr(e)
-    // TODO: this is broken
-    /*{
-        println!("setting e = {:?}", e);
-        e
-    }*/
-    IN Expr(_f) {
-        println!("popping {:?}", e);
-        0
-    };
-
-    FuncDef -> FuncDef : FN IDENT(name) LPAREN RPAREN LBRACE Expr(body) RBRACE {
-        FuncDef {
-            name,
-            body,
-        }
-    };
-
-    Comment : COMMENT;
 }
 
 #[cfg(nope)]

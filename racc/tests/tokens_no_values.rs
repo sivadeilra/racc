@@ -1,4 +1,5 @@
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     enum Token {
         // None of these tokens carry any values
         A,
@@ -6,7 +7,9 @@ racc::grammar! {
         C,
     }
 
-    Top : A B C;
+    rules! {
+        Top : A B C;
+    }
 }
 
 use Token::*;

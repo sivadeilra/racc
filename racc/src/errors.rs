@@ -50,7 +50,6 @@ impl Errors {
         }
     }
 
-
     #[allow(dead_code)]
     pub(crate) fn combine_with<T>(&mut self, mut with: WithErrors<T>) -> T {
         self.errors.append(&mut with.errors.errors);

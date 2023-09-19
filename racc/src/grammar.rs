@@ -68,9 +68,21 @@ pub(crate) struct Grammar {
 
     /// identifier used by grammar for a RHS value, given by =foo
     /// indices are same as rrhs
-    pub rhs_binding: Vec<Option<Ident>>,
+    pub rhs_binding: Vec<Option<Box<RhsBinding>>>,
 
     pub context_ty: Option<syn::Type>,
+
+    /// If `enum Token` was defined with generics, e.g. `enum Token<'a>`, then this contains
+    /// the generic parameters.
+    pub token_generics: syn::Generics,
+
+    pub token_attrs: Vec<syn::Attribute>,
+}
+
+#[derive(Clone)]
+pub struct RhsBinding {
+    pub ident: syn::Ident,
+    pub ty: Option<syn::Type>,
 }
 
 impl Grammar {

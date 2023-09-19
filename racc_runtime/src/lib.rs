@@ -27,5 +27,5 @@ macro_rules! racc_log {
         $($t:tt)*
     ) => {
         // nothing
-    }
+    };
 }

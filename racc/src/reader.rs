@@ -31,8 +31,7 @@
 //! abstraction) the data structures are quite similar.
 //!
 use super::*;
-use crate::grammar::Grammar;
-use crate::grammar::UNDEFINED;
+use crate::grammar::{Grammar, RhsBinding, UNDEFINED};
 use crate::Rule;
 use crate::SymbolOrRule;
 use crate::{Item, Symbol};
@@ -42,6 +41,7 @@ use proc_macro2::Span;
 use std::collections::HashMap;
 use std::rc::Rc;
 use syn::parse_quote;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{Ident, Token, Type};
 
@@ -121,7 +121,15 @@ struct ReaderState {
 
     /// identifier used by grammar for a RHS value, given by =foo
     /// indices are same as rrhs
-    rhs_binding: Vec<Option<Ident>>,
+    rhs_binding: Vec<Option<Box<RhsBinding>>>,
+
+    token_generics: syn::Generics,
+    token_attrs: Vec<syn::Attribute>,
+
+    next_left_precedence: i16,
+    next_right_precedence: i16,
+
+    goal_symbol: Option<usize>,
 }
 
 impl ReaderState {
@@ -141,13 +149,18 @@ impl ReaderState {
             lhs: vec![NO_ITEM; PREDEFINED_RULES],
             rule_blocks: vec![None; PREDEFINED_RULES],
             rule_span: vec![Span::call_site(); PREDEFINED_RULES],
-            rhs_binding: vec![None; PREDEFINED_ITEMS],
+            rhs_binding: (0..PREDEFINED_ITEMS).map(|_| None).collect(),
             symbols: Vec::new(),
             symbol_table: HashMap::new(),
             gensym: 1,
             last_was_action: false,
             rprec: vec![0; PREDEFINED_RULES],
             rassoc: vec![Assoc::TOKEN; PREDEFINED_RULES],
+            token_generics: syn::Generics::default(),
+            token_attrs: Vec::new(),
+            next_left_precedence: 0,
+            next_right_precedence: 0,
+            goal_symbol: None,
         }
     }
 
@@ -184,7 +197,7 @@ impl ReaderState {
     }
 
     // Terminates the current rule.
-    pub fn end_rule(&mut self, _span: Span) {
+    pub fn end_rule(&mut self) {
         assert!(self.nrules() > 0);
         let rule = self.nrules() - 1;
 
@@ -269,7 +282,7 @@ impl ReaderState {
 
     /// Adds a symbol to the RHS of the current rule being built.
     /// Can only be called between calls to start_rule() and end_rule().
-    pub fn add_symbol(&mut self, bp: usize, span: Span, ident: Option<syn::Ident>) {
+    pub fn add_symbol(&mut self, bp: usize, span: Span, binding: Option<Box<RhsBinding>>) {
         assert!(self.rhs_binding.len() == self.nitems());
 
         if self.last_was_action {
@@ -283,7 +296,7 @@ impl ReaderState {
         }
 
         self.pitem.push(bp);
-        self.rhs_binding.push(ident);
+        self.rhs_binding.push(binding);
     }
 
     /// "Packs" the symbol table and the grammar definition.  In the packed form, the
@@ -585,6 +598,8 @@ impl ReaderState {
             rhs_binding: self.rhs_binding,
             rule_blocks: self.rule_blocks,
             context_ty,
+            token_generics: self.token_generics,
+            token_attrs: self.token_attrs,
         }
     }
 
@@ -641,8 +656,522 @@ impl ReaderState {
     }
 }
 
-impl Parse for Grammar {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+fn parse_token_enum(
+    en_ty: syn::ItemEnum,
+    reader: &mut ReaderState,
+    errors: &mut Errors,
+) -> syn::Result<()> {
+    if en_ty.ident == "Token" {
+        // println!("found enum Token");
+        reader.token_generics = en_ty.generics;
+        reader.token_attrs = en_ty.attrs;
+
+        for var in en_ty.variants.iter() {
+            // TODO: do something with assoc
+
+            if let Some(disc) = &var.discriminant {
+                errors.push(syn::Error::new(
+                    disc.1.span(),
+                    "tokens may not specify a discriminant (vlaue)",
+                ));
+            } else {
+                // The grammar does not define a value for the token.
+                // That's fine, we supply the values.
+            }
+
+            // TODO: match on #[left] attribute
+
+            let id = &var.ident;
+            // let name_def_str = id.to_string();
+            // let name_def_span = id.span();
+            let lhs = reader.lookup(id);
+
+            let sym = &mut reader.symbols[lhs];
+            match sym.class {
+                SymClass::NonTerminal => {
+                    errors.push(syn::Error::new(
+                        var.span(),
+                        "This name has a conflicting definition. It is defined as both a token and variable."
+                    ));
+                    continue;
+                }
+                SymClass::Terminal => {
+                    // Hmmm, it was already defined.
+                    // That's ok for now, but if we eliminate the old form, this should
+                    // become an error.
+                }
+                SymClass::Unknown => {
+                    sym.class = SymClass::Terminal;
+
+                    match &var.fields {
+                        syn::Fields::Named(_) => {
+                            errors.push(syn::Error::new(
+                                var.fields.span(),
+                                "named fields are not supported; use a single-value tuple",
+                            ));
+                        }
+
+                        syn::Fields::Unnamed(fields) => {
+                            // This token provides a value. Only a single value is allowed.
+                            if fields.unnamed.len() != 1 {
+                                errors.push(syn::Error::new(
+                                    var.fields.span(),
+                                    "token enums may only contain a single vlaue",
+                                ));
+                            }
+
+                            if let Some(f0) = fields.unnamed.first() {
+                                attrs_are_not_allowed_here(errors, &f0.attrs);
+                                sym.value_type = Some(f0.ty.clone());
+                            }
+                        }
+
+                        syn::Fields::Unit => {
+                            // This token does not have a value.
+                            // The value_type field is already None, so we don't need to do anything.
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        errors.push(syn::Error::new(
+            en_ty.ident.span(),
+            "The name of the enum being defined is not recognized. \
+             The only allowed value is 'Token', which defines the set of tokens \
+             defined by your grammar.",
+        ));
+    }
+
+    Ok(())
+}
+
+struct RuleRhs {
+    name: syn::Ident,
+    binding: Option<Box<RhsBinding>>,
+    action: Option<syn::Block>,
+}
+
+struct RuleDef {
+    pub lhs: syn::Ident,
+    pub return_type: Option<syn::Type>,
+    pub rhs_list: Vec<Vec<RuleRhs>>,
+}
+
+struct RulesDef {
+    pub rules: Vec<RuleDef>,
+}
+
+impl Parse for RuleDef {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut errors = Errors::default();
+
+        let lhs = input.parse::<Ident>()?;
+
+        let mut rhs_list: Vec<Vec<RuleRhs>> = Vec::new();
+        let mut return_type: Option<syn::Type> = None;
+        let mut current_rhs: Vec<RuleRhs> = Vec::new();
+
+        let mut la = input.lookahead1();
+
+        // Parse the return type, if any.
+        if la.peek(Token![->]) {
+            input.parse::<Token![->]>().unwrap();
+            match input.parse::<syn::Type>() {
+                Ok(t) => return_type = Some(t),
+                Err(e) => errors.push(e),
+            }
+            la = input.lookahead1();
+        }
+
+        if !la.peek(syn::token::Colon) {
+            return Err(la.error());
+        }
+        input.parse::<syn::token::Colon>()?;
+
+        // In this loop, we process the symbols on the right-hand side of the rule.
+        // If we encounter a symbol (whether token or variable), we add a reference
+        // (a symbol index) to it to prhs.  If we encounter an action definition (code)
+        // then we close the current rule, then peek ahead to see whether we need to
+        // define an unnamed variable for the rule prefix, or whether this is a normal
+        // rule for name_def_str.
+        //
+        // If we encounter a | or ;, then the current rule ends.  If we encounter a |, then
+        // we start a new rule, with the same left-hand symbol.
+        loop {
+            // Treat the end of the input the same as a final semicolon.
+            if input.is_empty() {
+                break;
+            }
+
+            let la = input.lookahead1();
+            if la.peek(Ident) {
+                let rhs_ident = input.parse::<Ident>()?;
+                let mut binding: Option<Box<RhsBinding>> = None;
+
+                // Check to see whether there is a name binding specified after this
+                // variable, using Foo(x) syntax (a tuple pattern after the symbol).
+                if input.lookahead1().peek(syn::token::Paren) {
+                    let pat = input.parse::<syn::Pat>()?;
+
+                    let mut pat_ty: Option<syn::Type> = None;
+                    let pat: syn::Pat = match pat {
+                        syn::Pat::Type(pat_type) => {
+                            pat_ty = Some(*pat_type.ty);
+                            *pat_type.pat
+                        }
+                        other => other,
+                    };
+
+                    match pat {
+                        syn::Pat::Tuple(tuple) => {
+                            // println!("it's a tuple, len = {}", tuple.elems.len());
+                            if tuple.elems.len() == 1 {
+                                match &tuple.elems[0] {
+                                    syn::Pat::Ident(pat_ident) => {
+                                        binding = Some(Box::new(RhsBinding {
+                                            ident: pat_ident.ident.clone(),
+                                            ty: pat_ty.take(),
+                                        }));
+                                    }
+                                    unknown => {
+                                        errors.push(syn::Error::new(
+                                            unknown.span(),
+                                            "the pattern must specify exactly one name binding",
+                                        ));
+                                    }
+                                }
+                            } else {
+                                errors.push(syn::Error::new(
+                                    tuple.span(),
+                                    "the pattern must specify exactly one name binding",
+                                ));
+                            }
+                        }
+
+                        _ => {
+                            errors.push(syn::Error::new(
+                                pat.span(),
+                                "the pattern must be a tuple pattern, i.e. `(foo)`",
+                            ));
+                        }
+                    }
+                }
+
+                let action = if input.peek(syn::token::Brace) {
+                    // Parse an action (a code block).  Parsing it is actually very easy, thanks to Rust!
+                    let block: syn::Block = match input.parse::<syn::Block>() {
+                        Ok(block) => block,
+                        Err(e) => {
+                            errors.push(e);
+                            parse_quote!({ panic!() })
+                        }
+                    };
+                    Some(block)
+                } else {
+                    None
+                };
+
+                current_rhs.push(RuleRhs {
+                    name: rhs_ident,
+                    action,
+                    binding,
+                });
+            } else if la.peek(syn::token::Or) {
+                // Start a new RHS.
+                let _or_token = input.parse::<syn::token::Or>()?;
+                rhs_list.push(core::mem::take(&mut current_rhs));
+            } else if la.peek(Token![;]) {
+                input.parse::<Token![;]>()?;
+                // reader.end_rule(name_def_span);
+                break;
+            } else if la.peek(syn::LitChar) {
+                // Matching character tokens is not fully implemented.
+                let char_token = input.parse::<syn::LitChar>()?;
+                let ch = char_token.value();
+                log::debug!("char_token: {:?}", ch);
+                errors.push(syn::Error::new(
+                    char_token.span(),
+                    "character tokens are not implemented",
+                ));
+            } else {
+                return Err(la.error());
+            }
+        }
+
+        // There is always at least one rule.
+        rhs_list.push(current_rhs);
+
+        errors.into_result()?;
+        Ok(Self {
+            rhs_list,
+            lhs,
+            return_type,
+        })
+    }
+}
+
+impl Parse for RulesDef {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut rules = Vec::new();
+
+        while !input.is_empty() {
+            rules.push(input.parse::<RuleDef>()?);
+        }
+
+        Ok(Self { rules })
+    }
+}
+
+struct AssocDirective {
+    assoc: Assoc,
+    syms: Punctuated<syn::Ident, Token![,]>,
+}
+
+impl Parse for AssocDirective {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let directive = input.parse::<syn::Ident>()?;
+        input.parse::<Token![:]>()?;
+
+        let assoc: Assoc = if directive == "left" {
+            Assoc::LEFT
+        } else if directive == "right" {
+            Assoc::RIGHT
+        } else {
+            return Err(syn::Error::new(
+                directive.span(),
+                "unrecognized directive.  the only valid directives are `left` and `right`.",
+            ));
+        };
+
+        Ok(Self {
+            assoc,
+            syms: Punctuated::parse_terminated(input)?,
+        })
+    }
+}
+
+/*
+
+struct AssocDir {
+    assoc: Assoc,
+}
+
+impl Parse for AssocDir {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let directive: Ident = input.parse::<Ident>()?;
+
+        let errors = Errors::default();
+
+        let assoc: Assoc;
+        let precedence: i16;
+        if directive == "left" {
+            assoc = Assoc::LEFT;
+            // precedence = next_left_precedence;
+            // next_left_precedence += 1;
+        } else if directive == "right" {
+            assoc = Assoc::RIGHT;
+            // precedence = next_right_precedence;
+            // next_right_precedence += 1;
+        } else {
+            return Err(syn::Error::new(directive.span(), "unrecognized directive.  the only valid directives are `%left` and `%right`."));
+        };
+
+        // Consume identifiers, which are the names of tokens, until we reach ';'.
+        loop {
+            let la = input.lookahead1();
+            if la.peek(Ident) {
+                let token_ident: Ident = input.parse()?;
+
+                // Look up the token. This implicitly creates a new token, if it has
+                // not already been defined.
+                let sym_index = reader.lookup(&token_ident);
+                let sym = &mut reader.symbols[sym_index];
+
+                match sym.class {
+                    SymClass::Unknown => {
+                        errors.push(syn::Error::new(token_ident.span(),
+                            "please define this token before declaring its associativity"));
+                    }
+                    SymClass::Terminal => {
+                        if let Some(existing_span) = sym.assoc_prec_specified.as_ref() {
+                            errors.push(syn::Error::new(
+                                token_ident.span(),
+                                "the associativity and precedence for this token has already been specified"
+                            ));
+                            errors.push(syn::Error::new(
+                                existing_span.span(),
+                                "location of conflicting definition",
+                            ));
+                        } else {
+                            sym.assoc = assoc;
+                            sym.prec = precedence;
+                            sym.assoc_prec_specified = Some(token_ident.span());
+                        }
+                    }
+                    SymClass::NonTerminal => {
+                        errors.push(syn::Error::new(token_ident.span(),
+                            "cannot set associativity for non-terminals, only for terminals (tokens)"
+                        ));
+                    }
+                }
+            } else {
+                return Err(syn::Error::new(
+                    input.span(),
+                    "expected only token identifiers and a `;` delimiter.",
+                ));
+            }
+        }
+
+        errors.into_result()?;
+        Ok(Self {
+            assoc,
+        })
+    }
+}
+*/
+
+fn apply_assoc(
+    reader: &mut ReaderState,
+    errors: &mut Errors,
+    assoc_dir: &AssocDirective,
+) -> syn::Result<()> {
+    // It's a directive, like %left and %right.
+
+    let assoc = assoc_dir.assoc;
+
+    let next_prec = match assoc_dir.assoc {
+        Assoc::LEFT => &mut reader.next_left_precedence,
+        Assoc::RIGHT => &mut reader.next_right_precedence,
+        Assoc::TOKEN => panic!(),
+    };
+    let precedence: i16 = *next_prec;
+    *next_prec += 1;
+
+    // Consume identifiers, which are the names of tokens, until we reach ';'.
+    for token_ident in assoc_dir.syms.iter() {
+        // Look up the token. This implicitly creates a new token, if it has
+        // not already been defined.
+        let sym_index = reader.lookup(token_ident);
+        let sym = &mut reader.symbols[sym_index];
+
+        match sym.class {
+            SymClass::Unknown => {
+                errors.push(syn::Error::new(
+                    token_ident.span(),
+                    "please define this token before declaring its associativity",
+                ));
+            }
+            SymClass::Terminal => {
+                if let Some(existing_span) = sym.assoc_prec_specified.as_ref() {
+                    errors.push(syn::Error::new(
+                        token_ident.span(),
+                        "the associativity and precedence for this token has already been specified"
+                    ));
+                    errors.push(syn::Error::new(
+                        existing_span.span(),
+                        "location of conflicting definition",
+                    ));
+                } else {
+                    sym.assoc = assoc;
+                    sym.prec = precedence;
+                    sym.assoc_prec_specified = Some(token_ident.span());
+                }
+            }
+            SymClass::NonTerminal => {
+                errors.push(syn::Error::new(
+                    token_ident.span(),
+                    "cannot set associativity for non-terminals, only for terminals (tokens)",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_rules(reader: &mut ReaderState, errors: &mut Errors, rules: &RulesDef) -> syn::Result<()> {
+    for rule in rules.rules.iter() {
+        let id = &rule.lhs;
+        let name_def_str = id.to_string();
+        let name_def_span = id.span();
+        let lhs = reader.lookup(&rule.lhs);
+
+        match reader.symbols[lhs].class {
+            SymClass::Terminal => {
+                errors.push(syn::Error::new(
+                    name_def_span,
+                    "name has been defined as a token, and so cannot be on the \
+                     left-hand side of a rule",
+                ));
+                // we continue executing, even with a bogus name index.
+            }
+            SymClass::NonTerminal => {
+                // good, this symbol is already known to be a non-terminal
+            }
+            SymClass::Unknown => {
+                reader.symbols[lhs].class = SymClass::NonTerminal;
+            }
+        }
+
+        if let Some(return_type) = &rule.return_type {
+            {
+                // if reader.symbols[lhs].class == SymClass::Terminal {
+                match &mut reader.symbols[lhs].value_type {
+                    Some(_) => errors.push(syn::Error::new(
+                        return_type.span(),
+                        "the return type of a symbol cannot be declared more than once",
+                    )),
+                    existing => *existing = Some(return_type.clone()),
+                }
+            }
+        }
+
+        if reader.goal_symbol.is_none() {
+            debug!("using '{}' as start symbol", name_def_str);
+            reader.goal_symbol = Some(lhs);
+        }
+
+        // In this loop, we process the symbols on the right-hand side of the rule.
+        // If we encounter a symbol (whether token or variable), we add a reference
+        // (a symbol index) to it to prhs.  If we encounter an action definition (code)
+        // then we close the current rule, then peek ahead to see whether we need to
+        // define an unnamed variable for the rule prefix, or whether this is a normal
+        // rule for name_def_str.
+        //
+        // If we encounter a | or ;, then the current rule ends.  If we encounter a |, then
+        // we start a new rule, with the same left-hand symbol.
+
+        for def in rule.rhs_list.iter() {
+            reader.start_rule(lhs, name_def_span);
+
+            for rhs in def.iter() {
+                let rhs_sym = reader.lookup(&rhs.name);
+                reader.add_symbol(rhs_sym, rhs.name.span(), rhs.binding.clone());
+
+                if let Some(action) = &rhs.action {
+                    if reader.last_was_action {
+                        reader.insert_empty_rule(action.span());
+                    }
+                    reader.rule_blocks.push(Some(action.clone()));
+                    reader.last_was_action = true;
+                }
+            }
+
+            reader.end_rule();
+        }
+    }
+
+    Ok(())
+}
+
+impl Grammar {
+    pub fn parse_from_tokens(input: proc_macro2::TokenStream) -> syn::Result<Self> {
+        let input_mod: syn::ItemMod = syn::parse2(input)?;
+        Self::parse_from_mod(input_mod)
+    }
+
+    pub fn parse_from_mod(input: syn::ItemMod) -> syn::Result<Self> {
         let mut reader: ReaderState = ReaderState::new();
         let mut context_ty: Option<Type> = None;
         let mut errors = Errors::default();
@@ -653,430 +1182,64 @@ impl Parse for Grammar {
             s.class = SymClass::Terminal;
         }
 
-        let mut goal_symbol: Option<usize> = None;
-        let mut next_left_precedence: i16 = 0;
-        let mut next_right_precedence: i16 = 0;
+        for item in input.content.unwrap().1.into_iter() {
+            match item {
+                syn::Item::Enum(en_ty) => {
+                    parse_token_enum(en_ty, &mut reader, &mut errors)?;
+                }
 
-        while !input.is_empty() {
-            let la = input.lookahead1();
-            if la.peek(Token![type]) {
-                // `type Value = <some type>;` - specifies the value stack type.
-                input.parse::<Token![type]>()?; // should always succeed
-                let keyword = input.parse::<Ident>()?;
-                input.parse::<Token![=]>()?;
-                let ty = input.parse::<Type>()?;
-                input.parse::<Token![;]>()?;
+                syn::Item::Type(alias) => {
+                    // `type Value = <some type>;` - specifies the value stack type.
+                    let keyword = &alias.ident;
+                    let ty = &alias.ty;
 
-                let keyword_string = keyword.to_string();
-                if keyword_string == "Context" {
-                    if context_ty.is_some() {
+                    let keyword_string = keyword.to_string();
+                    if keyword_string == "Context" {
+                        if context_ty.is_some() {
+                            errors.push(syn::Error::new(
+                                keyword.span(),
+                                "The 'Context' type cannot be specified more than once.",
+                            ));
+                        } else {
+                            context_ty = Some((**ty).clone());
+                        }
+                    } else {
                         errors.push(syn::Error::new(
                             keyword.span(),
-                            "The 'Context' type cannot be specified more than once.",
-                        ));
-                    } else {
-                        context_ty = Some(ty);
-                    }
-                } else {
-                    errors.push(syn::Error::new(
-                        keyword.span(),
-                        format!("The type '{}' is unrecognized.", keyword_string),
-                    ));
-                }
-            } else if la.peek(Ident) {
-                // An identifier can start either a token definition or a rule definition.
-                // The next character will tell us whether this is a token definition or a
-                // rule definition.
-                //      : (begins a rule)
-                //      = (defines a token with a specific value)
-                //      ; (defines a token with an automatically-assigned value)
-                let id = input.parse::<Ident>()?;
-                let name_def_str = id.to_string();
-                let name_def_span = id.span();
-                let lhs = reader.lookup(&id);
-
-                let mut la = input.lookahead1();
-
-                let mut var_return_type: Option<syn::Type> = None;
-                if la.peek(Token![->]) {
-                    input.parse::<Token![->]>().unwrap();
-                    match input.parse::<syn::Type>() {
-                        Ok(t) => var_return_type = Some(t),
-                        Err(e) => errors.push(e),
-                    }
-                    la = input.lookahead1();
-                }
-
-                if la.peek(syn::token::Colon) {
-                    input.parse::<syn::token::Colon>()?;
-                    match reader.symbols[lhs].class {
-                        SymClass::Terminal => {
-                            errors.push(syn::Error::new(
-                                name_def_span,
-                                "name has been defined as a token, and so cannot be on the \
-                                 left-hand side of a rule",
-                            ));
-                            // we continue executing, even with a bogus name index.
-                        }
-                        SymClass::NonTerminal => {
-                            // good, this symbol is already known to be a non-terminal
-                        }
-                        SymClass::Unknown => {
-                            reader.symbols[lhs].class = SymClass::NonTerminal;
-                        }
-                    }
-
-                    if let Some(rt) = var_return_type {
-                        let sym_rt = &mut reader.symbols[lhs].value_type;
-                        if let Some(existing_rt) = &*sym_rt {
-                            errors.push(syn::Error::new(
-                                sym_rt.span(),
-                                "conflicting definition for type of non-terminal",
-                            ));
-                            errors.push(syn::Error::new(
-                                existing_rt.span(),
-                                "conflicting definition for type of non-terminal",
-                            ));
-                        }
-
-                        *sym_rt = Some(rt);
-                    }
-
-                    reader.start_rule(lhs, name_def_span);
-
-                    if goal_symbol.is_none() {
-                        debug!("using '{}' as start symbol", name_def_str);
-                        goal_symbol = Some(lhs);
-                    }
-
-                    // In this loop, we process the symbols on the right-hand side of the rule.
-                    // If we encounter a symbol (whether token or variable), we add a reference
-                    // (a symbol index) to it to prhs.  If we encounter an action definition (code)
-                    // then we close the current rule, then peek ahead to see whether we need to
-                    // define an unnamed variable for the rule prefix, or whether this is a normal
-                    // rule for name_def_str.
-                    //
-                    // If we encounter a | or ;, then the current rule ends.  If we encounter a |, then
-                    // we start a new rule, with the same left-hand symbol.
-                    loop {
-                        let la = input.lookahead1();
-                        if la.peek(Ident) {
-                            let rhs_ident = input.parse::<Ident>()?;
-                            let rhs = reader.lookup(&rhs_ident);
-                            let mut rbind: Option<Ident> = None;
-
-                            // TODO: Remove this, after converting all rhs bindings to use Foo(x).
-                            if input.lookahead1().peek(syn::token::Eq) {
-                                input.parse::<syn::token::Eq>()?;
-
-                                let la = input.lookahead1();
-                                if la.peek(Ident) {
-                                    let rhs_bind_ident: Ident = input.parse()?;
-
-                                    errors.push(syn::Error::new(
-                                        rhs_bind_ident.span(),
-                                        "convert this to the new form",
-                                    ));
-
-                                    rbind = Some(rhs_bind_ident);
-                                } else {
-                                    return Err(la.error());
-                                }
-                            }
-
-                            // Check to see whether there is a name binding specified after this
-                            // variable, using Foo(x) syntax (a tuple pattern after the symbol).
-                            if input.lookahead1().peek(syn::token::Paren) {
-                                let pat = input.parse::<syn::Pat>()?;
-                                // println!("parsed pat");
-                                match &pat {
-                                    syn::Pat::Tuple(tuple) => {
-                                        // println!("it's a tuple, len = {}", tuple.elems.len());
-                                        if tuple.elems.len() == 1 {
-                                            match &tuple.elems[0] {
-                                                syn::Pat::Ident(pat_ident) => {
-                                                    // println!("pat_ident = {}", pat_ident.ident);
-                                                    rbind = Some(pat_ident.ident.clone());
-                                                }
-                                                _ => {
-                                                    errors.push(syn::Error::new(pat.span(),
-                                                    "the pattern must specify exactly one name binding"));
-                                                }
-                                            }
-                                        } else {
-                                            errors.push(syn::Error::new(
-                                                pat.span(),
-                                                "the pattern must specify exactly one name binding",
-                                            ));
-                                        }
-                                    }
-                                    _ => {
-                                        errors.push(syn::Error::new(
-                                            pat.span(),
-                                            "the pattern must be a tuple pattern, i.e. `(foo)`",
-                                        ));
-                                    }
-                                }
-                            }
-
-                            reader.add_symbol(rhs, rhs_ident.span(), rbind);
-                        } else if la.peek(syn::token::Or) {
-                            let or_token = input.parse::<syn::token::Or>()?;
-                            reader.end_rule(name_def_span);
-                            reader.start_rule(lhs, or_token.span());
-                        } else if la.peek(syn::token::Brace) {
-                            let block: syn::Block = match input.parse::<syn::Block>() {
-                                Ok(block) => block,
-                                Err(e) => {
-                                    errors.push(e);
-                                    parse_quote!({ panic!() })
-                                }
-                            };
-
-                            // Parse an action (a code block).  Parsing it is actually very easy, thanks to Rust!
-                            if reader.last_was_action {
-                                reader.insert_empty_rule(block.span());
-                            }
-                            reader.rule_blocks.push(Some(block));
-                            reader.last_was_action = true;
-                        } else if la.peek(Token![;]) {
-                            input.parse::<Token![;]>()?;
-                            reader.end_rule(name_def_span);
-                            break;
-                        } else if la.peek(syn::LitChar) {
-                            // Matching character tokens is not fully implemented.
-                            let char_token = input.parse::<syn::LitChar>()?;
-                            let ch = char_token.value();
-                            log::debug!("char_token: {:?}", ch);
-                            errors.push(syn::Error::new(
-                                char_token.span(),
-                                "character tokens are not implemented",
-                            ));
-                        } else {
-                            return Err(la.error());
-                        }
-                    }
-                } else if la.peek(Token![=]) || la.peek(Token![;]) {
-                    if let Some(rt) = var_return_type {
-                        errors.push(syn::Error::new(
-                            rt.span(),
-                            "tokens cannot use this syntax for return types",
+                            format!("The type '{}' is unrecognized.", keyword_string),
                         ));
                     }
+                }
 
-                    let has_value = la.peek(Token![=]);
-                    if la.peek(Token![=]) {
-                        input.parse::<Token![=]>()?;
+                syn::Item::Macro(m) => {
+                    if m.mac.path.is_ident("assoc") {
+                        let assoc_dir: AssocDirective = syn::parse2(m.mac.tokens)?;
+                        apply_assoc(&mut reader, &mut errors, &assoc_dir)?;
+                    } else if m.mac.path.is_ident("rules") {
+                        let rules: RulesDef = syn::parse2(m.mac.tokens)?;
+                        apply_rules(&mut reader, &mut errors, &rules)?;
                     } else {
-                        input.parse::<Token![;]>()?;
+                        errors.push(syn::Error::new(m.span(), "Unrecognized item"));
                     }
-
-                    match reader.symbols[lhs].class {
-                        SymClass::Terminal => {
-                            // symbol class is already known, but this means user has defined same symbol twice
-                            errors.push(syn::Error::new(
-                                name_def_span,
-                                "token is defined more than once",
-                            ));
-                            // parser.span_err(reader.symbols[lhs].span, "location of previous definition");
-                        }
-                        SymClass::NonTerminal => {
-                            // this name is defined inconsistently -- as both a variable and a token
-                            errors.push(syn::Error::new(
-                                name_def_span,
-                                "token was previously used as a variable",
-                            ));
-                        }
-                        SymClass::Unknown => {
-                            reader.symbols[lhs].class = SymClass::Terminal;
-                        }
-                    }
-
-                    if has_value {
-                        let la = input.lookahead1();
-                        if la.peek(syn::Lit) {
-                            let _lit: syn::Lit = input.parse()?;
-                            let la = input.lookahead1();
-                            if la.peek(Token![;]) {
-                                input.parse::<Token![;]>()?;
-                            } else {
-                                return Err(la.error());
-                            }
-                        } else {
-                            return Err(la.error());
-                        }
-                    }
-                } else {
-                    return Err(la.error());
                 }
-            } else if la.peek(Token![enum]) {
-                let en_ty = input.parse::<syn::ItemEnum>()?;
 
-                if en_ty.ident == "Token" {
-                    generics_are_not_allowed_here(&mut errors, &en_ty.generics);
-                    attrs_are_not_allowed_here(&mut errors, &en_ty.attrs);
-
-                    for var in en_ty.variants.iter() {
-                        // TODO: do something with assoc
-
-                        if let Some(disc) = &var.discriminant {
-                            errors.push(syn::Error::new(
-                                disc.1.span(),
-                                "tokens may not specify a discriminant (vlaue)",
-                            ));
-                        } else {
-                            // The grammar does not define a value for the token.
-                            // That's fine, we supply the values.
-                        }
-
-                        // TODO: match on #[left] attribute
-
-                        let id = &var.ident;
-                        // let name_def_str = id.to_string();
-                        // let name_def_span = id.span();
-                        let lhs = reader.lookup(id);
-
-                        let sym = &mut reader.symbols[lhs];
-                        match sym.class {
-                            SymClass::NonTerminal => {
-                                errors.push(syn::Error::new(
-                                    var.span(),
-                                    "This name has a conflicting definition. It is defined as both a token and variable."
-                                ));
-                                continue;
-                            }
-                            SymClass::Terminal => {
-                                // Hmmm, it was already defined.
-                                // That's ok for now, but if we eliminate the old form, this should
-                                // become an error.
-                            }
-                            SymClass::Unknown => {
-                                sym.class = SymClass::Terminal;
-
-                                match &var.fields {
-                                    syn::Fields::Named(_) => {
-                                        errors.push(syn::Error::new(var.fields.span(), "named fields are not supported; use a single-value tuple"));
-                                    }
-
-                                    syn::Fields::Unnamed(fields) => {
-                                        // This token provides a value. Only a single value is allowed.
-                                        if fields.unnamed.len() != 1 {
-                                            errors.push(syn::Error::new(
-                                                var.fields.span(),
-                                                "token enums may only contain a single vlaue",
-                                            ));
-                                        }
-
-                                        if let Some(f0) = fields.unnamed.first() {
-                                            attrs_are_not_allowed_here(&mut errors, &f0.attrs);
-                                            sym.value_type = Some(f0.ty.clone());
-                                        }
-                                    }
-
-                                    syn::Fields::Unit => {
-                                        // This token does not have a value.
-                                        // The value_type field is already None, so we don't need to do anything.
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    errors.push(syn::Error::new(
-                        en_ty.ident.span(),
-                        "The name of the enum being defined is not recognized. \
-                         The only allowed value is 'Token', which defines the set of tokens \
-                         defined by your grammar.",
-                    ));
+                unknown_item => {
+                    errors.push(syn::Error::new(unknown_item.span(), "Unrecognized item"));
                 }
-            } else if la.peek(Token![%]) {
-                // It's a directive, like %left and %right.
-                input.parse::<Token![%]>()?;
-
-                let la = input.lookahead1();
-                if la.peek(Ident) {
-                    let directive: Ident = input.parse::<Ident>()?;
-
-                    let assoc: Assoc;
-                    let precedence: i16;
-                    if directive == "left" {
-                        assoc = Assoc::LEFT;
-                        precedence = next_left_precedence;
-                        next_left_precedence += 1;
-                    } else if directive == "right" {
-                        assoc = Assoc::RIGHT;
-                        precedence = next_right_precedence;
-                        next_right_precedence += 1;
-                    } else {
-                        return Err(syn::Error::new(directive.span(), "unrecognized directive.  the only valid directives are `%left` and `%right`."));
-                    };
-
-                    // Consume identifiers, which are the names of tokens, until we reach ';'.
-                    loop {
-                        let la = input.lookahead1();
-                        if la.peek(Ident) {
-                            let token_ident: Ident = input.parse()?;
-                            // println!("setting token associativity and precedence: {}: assoc {:?} prec {:?}", token_ident, precedence, assoc);
-
-                            // Look up the token. This implicitly creates a new token, if it has
-                            // not already been defined.
-                            let sym_index = reader.lookup(&token_ident);
-                            let sym = &mut reader.symbols[sym_index];
-
-                            match sym.class {
-                                SymClass::Unknown => {
-                                    errors.push(syn::Error::new(token_ident.span(),
-                                        "please define this token before declaring its associativity"));
-                                }
-                                SymClass::Terminal => {
-                                    if let Some(existing_span) = sym.assoc_prec_specified.as_ref() {
-                                        errors.push(syn::Error::new(
-                                            token_ident.span(),
-                                            "the associativity and precedence for this token has already been specified"
-                                        ));
-                                        errors.push(syn::Error::new(
-                                            existing_span.span(),
-                                            "location of conflicting definition",
-                                        ));
-                                    } else {
-                                        sym.assoc = assoc;
-                                        sym.prec = precedence;
-                                        sym.assoc_prec_specified = Some(token_ident.span());
-                                    }
-                                }
-                                SymClass::NonTerminal => {
-                                    errors.push(syn::Error::new(token_ident.span(),
-                                        "cannot set associativity for non-terminals, only for terminals (tokens)"
-                                    ));
-                                }
-                            }
-                        } else if la.peek(Token![;]) {
-                            input.parse::<Token![;]>()?;
-                            break;
-                        } else {
-                            return Err(syn::Error::new(
-                                input.span(),
-                                "expected only token identifiers and a `;` delimiter.",
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(la.error());
-                }
-            } else {
-                // If we can't recognize the next token at all, then we cannot continue parsing
-                // the macro invocation.
-                errors.push(la.error());
-                break;
             }
         }
 
         // Check that we found a goal state.  This check was in check_symbols().
         // Rebind 'goal_symbol' now that we know it exists.
-        let goal_symbol = if let Some(goal) = goal_symbol {
+        let goal_symbol = if let Some(goal) = reader.goal_symbol {
             goal
         } else {
-            return Err(input.error("grammar does not define any rules"));
+            errors.push(syn::Error::new(
+                Span::call_site(),
+                "grammar does not define any rules",
+            ));
+            errors.into_result()?;
+            unreachable!();
         };
         debug!(
             "goal symbol = {}_{}",
@@ -1093,10 +1256,10 @@ impl Parse for Grammar {
             }
         }
 
+        errors.into_result()?;
+
         let gram = reader.pack_symbols_and_grammar(goal_symbol, context_ty);
         ReaderState::print_grammar(&gram);
-
-        errors.into_result()?;
 
         Ok(gram)
     }
@@ -1108,6 +1271,7 @@ fn attrs_are_not_allowed_here(errors: &mut Errors, attrs: &[syn::Attribute]) {
     }
 }
 
+#[allow(dead_code)]
 fn generics_are_not_allowed_here(errors: &mut Errors, generics: &syn::Generics) {
     if !generics.params.is_empty() {
         errors.push(syn::Error::new(

@@ -4,3 +4,6 @@ version = "0.1.1"
 authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 edition = "2018"
 
+[features]
+default = []
+racc_log = []

@@ -1,10 +1,11 @@
 #[racc::grammar]
 mod grammar {
-    enum Token {
+    enum Token<'a> {
         // Some of these tokens carry values
         A,
-        B(i32),
-        C,
+        B(&'a str),
+        C((u32, &'a str)),
+        D((u32, &'a str)),
     }
 
     rules! {
@@ -16,5 +17,5 @@ use Token::*;
 
 #[test]
 fn tokens_some_values() {
-    let () = Parser::parse(vec![A, B(100), C].into_iter()).unwrap();
+    let () = Parser::parse(vec![A, B("sparrow"), C((42, "bar"))].into_iter()).unwrap();
 }

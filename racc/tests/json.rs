@@ -1,4 +1,6 @@
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
+    #[derive(Debug)]
     enum Token {
         STRING(String),
         INT(i64),
@@ -14,6 +16,7 @@ racc::grammar! {
         COLON,
     }
 
+    rules! {
     Value
         : NULL
         | TRUE
@@ -50,6 +53,7 @@ racc::grammar! {
         : ArrayItemList
         | // nothing
     ;
+    }
 }
 
 use Token::*;

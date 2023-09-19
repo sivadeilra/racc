@@ -19,7 +19,8 @@ In your code:
 
 ```rust
 
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     // This is the list of tokens defined for your grammar. The `Token` type defines the input
     // the generated parser.
     enum Token {
@@ -145,7 +146,8 @@ For example:
 
 ```rust
 
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     type Context = MyContext;
 
     enum Token {
@@ -202,7 +204,8 @@ contains a literal numeric value.
 For example:
 
 ```rust
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     enum Token {
         LITERAL(f64),       // This specifies that LITERAL contains a value.
         PLUS,

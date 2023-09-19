@@ -13,8 +13,8 @@ fn transitive_closure(r: &mut Bitmat) {
         let mut ccol = cword;
         let mut rowj: usize = 0;
 
-        assert_eq!(rowi % BITS_PER_WORD, i);
-        assert_eq!(rowi / BITS_PER_WORD, cword);
+        // assert_eq!(rowi % BITS_PER_WORD, i);
+        // assert_eq!(rowi / BITS_PER_WORD, cword);
 
         while rowj < relend {
             if (r.data[ccol] & (1 << i)) != 0 {

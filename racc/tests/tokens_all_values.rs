@@ -1,4 +1,5 @@
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     enum Token {
         // All of these tokens carry any values
         A(i32),
@@ -6,7 +7,9 @@ racc::grammar! {
         C(i32),
     }
 
-    Top : A B C {println!("... wait, what?")};
+    rules! {
+        Top : A B C {println!("... wait, what?")};
+    }
 }
 
 use Token::*;

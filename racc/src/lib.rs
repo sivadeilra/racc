@@ -1,6 +1,5 @@
 #![doc = include_str!("doc.md")]
 #![recursion_limit = "256"]
-#![warn(rust_2018_idioms)]
 #![allow(clippy::cognitive_complexity)]
 #![allow(clippy::collapsible_else_if)]
 #![allow(clippy::needless_lifetimes)]
@@ -8,6 +7,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(unused_imports)]
 
+mod errors;
 mod grammar;
 mod lalr;
 mod lr0;
@@ -16,7 +16,6 @@ mod output;
 mod packing;
 mod reader;
 mod tvec;
-mod errors;
 mod util;
 mod warshall;
 
@@ -25,8 +24,8 @@ mod tests;
 
 // use core::fmt::Write;
 use core::iter::repeat;
-use grammar::*;
 use errors::*;
+use grammar::*;
 use lalr::GotoMap;
 use lalr::LALROutput;
 use log::debug;
@@ -402,6 +401,7 @@ fn sort_actions(act: &ActionsTable) -> Vec<usize> {
     order
 }
 
+#[cfg(nope)]
 #[proc_macro]
 pub fn grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let tokens2: proc_macro2::TokenStream = tokens.into();
@@ -412,9 +412,20 @@ pub fn grammar(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     }
 }
 
+#[proc_macro_attribute]
+pub fn grammar(
+    _attrs: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match grammar2(input.into()) {
+        Ok(result) => result.into(),
+        Err(e) => e.into_compile_error().into(),
+    }
+}
+
 /// This is the main worker function for the proc macro.
 fn grammar2(tokens: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
-    let gram: Grammar = syn::parse2::<Grammar>(tokens)?;
+    let gram: Grammar = Grammar::parse_from_tokens(tokens)?;
 
     let lr0 = lr0::compute_lr0(&gram);
     let lalr_out = lalr::run_lalr_phase(&gram, &lr0);

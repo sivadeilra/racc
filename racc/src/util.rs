@@ -18,6 +18,7 @@ pub struct Bitmat {
     // Number of columns
     pub cols: usize,
     // Number of u32 elements per row
+    // Equal to round_up(cols / bits_per_row)
     pub rowsize: usize,
 
     id: u64,

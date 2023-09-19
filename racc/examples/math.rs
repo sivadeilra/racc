@@ -1,4 +1,5 @@
-racc::grammar! {
+#[racc::grammar]
+mod grammar {
     enum Token {
         PLUS,
         MINUS,
@@ -19,34 +20,36 @@ racc::grammar! {
         IN,
     }
 
-    %left PLUS MINUS;
-    %left MUL DIV;
+    assoc!(left: PLUS, MINUS);
+    assoc!(left: MUL, DIV);
 
-    Expr -> i32 : NUM(x) { x }
-    | Expr(a) PLUS Expr(b) { a + b }
-    | Expr(a) MINUS Expr(b) { a - b }
-    | Expr(a) MUL Expr(b) { a * b }
-    | Expr(a) DIV Expr(b) {
-        if b == 0 {
-            return Err(racc_runtime::Error::AppError);
+    rules! {
+        Expr -> i32 : NUM(x) { x }
+        | Expr(a) PLUS Expr(b) { a + b }
+        | Expr(a) MINUS Expr(b) { a - b }
+        | Expr(a) MUL Expr(b) { a * b }
+        | Expr(a) DIV Expr(b) {
+            if b == 0 {
+                return Err(racc_runtime::Error::AppError);
+            }
+            a / b
         }
-        a / b
+        | LPAREN Expr(inner) RPAREN { inner }
+        | IF Expr(predicate) THEN Expr(true_value) {
+            if predicate != 0 {
+                true_value
+            } else {
+                0
+            }
+        }
+        | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
+            if predicate != 0 {
+                true_value
+            } else {
+                false_value
+            }
+        };
     }
-    | LPAREN Expr(inner) RPAREN { inner }
-    | IF Expr(predicate) THEN Expr(true_value) {
-        if predicate != 0 {
-            true_value
-        } else {
-            0
-        }
-    }
-    | IF Expr(predicate) THEN Expr(true_value) ELSE Expr(false_value) {
-        if predicate != 0 {
-            true_value
-        } else {
-            false_value
-        }
-    };
 }
 
 #[test]
