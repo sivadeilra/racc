@@ -13,9 +13,9 @@ proc-macro = true
 
 [dependencies]
 log = { version = "0.4.*", features = ["release_max_level_warn"] }
-syn = { version = "1.0.3", features = ["full", "extra-traits"] }
+syn = { version = "1.0.3", features = ["full", "extra-traits", "visit"] }
 quote = "1.0.2"
-proc-macro2 = "1.0.1"
+proc-macro2 = "1.0.67"
 ramp_table = "0.1.0"
 
 [dev-dependencies]

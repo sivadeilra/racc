@@ -7,7 +7,11 @@ use std::cmp;
 use std::iter::repeat;
 use syn::{Ident, Type};
 
-fn output_parser_struct(needs_token_stack: bool, token_generics: &syn::Generics) -> syn::Item {
+fn output_parser_struct(
+    needs_token_stack: bool,
+    token_generics: &syn::Generics,
+    vv_type: &syn::Type,
+) -> syn::Item {
     let token_stack_field = if needs_token_stack {
         quote!(token_stack: Vec<Token #token_generics >,)
     } else {
@@ -24,7 +28,7 @@ fn output_parser_struct(needs_token_stack: bool, token_generics: &syn::Generics)
             yystate: u16,
             /// Contains (symbol, value), where symbol is either the token that gave us a value,
             /// or a variable that produced a value.
-            value_stack: Vec<VarValue>,
+            value_stack: Vec<#vv_type>,
             #token_stack_field // token_stack: Vec<Token>,
             state_stack: Vec<u16>,
         }
@@ -59,6 +63,17 @@ pub(crate) fn output_parser(
 
     let token_generics = &gram.token_generics;
 
+    // Decide some stuff for VarValue. Does it need generic type arguments?
+    let vv_needs_generics = var_value_need_generics(gram);
+    let vv_generics: syn::Generics = if vv_needs_generics {
+        token_generics.clone()
+    } else {
+        parse_quote!()
+    };
+    let vv_type: syn::Type = parse_quote! {
+        VarValue #vv_generics
+    };
+
     let mut output_mod: syn::ItemMod = parse_quote! {
         mod this_name_is_not_used {
 
@@ -86,6 +101,7 @@ pub(crate) fn output_parser(
     items.push(output_parser_struct(
         needs_token_stack,
         &gram.token_generics,
+        &vv_type,
     ));
 
     // Create fragments for passing context through.
@@ -153,7 +169,7 @@ pub(crate) fn output_parser(
 
             #[inline(never)]
             #[cold]
-            fn error_invalid_value_in_values_stack(v: VarValue) -> ! {
+            fn error_invalid_value_in_values_stack #token_generics (v: #vv_type) -> ! {
                 // panic!("unexpected value in value stack: {:?}", v);
                 panic!("unexpected value in value stack");
             }
@@ -225,14 +241,14 @@ pub(crate) fn output_parser(
 
                 let red = YYRINDEX[self.yystate as usize];
                 if red == 0 {
-                    racc_log!("try_reduce: s{} has no reductions", self.yystate);
+                    // racc_log!("try_reduce: s{} has no reductions", self.yystate);
                     return Ok(false);
                 }
 
                 let yyn = red as i32 + token as i32;
-                racc_log!("try_reduce: red = {}, yyn = {}", red, yyn);
+                // racc_log!("try_reduce: red = {}, yyn = {}", red, yyn);
                 if yyn < 0 || yyn as usize >= YYCHECK.len() || YYCHECK[yyn as usize] != token {
-                    racc_log!("try_reduce: s{} has no reduction for token {}", self.yystate, YYNAME[token as usize]);
+                    // racc_log!("try_reduce: s{} has no reduction for token {}", self.yystate, YYNAME[token as usize]);
                     return Ok(false);
                 }
 
@@ -295,7 +311,7 @@ pub(crate) fn output_parser(
 
     items.push(output_token_to_i16(gram));
     items.push(output_token_enum(gram));
-    items.push(output_var_value_enum(gram));
+    items.push(output_var_value_enum(gram, &vv_generics));
 
     // We only need the token_has_value() function is there are both tokens
     // that have a value and tokens that don't.
@@ -599,7 +615,7 @@ fn output_yyreduce(
 
                 all_action_funcs.extend(quote_spanned! {
                     block_span =>
-                    #[inline(always)]
+                    #[cfg_attr(test, inline(never))]
                     #[allow(unused_mut)]
                     fn #rule_func_id #token_generics(#context_param #action_func_params) -> Result<#action_return_ty, racc_runtime::Error> {
                         Ok(#block)
@@ -656,7 +672,7 @@ fn output_yyreduce(
             extend_stmt_parse_quote_spanned! {
                 stmts1, rule_span =>
                 self.yystate = if let Some(s) = self.state_stack.pop() {
-                    racc_log!("yyreduce: popped state: s{}", s);
+                    // racc_log!("yyreduce: popped state: s{}", s);
                     s
                 } else {
                     // TODO: Is this right?
@@ -679,10 +695,10 @@ fn output_yyreduce(
                 let next_state: u16 = {
                     let i = #yygindex + self.yystate as i32;
                     if i >= 0 && YYCHECK[i as usize] as u16 == self.yystate {
-                        racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", i, YYTABLE[i as usize] as u16);
+                        // racc_log!("yyreduce: yycheck passes, yytable[{}] = s{}", i, YYTABLE[i as usize] as u16);
                         YYTABLE[i as usize] as u16
                     } else {
-                        racc_log!("yyreduce: using default goto {}", #yydgoto);
+                        // racc_log!("yyreduce: using default goto {}", #yydgoto);
                         #yydgoto
                     }
                 };
@@ -690,7 +706,7 @@ fn output_yyreduce(
         } else {
             // There are no gotos associated with this LHS symbol.
             quote! {
-                racc_log!("yyreduce: using default goto {}", #yydgoto);
+                // racc_log!("yyreduce: using default goto {}", #yydgoto);
                 let next_state = #yydgoto;
             }
         };
@@ -698,7 +714,7 @@ fn output_yyreduce(
         next_state_toks.extend(quote! {
             self.state_stack.push(self.yystate);
             self.yystate = next_state;
-            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            // racc_log!("states: {:?} {}", self.state_stack, self.yystate);
         });
 
         // If we are reducing a rule for the goal symbol, and yystate is in the initial state,
@@ -794,7 +810,11 @@ fn output_token_to_i16(gram: &Grammar) -> syn::Item {
     }
 }
 
-fn output_var_value_enum(gram: &Grammar) -> syn::Item {
+/// Generates the `VarValue` enum. The `VarValue` enum contains values that are produced by some
+/// rules (returned by them) and are inputs to the rules that depend on those rules.
+///
+/// We only generate variants in `VarValue` for variables whose rules produce a value.
+fn output_var_value_enum(gram: &Grammar, vv_generics: &syn::Generics) -> syn::Item {
     let mut var_variants = TokenStream::new();
 
     // Do the same for variables.  Variables are handled differently, though.
@@ -815,10 +835,47 @@ fn output_var_value_enum(gram: &Grammar) -> syn::Item {
 
     parse_quote! {
         // #[derive(Debug)]
-        enum VarValue {
+        enum VarValue #vv_generics {
             #var_variants
         }
     }
+}
+
+/// Examines the values that flow from one rule to another (which are carried through `VarValue`)
+///
+fn var_value_need_generics(gram: &Grammar) -> bool {
+    for i in gram.iter_var_syms() {
+        if let Some(sym_ty) = &gram.sym_type[i.index()] {
+            if type_contains_lifetimes(sym_ty) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Returns `true` if `ty` contains non-static lifetimes.
+fn type_contains_lifetimes(ty: &syn::Type) -> bool {
+    use syn::visit::Visit;
+
+    struct Viz {
+        found_lifetime: bool,
+    }
+
+    impl<'ast> Visit<'ast> for Viz {
+        fn visit_lifetime(&mut self, i: &'ast syn::Lifetime) {
+            if i.ident != "static" {
+                self.found_lifetime = true;
+            }
+        }
+    }
+
+    let mut v = Viz {
+        found_lifetime: false,
+    };
+    v.visit_type(ty);
+    v.found_lifetime
 }
 
 fn output_token_enum(gram: &Grammar) -> syn::Item {
@@ -896,10 +953,10 @@ fn output_push(
             // dynamic check for whether the token has a value or not.
             quote! {
                 if token_has_value(&token) {
-                    racc_log!("shifted token: {:?}", token);
+                    // racc_log!("shifted token: {:?}", token);
                     self.token_stack.push(token);
                 } else {
-                    racc_log!("shifted token: {:?} (not really -- it has no value)", token);
+                    // racc_log!("shifted token: {:?} (not really -- it has no value)", token);
                 }
             }
         } else {
@@ -936,9 +993,9 @@ fn output_push(
                 token_num, YYNAME[token_num as usize], token
             );
 
-            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            // racc_log!("states: {:?} {}", self.state_stack, self.yystate);
             // racc_log!("values: {:?}", self.value_stack);
-            racc_log!("tokens: {:?}", self.token_stack);
+            // racc_log!("tokens: {:?}", self.token_stack);
 
             let mut any_reduce = false;
 
@@ -962,7 +1019,7 @@ fn output_push(
 
                             self.state_stack.push(self.yystate);
                             self.yystate = next_state;
-                            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+                            // racc_log!("states: {:?} {}", self.state_stack, self.yystate);
 
                             // Token is moved by the statement following this.
                             #shift_token_stmt
@@ -986,12 +1043,11 @@ fn output_push(
                     racc_log!("syntax error!  token is not recognized in this state.");
                     return Err(racc_runtime::Error::SyntaxError);
                 }
-
             }
 
-            racc_log!("states: {:?} {}", self.state_stack, self.yystate);
+            // racc_log!("states: {:?} {}", self.state_stack, self.yystate);
             // racc_log!("values: {:?}", self.value_stack);
-            racc_log!("tokens: {:?}", self.token_stack);
+            // racc_log!("tokens: {:?}", self.token_stack);
             Ok(())
         }
     })
@@ -1021,7 +1077,7 @@ fn output_do_default_reductions(
                 if defred == 0 {
                     return Ok(());
                 }
-                racc_log!("do_default_reductions: s{} has default reduction r{}", self.yystate, defred + 2);
+                // racc_log!("do_default_reductions: s{} has default reduction r{}", self.yystate, defred + 2);
                 self.yyreduce(defred, #context_arg)?;
             }
         }
