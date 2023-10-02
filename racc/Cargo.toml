@@ -3,9 +3,10 @@ name = "racc"
 version = "0.0.4"
 authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 readme = "../README.md"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "RACC is a port of Berkeley YACC to Rust, and allows you to write grammar definitions directly in Rust source code."
 edition = "2018"
+repository = "https://github.com/sivadeilra/racc"
 
 [lib]
 name = "racc"

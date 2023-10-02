@@ -3,6 +3,9 @@ name = "racc_runtime"
 version = "0.1.1"
 authors = ["Arlie Davis <arlie.davis@gmail.com>"]
 edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "RACC is a port of Berkeley YACC to Rust, and allows you to write grammar definitions directly in Rust source code."
+repository = "https://github.com/sivadeilra/racc"
 
 [features]
 default = []
